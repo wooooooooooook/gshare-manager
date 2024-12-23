@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<!-- Flask 템플릿 파일입니다 -->
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 p-4">
+    <div class="max-w-7xl mx-auto">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- 왼쪽 컬럼 -->
+            <div class="space-y-4">
+                <!-- 상태 요약 섹션 -->
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 toggle-text">
+                        <div class="flex items-center gap-1">
+                            <svg class="w-4 h-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                            </svg>
+                            <span class="text-xs text-gray-500">마지막 확인</span>
+                        </div>
+                        <div class="flex items-center gap-1 font-medium text-sm justify-end last-check-time">
+                            <span class="text-right readable-time">{{get_time_ago(state['last_check_time'])}}</span>
+                            <span class="hidden text-right time-string">{{state['last_check_time']}}</span>
+                        </div>
+                    </div>
+                    <div class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200">
+                        <div class="flex items-center gap-1">
+                            <svg class="w-4 h-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M6 13.5V3.75m0 9.75a1.5 1.5 0 0 1 0 3m0-3a1.5 1.5 0 0 0 0 3m0 3.75V16.5m12-3V3.75m0 9.75a1.5 1.5 0 0 1 0 3m0-3a1.5 1.5 0 0 0 0 3m0 3.75V16.5m-6-9V3.75m0 3.75a1.5 1.5 0 0 1 0 3m0-3a1.5 1.5 0 0 0 0 3m0 9.75V10.5" />
+                            </svg>
+                            <span class="text-xs text-gray-500">마지막 작업</span>
+                        </div>
+                        <div class="flex items-center gap-1 font-medium text-sm justify-end last-action">
+                            <span class="text-right">{{state['last_action']}}</span>
+                        </div>
+                    </div>
+                    <button onclick="restartService()" 
+                        class="col-span-2 bg-yellow-50 hover:bg-yellow-100 text-yellow-800 rounded-lg p-2 border border-yellow-200 transition-colors duration-200">
+                        <div class="flex items-center justify-center gap-1">
+                            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                            </svg>
+                            <span class="text-sm font-medium">서비스 재시작</span>
+                        </div>
+                    </button>
+                    <!-- 상태 메시지 영역 추가 -->
+                    <div id="restartStatus" class="col-span-2 text-sm text-center hidden">
+                        <span class="inline-flex items-center">
+                            <svg class="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span id="restartStatusText"></span>
+                        </span>
+                    </div>
+                </div>
+
+                <!-- VM 상태 섹션 -->
+                <div class="bg-white rounded-lg shadow-sm p-4">
+                    <div class="flex items-center gap-1 mb-2">
+                        <svg class="w-4 h-4 text-gray-700" xmlns="http://www.w3.org/2000/svg" fill="none"
+                            viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-16.5-3a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3m-19.5 0a4.5 4.5 0 0 1 .9-2.7L5.737 5.1a3.375 3.375 0 0 1 2.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 0 1 .9 2.7m0 0a3 3 0 0 1-3 3m0 3h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Zm-3 6h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Z" />
+                        </svg>
+                        <h3 class="text-sm font-bold text-gray-800">Android VM 상태</h3>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div
+                            class="flex justify-between bg-red-50 rounded-lg p-2 border border-red-100 vm-status-container">
+                            <div class="flex items-center gap-1">
+                                <svg class="w-4 h-4 text-gray-700" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                    viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" />
+                                </svg>
+                                <span class="text-xs text-gray-500">VM status</span>
+                            </div>
+                            <div class="flex items-center font-medium text-sm text-red-800 vm-status">
+                                <span class="text-right">{{state['vm_status']}}</span>
+                            </div>
+                        </div>
+                        <div
+                            class="flex justify-between vm-running-element bg-green-50 rounded-lg p-2 border border-green-100">
+                            <div class="flex items-center gap-1">
+                                <svg class="w-4 h-4 text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                    viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 0 0 2.25-2.25V6.75a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 6.75v10.5a2.25 2.25 0 0 0 2.25 2.25Zm.75-12h9v9h-9v-9Z" />
+                                </svg>
+                                <span class="text-xs text-gray-500">CPU usage</span>
+                            </div>
+                            <div class="flex items-center font-medium text-sm text-green-800 cpu-usage">
+                                <span class="text-right">{{state['cpu_usage']}}%</span>
+                            </div>
+                        </div>
+                        <div
+                            class="flex justify-between vm-running-element bg-blue-50 rounded-lg p-2 border border-blue-100">
+                            <div class="flex items-center gap-1">
+                                <svg class="w-4 h-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                    viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75Z" />
+                                </svg>
+                                <span class="text-xs text-gray-500">Low CPU count</span>
+                            </div>
+                            <div class="flex items-center font-medium text-sm text-blue-800 low-cpu-count">
+                                <span class="text-right">{{state['low_cpu_count']}}</span>
+                            </div>
+                        </div>
+                        <div
+                            class="flex justify-between vm-stopped-element bg-purple-50 rounded-lg p-2 border border-purple-100 toggle-text">
+                            <div class="flex items-center gap-1">
+                                <svg class="w-4 h-4 text-purple-500" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                    viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                                </svg>
+                                <span class="text-xs text-gray-500">Last shutdown</span>
+                            </div>
+                            <div class="flex items-center font-medium text-sm text-purple-800 last-shutdown-time">
+                                <span class="text-right readable-time">{{get_time_ago(state['last_shutdown_time']) if
+                                    state['last_shutdown_time'] != '-' else
+                                    '정보없음'}}</span>
+                                <span class="text-right hidden time-string">{{state['last_shutdown_time']}}</span>
+                            </div>
+                        </div>
+                        <div
+                            class="flex justify-between vm-running-element bg-indigo-50 rounded-lg p-2 border border-indigo-100">
+                            <div class="flex items-center gap-1">
+                                <svg class="w-4 h-4 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                    viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                                </svg>
+                                <span class="text-xs text-gray-500">Uptime</span>
+                            </div>
+                            <div class="flex items-center font-medium text-sm text-indigo-800 uptime">
+                                <span class="text-right">{{state['uptime']}}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 폴더 감시 정보 섹션 -->
+                <div class="bg-white rounded-lg shadow-sm p-4">
+                    <div class="flex items-center gap-1 mb-2">
+                        <svg class="w-4 h-4 text-gray-700" xmlns="http://www.w3.org/2000/svg" fill="none"
+                            viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" />
+                        </svg>
+                        <h3 class="text-sm font-bold text-gray-800">gshare 폴더 감시 정보</h3>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="flex justify-between bg-yellow-50 rounded-lg p-2 border border-yellow-100">
+                            <div class="flex items-center gap-1">
+                                <svg class="w-4 h-4 text-yellow-500" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                    viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                                </svg>
+                                <span class="text-xs text-gray-500">Size</span>
+                            </div>
+                            <div class="flex items-center font-medium text-sm text-yellow-800 folder-size">
+                                {{format_size(state['folder_size'])}}</div>
+                        </div>
+                        <div
+                            class="flex justify-between bg-orange-50 rounded-lg p-2 border border-orange-100 toggle-text">
+                            <div class="flex items-center gap-1">
+                                <svg class="w-4 h-4 text-orange-500" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                    viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                                </svg>
+                                <span class="text-xs text-gray-500">Last size change</span>
+                            </div>
+                            <div class="flex items-center font-medium text-sm text-orange-800 last-size-change-time">
+                                <span class="readable-time">{{get_time_ago(state['last_size_change_time']) if
+                                    state['last_size_change_time'] != '-'
+                                    else '정보없음'}}</span>
+                                <span class="time-string hidden">{{state['last_size_change_time']}}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 오른쪽 컬��� (로그) -->
+            <div class="bg-white rounded-lg shadow-sm p-4 lg:h-[calc(100vh-2rem)] lg:sticky lg:top-4">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-1">
+                        <svg class="w-4 h-4 text-gray-700" xmlns="http://www.w3.org/2000/svg" fill="none"
+                            viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
+                        </svg>
+                        <h3 class="text-sm font-bold text-gray-800">로그</h3>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="trimLog(100)" 
+                            class="text-xs px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded border border-blue-200 transition-colors duration-200">
+                            최근 100줄만 유지
+                        </button>
+                        <button onclick="clearLog()" 
+                            class="text-xs px-2 py-1 bg-red-50 hover:bg-red-100 text-red-800 rounded border border-red-200 transition-colors duration-200">
+                            전체 삭제
+                        </button>
+                    </div>
+                </div>
+                <pre id="logContent"
+                    class="bg-gray-50 p-3 rounded-lg overflow-x-auto whitespace-pre-wrap text-xs h-[calc(100vh-8rem)] overflow-y-auto">{{log_content}}</pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // JavaScript 코드도 별도 파일로 분리 가능
+        {% include 'scripts.js' %}
+    </script>
+</body>
+
+</html>
