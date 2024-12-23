@@ -105,7 +105,7 @@ class FolderMonitor:
             with open('current_state.json', 'r', encoding='utf-8') as f:
                 state = json.loads(f.read())
                 size = state.get('folder_size', 0)
-                logging.info(f"이전 상태 파일에서 폴더 용량 불러옴: {size} bytes")
+                logging.info(f"이전 상태 파일에서 폴더 용량 불러옴: {format_size(size)}")
                 return size
         except FileNotFoundError:
             logging.info("이전 상태 파일이 없습니다.")
@@ -321,9 +321,9 @@ def format_size(size_in_bytes: int) -> str:
     """바이트 단위의 크기를 사람이 읽기 쉬운 형식으로 변환"""
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if size_in_bytes < 1024.0:
-            return f"{size_in_bytes:.1f} {unit}"
+            return f"{size_in_bytes:.2f} {unit}"
         size_in_bytes /= 1024.0
-    return f"{size_in_bytes:.1f} PB"
+    return f"{size_in_bytes:.2f} PB"
 
 if __name__ == '__main__':
     logger = setup_logging()
