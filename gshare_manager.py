@@ -84,17 +84,13 @@ class ProxmoxAPI:
             return False
 
 class FolderMonitor:
-    def __init__(self, config: Config, manager=None):
+    def __init__(self, config: Config):
         self.config = config
-        self.manager = manager
-        self.get_folder_size_timeout = 200
+        self.get_folder_size_timeout = self.config.GET_FOLDER_SIZE_TIMEOUT
         self.previous_size = 0
         self.previous_size = self._get_folder_size()
 
     def _get_folder_size(self) -> int:
-        logging.info(f"폴더 크기 확인 시작: {self.config.MOUNT_PATH}, 오래걸릴 수 있습니다. timeout: {self.get_folder_size_timeout}초")
-        if self.manager:
-            self.manager.last_action = "파일시스템 용량 확인 중"
         try:
             result = subprocess.run(
                 ['df', '--output=used', '--block-size=1', self.config.MOUNT_PATH],
@@ -118,7 +114,7 @@ class FolderMonitor:
     def has_size_changed(self) -> bool:
         current_size = self._get_folder_size()
         if current_size != self.previous_size:
-            logging.info(f"파일시스템 용량 변경: {self.previous_size} -> {current_size}")
+            logging.info(f"용량 변화량: {(self.previous_size-current_size)/1024/1024:.2f}MB")
             self.previous_size = current_size
             return True
         return False
@@ -131,7 +127,7 @@ class GShareManager:
         self.last_action = "프로그램 시작"
         self.last_size_change_time = "-"
         self.last_shutdown_time = "-"
-        self.folder_monitor = FolderMonitor(config, self)
+        self.folder_monitor = FolderMonitor(config)
         self._update_state()
 
     def _format_uptime(self, seconds: float) -> str:
@@ -195,8 +191,7 @@ class GShareManager:
                 try:
                     if self.folder_monitor.has_size_changed():
                         self.last_size_change_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
-                        logging.info(f"파일시스템 용량 변경 감지: {self.last_size_change_time}")
-                        
+                        logging.info(f"VM 시작을 시도합니다: {self.last_size_change_time}")
                         if not self.proxmox_api.is_vm_running():
                             self.last_action = "VM 시작"
                             if self.proxmox_api.start_vm():
@@ -250,8 +245,9 @@ if __name__ == '__main__':
         proxmox_api = ProxmoxAPI(config)
         gshare_manager = GShareManager(config, proxmox_api)
         logging.info(f"초기 정보: VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}, 파일시스템 용량 - {gshare_manager.folder_monitor.previous_size}")
-        logging.info("GShare 관리 시작")        
-        logging.info("───────────────────────────────────────────────")
+        if gshare_manager.folder_monitor.previous_size == 0:
+            logging.warning(f"파일시스템 용량이 0입니다. {config.MOUNT_PATH} 경로가 정상적으로 마운트되어 있는지 확인하세요.")
+        logging.info("GShare 관리 시작")
         gshare_manager.monitor()
     except KeyboardInterrupt:
         logging.info("프로그램 종료")
