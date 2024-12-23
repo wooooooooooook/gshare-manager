@@ -8,6 +8,8 @@ from datetime import datetime
 import pytz
 import json
 from config import Config  # 새로운 import 추가
+from dotenv import load_dotenv
+import os
 
 @dataclass
 class State:
@@ -36,7 +38,7 @@ class ProxmoxAPI:
         self.session.headers.update({
             "Authorization": f"PVEAPIToken={self.config.TOKEN_ID}={self.config.SECRET}"
         })
-        logging.info("Proxmox API 토큰 인증 설정 완료")
+        logging.info("Proxmox API 토큰 인증 설정 ���료")
         self.session.timeout = (5, 10)  # (connect timeout, read timeout)
 
     def is_vm_running(self) -> bool:
@@ -45,16 +47,19 @@ class ProxmoxAPI:
                 f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current"
             )
             response.raise_for_status()
+            logging.debug(f"VM 상태 확인 응답: {response.json()}")
             return response.json()["data"]["status"] == "running"
         except Exception as e:
             logging.error(f"VM 상태 확인 실패: {e}")
-            return False
+            return False    
+    
     def get_vm_uptime(self) -> Optional[float]:
         try:
             response = self.session.get(
                 f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current"
             )
             response.raise_for_status()
+            logging.debug(f"VM 부팅 시간 확인 응답: {response.json()}")
             return response.json()["data"]["uptime"]
         except Exception as e:
             logging.error(f"VM 부팅 시간 확인 실패: {e}")
@@ -66,6 +71,7 @@ class ProxmoxAPI:
                 f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current"
             )
             response.raise_for_status()
+            logging.debug(f"CPU 사용량 확인 응답: {response.json()}")
             return response.json()["data"]["cpu"] * 100
         except Exception as e:
             logging.error(f"CPU 사용량 확인 실패: {e}")
@@ -77,6 +83,7 @@ class ProxmoxAPI:
                 f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/start"
             )
             response.raise_for_status()
+            logging.debug(f"VM 시작 응답: {response.json()}")
             logging.info("VM 시작 성공")
             return True
         except Exception as e:
@@ -100,6 +107,7 @@ class FolderMonitor:
                 check=True
             )
             size = int(result.stdout.strip().split('\n')[1])
+            logging.debug(f"현재 폴더 용량: {size/1024/1024:.2f}MB")
             return size
         except subprocess.TimeoutExpired:
             logging.error("파일시스템 용량 확인 시간 초과")
@@ -155,7 +163,7 @@ class GShareManager:
             except Exception as e:
                 logging.error(f"종료 웹훅 전송 실패: {e}")
         else:
-            logging.info("종료웹훅을 전송하려했지만 vm이 이미 종료상태입니다.")
+            logging.info("종료웹훅을 전송하려했지만 vm이 이미 종료상��입니다.")
 
     def _update_state(self) -> None:
         try:
@@ -180,6 +188,7 @@ class GShareManager:
 
             with open('current_state.json', 'w', encoding='utf-8') as f:
                 f.write(state.to_json())
+            logging.debug(f"상태 업데이트: {state.to_json()}")
         except Exception as e:
             logging.error(f"상태 업데이트 실패: {e}")
 
@@ -229,24 +238,43 @@ class GShareManager:
                 logging.error(f"모니터링 루프에서 예상치 못한 오류 발생: {e}")
                 time.sleep(self.config.CHECK_INTERVAL)  # 오류 발생시에도 대기 후 계속 실행
 
-if __name__ == '__main__':
-    config = Config()
+def setup_logging():
+    load_dotenv()
+    log_level = os.getenv('LOG_LEVEL', 'INFO')
     
-    logging.Formatter.converter = lambda *args: datetime.now(tz=pytz.timezone(config.TIMEZONE)).timetuple()
-    logging.basicConfig(
-        filename='./gshare_manager.log',
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
+    # 타임존 설정을 위한 Formatter 생성
+    formatter = logging.Formatter(
+        fmt='%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+    formatter.converter = lambda *args: datetime.now(tz=pytz.timezone(Config().TIMEZONE)).timetuple()
+    
+    # 핸들러 설정
+    file_handler = logging.FileHandler('gshare_manager.log')
+    file_handler.setFormatter(formatter)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    
+    # 로거 설정
+    logger = logging.getLogger()
+    logger.setLevel(getattr(logging, log_level))
+    logger.handlers = []  # 기존 핸들러 제거
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    
+    return logger
+
+if __name__ == '__main__':
+    logger = setup_logging()
+    config = Config()
     
     try:
         logging.info("───────────────────────────────────────────────")
         proxmox_api = ProxmoxAPI(config)
         gshare_manager = GShareManager(config, proxmox_api)
-        logging.info(f"초기 정보: VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}, 파일시스템 용량 - {gshare_manager.folder_monitor.previous_size}")
+        logging.info(f"초기 정보: VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}, 마운트된 폴더 용량 - {gshare_manager.folder_monitor.previous_size / (1024*1024):.2f}MB")
         if gshare_manager.folder_monitor.previous_size == 0:
-            logging.warning(f"파일시스템 용량이 0입니다. {config.MOUNT_PATH} 경로가 정상적으로 마운트되어 있는지 확인하세요.")
+            logging.warning(f"파일시스템 용량이 0입니다. {config.MOUNT_PATH} 경로에 감시 폴더가 정상적으로 마운트되어 있는지 확인하세요.")
         logging.info("GShare 관리 시작")
         gshare_manager.monitor()
     except KeyboardInterrupt:

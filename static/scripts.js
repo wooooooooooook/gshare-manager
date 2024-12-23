@@ -36,8 +36,39 @@ function format_size(size_in_bytes) {
     return `${size.toFixed(3)} ${units[unit_index]}`;
 }
 
+// 페재 로그 레벨 가져오기
+async function getCurrentLogLevel() {
+    try {
+        const response = await fetch('/get_log_level');
+        const data = await response.json();
+        if (data.status === 'success') {
+            document.getElementById('logLevel').value = data.current_level;
+        }
+    } catch (error) {
+        console.error('로그 레벨 확인 실패:', error);
+    }
+}
+
+// 로그 레벨 변경
+async function setLogLevel() {
+    const level = document.getElementById('logLevel').value;
+    try {
+        const response = await fetch(`/set_log_level/${level}`);
+        const data = await response.json();
+        if (data.status === 'success') {
+            alert(data.message);
+        } else {
+            alert('로그 레벨 변경 실패: ' + data.message);
+        }
+    } catch (error) {
+        alert('로그 레벨 변경 중 오류 발생');
+        console.error('로그 레벨 변경 실패:', error);
+    }
+}
+
 // 페이지 로드 시 로그를 맨 아래로 스크롤
 window.onload = function () {
+    getCurrentLogLevel();
     const logContent = document.getElementById('logContent');
     logContent.scrollTop = logContent.scrollHeight;
 

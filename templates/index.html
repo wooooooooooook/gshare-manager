@@ -194,7 +194,7 @@
                 </div>
             </div>
 
-            <!-- 오른쪽 컬��� (로그) -->
+            <!-- 오른쪽 컬럼 (로그) -->
             <div class="bg-white rounded-lg shadow-sm p-4 lg:h-[calc(100vh-2rem)] lg:sticky lg:top-4">
                 <div class="flex items-center justify-between mb-2">
                     <div class="flex items-center gap-1">
@@ -206,6 +206,17 @@
                         <h3 class="text-sm font-bold text-gray-800">로그</h3>
                     </div>
                     <div class="flex gap-2">
+                        <select id="logLevel" class="text-xs px-2 py-1 bg-gray-50 border border-gray-200 rounded">
+                            <option value="DEBUG">DEBUG</option>
+                            <option value="INFO">INFO</option>
+                            <option value="WARNING">WARNING</option>
+                            <option value="ERROR">ERROR</option>
+                            <option value="CRITICAL">CRITICAL</option>
+                        </select>
+                        <button onclick="setLogLevel()" 
+                            class="text-xs px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded border border-blue-200 transition-colors duration-200">
+                            로그 레벨 변경
+                        </button>
                         <button onclick="trimLog(100)" 
                             class="text-xs px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded border border-blue-200 transition-colors duration-200">
                             최근 100줄만 유지
@@ -222,10 +233,7 @@
         </div>
     </div>
 
-    <script>
-        // JavaScript 코드도 별도 파일로 분리 가능
-        {% include 'scripts.js' %}
-    </script>
+    <script src="{{ url_for('static', filename='scripts.js') }}"></script>
 </body>
 
 </html>

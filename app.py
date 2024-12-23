@@ -4,6 +4,8 @@ import json
 from datetime import datetime
 import pytz
 import subprocess
+import logging
+from dotenv import load_dotenv, set_key
 
 app = Flask(__name__)
 
@@ -117,6 +119,56 @@ def trim_log(lines):
         })
     except Exception as e:
         return jsonify({"status": "error", "message": f"로그 정리 실패: {str(e)}"}), 500
+
+@app.route('/set_log_level/<string:level>')
+def set_log_level(level):
+    try:
+        # 유효한 로그 레벨 확인
+        valid_levels = {
+            'DEBUG': logging.DEBUG,
+            'INFO': logging.INFO,
+            'WARNING': logging.WARNING,
+            'ERROR': logging.ERROR,
+            'CRITICAL': logging.CRITICAL
+        }
+        
+        if level.upper() not in valid_levels:
+            return jsonify({
+                "status": "error",
+                "message": f"유효하지 않은 로그 레벨입니다. 가능한 레벨: {', '.join(valid_levels.keys())}"
+            }), 400
+
+        # .env 파일에 로그 레벨 저장
+        set_key('.env', 'LOG_LEVEL', level.upper())
+            
+        # gshare_manager 서비스 재시작
+        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager.service'], check=True)
+        
+        return jsonify({
+            "status": "success",
+            "message": f"로그 레벨이 {level.upper()}로 변경되었습니다."
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"로그 레벨 변경 실패: {str(e)}"
+        }), 500
+
+@app.route('/get_log_level')
+def get_log_level():
+    try:
+        load_dotenv()
+        level = os.getenv('LOG_LEVEL', 'INFO')  # 기본값은 INFO
+            
+        return jsonify({
+            "status": "success",
+            "current_level": level
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"로그 레벨 확인 실패: {str(e)}"
+        }), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000) 
