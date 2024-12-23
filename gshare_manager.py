@@ -94,11 +94,19 @@ class FolderMonitor:
                 ['du', '-sb', self.config.MOUNT_PATH],
                 capture_output=True,
                 text=True,
+                timeout=300,  # 타임아웃 추가
                 check=True
             )
-            return int(result.stdout.split()[0])
+            size = int(result.stdout.split()[0])
+            return size
         except subprocess.TimeoutExpired:
             logging.error("폴더 크기 확인 시간 초과")
+            return self.previous_size
+        except (subprocess.SubprocessError, ValueError, IndexError) as e:
+            logging.error(f"폴더 크기 확인 중 오류 발생: {e}")
+            return self.previous_size
+        except Exception as e:
+            logging.error(f"폴더 크기 확인 중 예상치 못한 오류: {e}")
             return self.previous_size
 
     def has_size_changed(self) -> bool:
@@ -175,26 +183,50 @@ class GShareManager:
 
     def monitor(self) -> None:
         while True:
-            if self.folder_monitor.has_size_changed():
-                self.last_size_change_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
-                if not self.proxmox_api.is_vm_running():
-                    self.last_action = "VM 시작"
-                    self.proxmox_api.start_vm()
+            try:
+                logging.debug("모니터링 루프 시작")
+                
+                try:
+                    if self.folder_monitor.has_size_changed():
+                        self.last_size_change_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
+                        logging.info(f"폴더 크기 변경 감지: {self.last_size_change_time}")
+                        
+                        if not self.proxmox_api.is_vm_running():
+                            self.last_action = "VM 시작"
+                            if self.proxmox_api.start_vm():
+                                logging.info("VM 시작 성공")
+                            else:
+                                logging.error("VM 시작 실패")
+                except Exception as e:
+                    logging.error(f"폴더 모니터링 중 오류: {e}")
 
-            if self.proxmox_api.is_vm_running():
-                cpu_usage = self.proxmox_api.get_cpu_usage()
-                if cpu_usage is not None:
-                    if cpu_usage < self.config.CPU_THRESHOLD:
-                        self.low_cpu_count += 1
-                        if self.low_cpu_count >= self.config.THRESHOLD_COUNT:
-                            self.last_action = "종료 웹훅 전송"
-                            self._send_shutdown_webhook()
-                            self.low_cpu_count = 0
-                    else:
-                        self.low_cpu_count = 0
+                try:
+                    if self.proxmox_api.is_vm_running():
+                        cpu_usage = self.proxmox_api.get_cpu_usage()
+                        if cpu_usage is not None:
+                            logging.debug(f"현재 CPU 사용량: {cpu_usage}%")
+                            if cpu_usage < self.config.CPU_THRESHOLD:
+                                self.low_cpu_count += 1
+                                logging.debug(f"낮은 CPU 사용량 카운트: {self.low_cpu_count}/{self.config.THRESHOLD_COUNT}")
+                                if self.low_cpu_count >= self.config.THRESHOLD_COUNT:
+                                    self.last_action = "종료 웹훅 전송"
+                                    self._send_shutdown_webhook()
+                                    self.low_cpu_count = 0
+                            else:
+                                self.low_cpu_count = 0
+                except Exception as e:
+                    logging.error(f"VM 모니터링 중 오류: {e}")
 
-            self._update_state()
-            time.sleep(self.config.CHECK_INTERVAL)
+                try:
+                    self._update_state()
+                except Exception as e:
+                    logging.error(f"상태 업데이트 중 오류: {e}")
+
+                time.sleep(self.config.CHECK_INTERVAL)
+                
+            except Exception as e:
+                logging.error(f"모니터링 루프에서 예상치 못한 오류 발생: {e}")
+                time.sleep(self.config.CHECK_INTERVAL)  # 오류 발생시에도 대기 후 계속 실행
 
 if __name__ == '__main__':
     config = Config()
