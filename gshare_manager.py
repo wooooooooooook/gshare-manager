@@ -84,35 +84,41 @@ class ProxmoxAPI:
             return False
 
 class FolderMonitor:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, manager=None):
         self.config = config
+        self.manager = manager
+        self.get_folder_size_timeout = 200
+        self.previous_size = 0
         self.previous_size = self._get_folder_size()
 
     def _get_folder_size(self) -> int:
+        logging.info(f"폴더 크기 확인 시작: {self.config.MOUNT_PATH}, 오래걸릴 수 있습니다. timeout: {self.get_folder_size_timeout}초")
+        if self.manager:
+            self.manager.last_action = "파일시스템 용량 확인 중"
         try:
             result = subprocess.run(
-                ['du', '-sb', self.config.MOUNT_PATH],
+                ['df', '--output=used', '--block-size=1', self.config.MOUNT_PATH],
                 capture_output=True,
                 text=True,
-                timeout=300,  # 타임아웃 추가
+                timeout=self.get_folder_size_timeout,
                 check=True
             )
-            size = int(result.stdout.split()[0])
+            size = int(result.stdout.strip().split('\n')[1])
             return size
         except subprocess.TimeoutExpired:
-            logging.error("폴더 크기 확인 시간 초과")
+            logging.error("파일시스템 용량 확인 시간 초과")
             return self.previous_size
         except (subprocess.SubprocessError, ValueError, IndexError) as e:
-            logging.error(f"폴더 크기 확인 중 오류 발생: {e}")
+            logging.error(f"파일시스템 용량 확인 중 오류 발생: {e}")
             return self.previous_size
         except Exception as e:
-            logging.error(f"폴더 크기 확인 중 예상치 못한 오류: {e}")
+            logging.error(f"파일시스템 용량 확인 중 예상치 못한 오류: {e}")
             return self.previous_size
 
     def has_size_changed(self) -> bool:
         current_size = self._get_folder_size()
         if current_size != self.previous_size:
-            logging.info(f"폴더 크기 변경: {self.previous_size} -> {current_size}")
+            logging.info(f"파일시스템 용량 변경: {self.previous_size} -> {current_size}")
             self.previous_size = current_size
             return True
         return False
@@ -122,10 +128,10 @@ class GShareManager:
         self.config = config
         self.proxmox_api = proxmox_api
         self.low_cpu_count = 0
-        self.folder_monitor = FolderMonitor(config)
         self.last_action = "프로그램 시작"
         self.last_size_change_time = "-"
         self.last_shutdown_time = "-"
+        self.folder_monitor = FolderMonitor(config, self)
         self._update_state()
 
     def _format_uptime(self, seconds: float) -> str:
@@ -160,7 +166,7 @@ class GShareManager:
             current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
             vm_status = "🟢" if self.proxmox_api.is_vm_running() else "🔴"
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
-            folder_size = self.folder_monitor._get_folder_size()
+            folder_size = self.folder_monitor.previous_size
             uptime = self.proxmox_api.get_vm_uptime()
             uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
 
@@ -189,7 +195,7 @@ class GShareManager:
                 try:
                     if self.folder_monitor.has_size_changed():
                         self.last_size_change_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
-                        logging.info(f"폴더 크기 변경 감지: {self.last_size_change_time}")
+                        logging.info(f"파일시스템 용량 변경 감지: {self.last_size_change_time}")
                         
                         if not self.proxmox_api.is_vm_running():
                             self.last_action = "VM 시작"
@@ -198,7 +204,7 @@ class GShareManager:
                             else:
                                 logging.error("VM 시작 실패")
                 except Exception as e:
-                    logging.error(f"폴더 모니터링 중 오류: {e}")
+                    logging.error(f"파일시스템 용량 모니터링 중 오류: {e}")
 
                 try:
                     if self.proxmox_api.is_vm_running():
@@ -240,16 +246,16 @@ if __name__ == '__main__':
     )
     
     try:
-        logging.info("────────────────────────────────────────────────")
+        logging.info("───────────────────────────────────────────────")
         proxmox_api = ProxmoxAPI(config)
         gshare_manager = GShareManager(config, proxmox_api)
-        logging.info(f"초기 정보: VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}, 폴더 볼륨 - {gshare_manager.folder_monitor._get_folder_size()}")
+        logging.info(f"초기 정보: VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}, 파일시스템 용량 - {gshare_manager.folder_monitor.previous_size}")
         logging.info("GShare 관리 시작")        
-        logging.info("───────────────────────────────────────────────┘")
+        logging.info("───────────────────────────────────────────────")
         gshare_manager.monitor()
     except KeyboardInterrupt:
         logging.info("프로그램 종료")
-        logging.info("───────────────────────────────────────────────┘")
+        logging.info("───────────────────────────────────────────────")
     except Exception as e:
         logging.error(f"예상치 못한 오류 발생: {e}")
-        logging.info("───────────────────────────────────────────────┘")
+        logging.info("───────────────────────────────────────────────")
