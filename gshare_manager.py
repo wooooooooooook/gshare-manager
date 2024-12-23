@@ -38,7 +38,7 @@ class ProxmoxAPI:
         self.session.headers.update({
             "Authorization": f"PVEAPIToken={self.config.TOKEN_ID}={self.config.SECRET}"
         })
-        logging.info("Proxmox API 토큰 인증 설정 ���료")
+        logging.info("Proxmox API 토큰 인증 설정 완료")
         self.session.timeout = (5, 10)  # (connect timeout, read timeout)
 
     def is_vm_running(self) -> bool:
@@ -272,7 +272,8 @@ if __name__ == '__main__':
         logging.info("───────────────────────────────────────────────")
         proxmox_api = ProxmoxAPI(config)
         gshare_manager = GShareManager(config, proxmox_api)
-        logging.info(f"초기 정보: VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}, 마운트된 폴더 용량 - {gshare_manager.folder_monitor.previous_size / (1024*1024):.2f}MB")
+        logging.info(f"초기 정보: VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}")
+        logging.info(f"마운트된 폴더 용량 - {gshare_manager.folder_monitor.previous_size / (1024*1024):.2f}MB")
         if gshare_manager.folder_monitor.previous_size == 0:
             logging.warning(f"파일시스템 용량이 0입니다. {config.MOUNT_PATH} 경로에 감시 폴더가 정상적으로 마운트되어 있는지 확인하세요.")
         logging.info("GShare 관리 시작")
