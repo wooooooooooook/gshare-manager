@@ -94,36 +94,54 @@ class FolderMonitor:
     def __init__(self, config: Config):
         self.config = config
         self.get_folder_size_timeout = self.config.GET_FOLDER_SIZE_TIMEOUT
-        self.previous_size = 0
-        self.previous_size = self._get_folder_size()
+        self.previous_count = self._load_previous_count()
+        if self.previous_count == 0:  # 파일에서 불러오기 실패시 현재 개수로 초기화
+            self.previous_count = self._get_file_count()
 
-    def _get_folder_size(self) -> int:
+    def _load_previous_count(self) -> int:
+        try:
+            with open('current_state.json', 'r', encoding='utf-8') as f:
+                state = json.loads(f.read())
+                count = state.get('folder_size', 0)
+                logging.info(f"이전 상태 파일에서 파일 개수 불러옴: {count}개")
+                return count
+        except FileNotFoundError:
+            logging.info("이전 상태 파일이 없습니다.")
+            return 0
+        except json.JSONDecodeError:
+            logging.error("상태 파일 파싱 실패")
+            return 0
+        except Exception as e:
+            logging.error(f"이전 상태 불러오기 실패: {e}")
+            return 0
+
+    def _get_file_count(self) -> int:
         try:
             result = subprocess.run(
-                ['df', '--output=used', '--block-size=1', self.config.MOUNT_PATH],
+                ['find', self.config.MOUNT_PATH, '-type', 'f', '-print0' '|', 'wc', '-l', '--files0-from=-'],
                 capture_output=True,
                 text=True,
                 timeout=self.get_folder_size_timeout,
                 check=True
             )
-            size = int(result.stdout.strip().split('\n')[1])
-            logging.debug(f"현재 폴더 용량: {size/1024/1024:.2f}MB")
-            return size
+            count = int(result.stdout.strip())
+            logging.debug(f"현재 파일 개수: {count}개")
+            return count
         except subprocess.TimeoutExpired:
-            logging.error("파일시스템 용량 확인 시간 초과")
-            return self.previous_size
+            logging.error("파일 개수 확인 시간 초과")
+            return self.previous_count
         except (subprocess.SubprocessError, ValueError, IndexError) as e:
-            logging.error(f"파일시스템 용량 확인 중 오류 발생: {e}")
-            return self.previous_size
+            logging.error(f"파일 개수 확인 중 오류 발생: {e}")
+            return self.previous_count
         except Exception as e:
-            logging.error(f"파일시스템 용량 확인 중 예상치 못한 오류: {e}")
-            return self.previous_size
+            logging.error(f"파일 개수 확인 중 예상치 못한 오류: {e}")
+            return self.previous_count
 
     def has_size_changed(self) -> bool:
-        current_size = self._get_folder_size()
-        if current_size != self.previous_size:
-            logging.info(f"용량 변화량: {(self.previous_size-current_size)/1024/1024:.2f}MB")
-            self.previous_size = current_size
+        current_count = self._get_file_count()
+        if current_count != self.previous_count:
+            logging.info(f"파일 개수 변화: {current_count - self.previous_count}개")
+            self.previous_count = current_count
             return True
         return False
 
@@ -163,14 +181,14 @@ class GShareManager:
             except Exception as e:
                 logging.error(f"종료 웹훅 전송 실패: {e}")
         else:
-            logging.info("종료웹훅을 전송하려했지만 vm이 이미 종료상��입니다.")
+            logging.info("종료웹훅을 전송하려했지만 vm이 이미 종료상태입니다.")
 
     def _update_state(self) -> None:
         try:
             current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
             vm_status = "🟢" if self.proxmox_api.is_vm_running() else "🔴"
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
-            folder_size = self.folder_monitor.previous_size
+            folder_size = self.folder_monitor.previous_count
             uptime = self.proxmox_api.get_vm_uptime()
             uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
 
@@ -273,8 +291,8 @@ if __name__ == '__main__':
         proxmox_api = ProxmoxAPI(config)
         gshare_manager = GShareManager(config, proxmox_api)
         logging.info(f"초기 정보: VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}")
-        logging.info(f"마운트된 폴더 용량 - {gshare_manager.folder_monitor.previous_size / (1024*1024):.2f}MB")
-        if gshare_manager.folder_monitor.previous_size == 0:
+        logging.info(f"마운트된 폴더 파일 수 - {gshare_manager.folder_monitor.previous_count}개")
+        if gshare_manager.folder_monitor.previous_count == 0:
             logging.warning(f"파일시스템 용량이 0입니다. {config.MOUNT_PATH} 경로에 감시 폴더가 정상적으로 마운트되어 있는지 확인하세요.")
         logging.info("GShare 관리 시작")
         gshare_manager.monitor()
