@@ -42,24 +42,53 @@
                             <span class="text-right">{{state['last_action']}}</span>
                         </div>
                     </div>
-                    <button onclick="restartService()" 
-                        class="col-span-2 bg-yellow-50 hover:bg-yellow-100 text-yellow-800 rounded-lg p-2 border border-yellow-200 transition-colors duration-200">
-                        <div class="flex items-center justify-center gap-1">
-                            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
-                            </svg>
-                            <span class="text-sm font-medium">서비스 재시작</span>
+                    <div class="col-span-2 grid grid-cols-3 gap-2">
+                        <button onclick="restartService()" 
+                            class="bg-yellow-50 hover:bg-yellow-100 text-yellow-800 rounded-lg p-2 border border-yellow-200 transition-colors duration-200">
+                            <div class="flex items-center justify-center gap-1">
+                                <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                                </svg>
+                                <span class="text-sm font-medium">서비스 재시작</span>
+                            </div>
+                        </button>
+                        <button onclick="startVM()" 
+                            class="bg-green-50 hover:bg-green-100 text-green-800 rounded-lg p-2 border border-green-200 transition-colors duration-200">
+                            <div class="flex items-center justify-center gap-1">
+                                <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
+                                </svg>
+                                <span class="text-sm font-medium">VM 시작</span>
+                            </div>
+                        </button>
+                        <button onclick="shutdownVM()" 
+                            class="bg-red-50 hover:bg-red-100 text-red-800 rounded-lg p-2 border border-red-200 transition-colors duration-200">
+                            <div class="flex items-center justify-center gap-1">
+                                <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 117.072-7.072" />
+                                </svg>
+                                <span class="text-sm font-medium">VM 종료</span>
+                            </div>
+                        </button>
+                        <!-- 상태 메시지 영역 -->
+                        <div id="restartStatus" class="col-span-3 text-sm text-center hidden">
+                            <span class="inline-flex items-center">
+                                <svg class="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span id="restartStatusText"></span>
+                            </span>
                         </div>
-                    </button>
-                    <!-- 상태 메시지 영역 추가 -->
-                    <div id="restartStatus" class="col-span-2 text-sm text-center hidden">
-                        <span class="inline-flex items-center">
-                            <svg class="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            <span id="restartStatusText"></span>
-                        </span>
+                        <div id="vmControlStatus" class="col-span-3 text-sm text-center hidden">
+                            <span class="inline-flex items-center">
+                                <svg class="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span id="vmControlStatusText"></span>
+                            </span>
+                        </div>
                     </div>
                 </div>
 
@@ -168,10 +197,10 @@
                                     <path stroke-linecap="round" stroke-linejoin="round"
                                         d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
                                 </svg>
-                                <span class="text-xs text-gray-500">Size</span>
+                                <span class="text-xs text-gray-500">Folder size</span>
                             </div>
-                            <div class="flex items-center font-medium text-sm text-yellow-800 folder-size">
-                                {{format_size(state['folder_size'])}}</div>
+                            <div class="flex items-center font-medium text-sm text-yellow-800 folder-files">
+                                {{state['folder_size_readable']}}</div>
                         </div>
                         <div
                             class="flex justify-between bg-orange-50 rounded-lg p-2 border border-orange-100 toggle-text">
@@ -183,7 +212,7 @@
                                 </svg>
                                 <span class="text-xs text-gray-500">Last size change</span>
                             </div>
-                            <div class="flex items-center font-medium text-sm text-orange-800 last-size-change-time">
+                            <div class="flex items-center font-medium text-sm text-orange-800 last-files-change-time">
                                 <span class="readable-time">{{get_time_ago(state['last_size_change_time']) if
                                     state['last_size_change_time'] != '-'
                                     else '정보없음'}}</span>

@@ -28,7 +28,7 @@ class Config:
     ## 감시폴더 마운트 경로
     MOUNT_PATH: str = "/mnt/gshare"
     ## 폴더 용량 확인 시간 초과(초)
-    GET_FOLDER_SIZE_TIMEOUT: int = 30
+    GET_FOLDER_SIZE_TIMEOUT: int = 500
     ## macrodroid 종료 웹훅 URL
     SHUTDOWN_WEBHOOK_URL: str = os.getenv('SHUTDOWN_WEBHOOK_URL')
     

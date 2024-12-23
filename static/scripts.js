@@ -22,20 +22,6 @@ function get_time_ago(timestamp_str) {
     }
 }
 
-// format_size 함수 추가
-function format_size(size_in_bytes) {
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let size = size_in_bytes;
-    let unit_index = 0;
-
-    while (size >= 1024 && unit_index < units.length - 1) {
-        size /= 1024;
-        unit_index++;
-    }
-
-    return `${size.toFixed(3)} ${units[unit_index]}`;
-}
-
 // 페재 로그 레벨 가져오기
 async function getCurrentLogLevel() {
     try {
@@ -108,10 +94,10 @@ window.onload = function () {
                 document.querySelector('.cpu-usage').innerText = data.cpu_usage + '%';
                 document.querySelector('.low-cpu-count').innerText = data.low_cpu_count;
                 document.querySelector('.uptime').innerText = data.uptime;
-                document.querySelector('.folder-size').innerText = format_size(data.folder_size);
-                document.querySelector('.last-size-change-time .readable-time').innerText =
+                document.querySelector('.folder-files').innerText = data.folder_size_readable;
+                document.querySelector('.last-files-change-time .readable-time').innerText =
                     data.last_size_change_time !== '-' ? get_time_ago(data.last_size_change_time) : '정보없음';
-                document.querySelector('.last-size-change-time .time-string').innerText = data.last_size_change_time;
+                document.querySelector('.last-files-change-time .time-string').innerText = data.last_size_change_time;
                 document.querySelector('.last-shutdown-time .readable-time').innerText =
                     data.last_shutdown_time !== '-' ? get_time_ago(data.last_shutdown_time) : '정보없음';
                 document.querySelector('.last-shutdown-time .time-string').innerText = data.last_shutdown_time;
@@ -247,6 +233,62 @@ function trimLog(lines) {
             .catch(error => {
                 console.error('Error:', error);
                 alert('로그 정리 중 오류가 발생했습니다.');
+            });
+    }
+}
+
+function startVM() {
+    if (confirm('VM을 시작하시겠습니까?')) {
+        const statusDiv = document.getElementById('vmControlStatus');
+        const statusText = document.getElementById('vmControlStatusText');
+        statusDiv.classList.remove('hidden');
+        statusText.textContent = 'VM 시작을 요청중입니다...';
+        
+        fetch('/start_vm')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    statusText.textContent = data.message;
+                    setTimeout(() => {
+                        statusDiv.classList.add('hidden');
+                    }, 3000);
+                } else {
+                    throw new Error(data.message);
+                }
+            })
+            .catch(error => {
+                statusText.textContent = '오류: ' + error.message;
+                setTimeout(() => {
+                    statusDiv.classList.add('hidden');
+                }, 3000);
+            });
+    }
+}
+
+function shutdownVM() {
+    if (confirm('VM을 종료하시겠습니까?')) {
+        const statusDiv = document.getElementById('vmControlStatus');
+        const statusText = document.getElementById('vmControlStatusText');
+        statusDiv.classList.remove('hidden');
+        statusText.textContent = 'VM 종료를 요청중입니다...';
+        
+        fetch('/shutdown_vm')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    statusText.textContent = data.message;
+                    setTimeout(() => {
+                        statusDiv.classList.add('hidden');
+                    }, 3000);
+                } else {
+                    throw new Error(data.message);
+                }
+            })
+            .catch(error => {
+                statusText.textContent = '오류: ' + error.message;
+                setTimeout(() => {
+                    statusDiv.classList.add('hidden');
+                }, 3000);
             });
     }
 }
