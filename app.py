@@ -99,6 +99,15 @@ def restart_service():
     except subprocess.CalledProcessError as e:
         return jsonify({"status": "error", "message": f"서비스 재시작 실패: {str(e)}"}), 500
 
+
+@app.route('/retry_mount')
+def retry_mount():
+    try:
+        subprocess.run(['sudo', 'mount', config.MOUNT_PATH], check=True)
+        return jsonify({"status": "success", "message": "마운트를 재시도했습니다."})
+    except subprocess.CalledProcessError as e:
+        return jsonify({"status": "error", "message": f"마운트 재시도 실패: {str(e)}"}), 500
+
 @app.route('/clear_log')
 def clear_log():
     try:
