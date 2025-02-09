@@ -1,4 +1,5 @@
 import logging
+from logging.handlers import RotatingFileHandler
 import time
 from dataclasses import dataclass, asdict
 from typing import Optional
@@ -141,10 +142,11 @@ class FolderMonitor:
             size = int(output)
             logging.debug(f"현재 폴더 전체 용량: {format_size(size)}")
             if size < 1024 * 1024:
-                logging.warning(f"폴더 용량이 1MB 미만입니다. {config.MOUNT_PATH} 경로에 감시 폴더가 정상적으로 마운트되어 있는지 확인하세요.")
+                subprocess.run(['mount', config.MOUNT_PATH], check=True)
+                logging.warning(f"폴더 용량이 1MB 미만입니다. 마운트를 재시도합니다. 이 메시지가 지속적으로 표시된다면 {config.MOUNT_PATH} 경로에 감시 폴더가 정상적으로 마운트되어 있는지 확인하세요.")
             return size
         except subprocess.TimeoutExpired:
-            logging.error("폴더 용량 확인 시간 초과")
+            logging.error("폴더 용량 확인 시간 초과. NAS가 살아있나요?")
             return self.previous_size
         except (subprocess.SubprocessError, ValueError) as e:
             logging.error(f"폴더 용량 확인 중 오류 발생: {e}")
@@ -292,7 +294,7 @@ def setup_logging():
     formatter.converter = lambda *args: datetime.now(tz=pytz.timezone(Config().TIMEZONE)).timetuple()
     
     # 핸들러 설정
-    file_handler = logging.FileHandler('gshare_manager.log')
+    file_handler = RotatingFileHandler('gshare_manager.log', maxBytes=5*1024*1024, backupCount=1)  # 5MB 크기
     file_handler.setFormatter(formatter)
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)

@@ -104,7 +104,9 @@ def restart_service():
 def retry_mount():
     try:
         subprocess.run(['sudo', 'mount', config.MOUNT_PATH], check=True)
-        return jsonify({"status": "success", "message": "마운트를 재시도했습니다."})
+        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager.service'], check=True)
+        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager_log_server.service'], check=True)
+        return jsonify({"status": "success", "message": "마운트 재시도 및 서비스를 재시작했습니다."})
     except subprocess.CalledProcessError as e:
         return jsonify({"status": "error", "message": f"마운트 재시도 실패: {str(e)}"}), 500
 
