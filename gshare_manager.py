@@ -30,7 +30,6 @@ class State:
     last_action: str
     low_cpu_count: int
     uptime: str
-    last_size_change_time: str
     last_shutdown_time: str
     
     def to_dict(self):
@@ -280,7 +279,7 @@ class FolderMonitor:
             if full_path not in self.previous_mtimes:
                 self.previous_mtimes[full_path] = self._get_folder_mtime(full_path)
 
-    def check_size_changes(self) -> list[str]:
+    def check_modifications(self) -> list[str]:
         """수정 시간이 변경된 서브폴더 목록을 반환"""
         changed_folders = []
         self._update_subfolder_mtimes()
@@ -293,7 +292,6 @@ class FolderMonitor:
                 logging.info(f"폴더 수정 시간 변화 감지 ({subfolder}): {last_modified}")
                 changed_folders.append(subfolder)
                 self.previous_mtimes[path] = current_mtime
-                # 최근 수정 정보 업데이트
                 self.last_modified_folder = subfolder
                 self.last_modified_time = last_modified
         
@@ -319,7 +317,6 @@ class GShareManager:
         self.proxmox_api = proxmox_api
         self.low_cpu_count = 0
         self.last_action = "프로그램 시작"
-        self.last_size_change_time = "-"
         self.last_shutdown_time = "-"
         self.folder_monitor = FolderMonitor(config)
         self._update_state()
@@ -373,7 +370,6 @@ class GShareManager:
                 last_action=self.last_action,
                 low_cpu_count=self.low_cpu_count,
                 uptime=uptime_str,
-                last_size_change_time=self.last_size_change_time,
                 last_shutdown_time=self.last_shutdown_time
             )
             logging.debug(f"상태 업데이트: {current_state.to_dict()}")
@@ -383,17 +379,13 @@ class GShareManager:
     def monitor(self) -> None:
         while True:
             try:
-                # 매 루프마다 로그 레벨 확인 및 업데이트
                 update_log_level()
-                
                 logging.debug("모니터링 루프 시작")
                 
                 try:
                     logging.debug("폴더 수정 시간 변화 확인 중")
-                    changed_folders = self.folder_monitor.check_size_changes()
+                    changed_folders = self.folder_monitor.check_modifications()
                     if changed_folders:
-                        self.last_size_change_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
-                        
                         # 변경된 폴더들의 SMB 공유 활성화
                         for folder in changed_folders:
                             if self.folder_monitor._activate_smb_share(folder):
@@ -666,15 +658,12 @@ if __name__ == '__main__':
         proxmox_api = ProxmoxAPI(config)
         gshare_manager = GShareManager(config, proxmox_api)
         logging.info(f"VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}")
-        logging.info(f"폴더 용량 - {format_size(gshare_manager.folder_monitor.total_size)}")
         logging.info("GShare 관리 시작")
         
-        # Flask 웹 서버를 별도 스레드에서 실행
         flask_thread = threading.Thread(target=run_flask_app)
-        flask_thread.daemon = True  # 메인 프로그램이 종료되면 웹 서버도 종료
+        flask_thread.daemon = True
         flask_thread.start()
         
-        # 메인 모니터링 루프 실행
         gshare_manager.monitor()
     except KeyboardInterrupt:
         logging.info("프로그램 종료")
