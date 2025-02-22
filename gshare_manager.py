@@ -171,6 +171,77 @@ class FolderMonitor:
             logging.error(f"SMB 기본 설정 초기화 실패: {e}")
             raise
 
+    def _get_subfolders(self) -> list[str]:
+        """마운트 경로의 모든 서브폴더를 재귀적으로 반환"""
+        try:
+            subfolders = []
+            for root, dirs, _ in os.walk(self.config.MOUNT_PATH):
+                for dir_name in dirs:
+                    # 마운트 경로로부터의 상대 경로 계산
+                    rel_path = os.path.relpath(os.path.join(root, dir_name), self.config.MOUNT_PATH)
+                    # 숨김 폴더 제외
+                    if not any(part.startswith('.') for part in rel_path.split(os.sep)):
+                        subfolders.append(rel_path)
+            return subfolders
+        except Exception as e:
+            logging.error(f"서브폴더 목록 가져오기 실패: {e}")
+            return []
+
+    def _get_folder_mtime(self, path: str) -> float:
+        """지정된 경로의 폴더 수정 시간을 반환"""
+        try:
+            full_path = os.path.join(self.config.MOUNT_PATH, path)
+            return os.path.getmtime(full_path)
+        except Exception as e:
+            logging.error(f"폴더 수정 시간 확인 중 오류 발생 ({path}): {e}")
+            return self.previous_mtimes.get(path, 0)
+
+    def _update_subfolder_mtimes(self) -> None:
+        """모든 서브폴더의 수정 시간을 업데이트"""
+        subfolders = self._get_subfolders()
+        for subfolder in subfolders:
+            if subfolder not in self.previous_mtimes:
+                self.previous_mtimes[subfolder] = self._get_folder_mtime(subfolder)
+
+    def check_modifications(self) -> list[str]:
+        """수정 시간이 변경된 서브폴더 목록을 반환"""
+        changed_folders = []
+        self._update_subfolder_mtimes()
+        
+        for path, prev_mtime in self.previous_mtimes.items():
+            current_mtime = self._get_folder_mtime(path)
+            if current_mtime != prev_mtime:
+                last_modified = datetime.fromtimestamp(current_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                logging.info(f"폴더 수정 시간 변화 감지 ({path}): {last_modified}")
+                changed_folders.append(path)
+                self.previous_mtimes[path] = current_mtime
+                self.last_modified_folder = path
+                self.last_modified_time = last_modified
+        
+        return changed_folders
+
+    @property
+    def total_size(self) -> int:
+        """전체 폴더 크기 반환 (웹 인터페이스 표시용)"""
+        total = 0
+        for path in self.previous_mtimes.keys():
+            try:
+                cmd = f"du -sb {path} 2>/dev/null | cut -f1"
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=self.config.GET_FOLDER_SIZE_TIMEOUT)
+                if result.returncode == 0:
+                    total += int(result.stdout.strip())
+            except Exception as e:
+                logging.error(f"폴더 크기 계산 중 오류 발생 ({path}): {e}")
+        return total
+
+    def get_monitored_folders(self) -> dict:
+        """감시 중인 모든 폴더와 수정 시간을 반환"""
+        monitored_folders = {}
+        for path in self.previous_mtimes.keys():
+            mtime = self._get_folder_mtime(path)
+            monitored_folders[path] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+        return monitored_folders
+
     def _activate_smb_share(self, subfolder: str) -> bool:
         """특정 서브폴더의 SMB 공유를 활성화"""
         try:
@@ -178,7 +249,8 @@ class FolderMonitor:
                 return True
 
             source_path = os.path.join(self.config.MOUNT_PATH, subfolder)
-            share_name = f"{self.config.SMB_SHARE_NAME}_{subfolder}"
+            # 폴더 경로의 슬래시를 언더스코어로 변환하여 공유 이름 생성
+            share_name = f"{self.config.SMB_SHARE_NAME}_{subfolder.replace(os.sep, '_')}"
             
             # 공유 설정 생성
             share_config = f"""
@@ -259,76 +331,6 @@ class FolderMonitor:
         except Exception as e:
             logging.error(f"SMB 공유 비활성화 실패: {e}")
             return False
-
-    def _get_subfolders(self) -> list[str]:
-        """마운트 경로의 서브폴더 목록을 반환"""
-        try:
-            subfolders = []
-            for item in os.listdir(self.config.MOUNT_PATH):
-                full_path = os.path.join(self.config.MOUNT_PATH, item)
-                if os.path.isdir(full_path):
-                    subfolders.append(item)
-            return subfolders
-        except Exception as e:
-            logging.error(f"서브폴더 목록 가져오기 실패: {e}")
-            return []
-
-    def _get_folder_mtime(self, path: str) -> float:
-        """지정된 경로의 폴더 수정 시간을 반환"""
-        try:
-            return os.path.getmtime(path)
-        except Exception as e:
-            logging.error(f"폴더 수정 시간 확인 중 오류 발생 ({path}): {e}")
-            return self.previous_mtimes.get(path, 0)
-
-    def _update_subfolder_mtimes(self) -> None:
-        """모든 서브폴더의 수정 시간을 업데이트"""
-        subfolders = self._get_subfolders()
-        for subfolder in subfolders:
-            full_path = os.path.join(self.config.MOUNT_PATH, subfolder)
-            if full_path not in self.previous_mtimes:
-                self.previous_mtimes[full_path] = self._get_folder_mtime(full_path)
-
-    def check_modifications(self) -> list[str]:
-        """수정 시간이 변경된 서브폴더 목록을 반환"""
-        changed_folders = []
-        self._update_subfolder_mtimes()
-        
-        for path, prev_mtime in self.previous_mtimes.items():
-            current_mtime = self._get_folder_mtime(path)
-            if current_mtime != prev_mtime:
-                subfolder = os.path.basename(path)
-                last_modified = datetime.fromtimestamp(current_mtime).strftime('%Y-%m-%d %H:%M:%S')
-                logging.info(f"폴더 수정 시간 변화 감지 ({subfolder}): {last_modified}")
-                changed_folders.append(subfolder)
-                self.previous_mtimes[path] = current_mtime
-                self.last_modified_folder = subfolder
-                self.last_modified_time = last_modified
-        
-        return changed_folders
-
-    @property
-    def total_size(self) -> int:
-        """전체 폴더 크기 반환 (웹 인터페이스 표시용)"""
-        total = 0
-        for path in self.previous_mtimes.keys():
-            try:
-                cmd = f"du -sb {path} 2>/dev/null | cut -f1"
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=self.config.GET_FOLDER_SIZE_TIMEOUT)
-                if result.returncode == 0:
-                    total += int(result.stdout.strip())
-            except Exception as e:
-                logging.error(f"폴더 크기 계산 중 오류 발생 ({path}): {e}")
-        return total
-
-    def get_monitored_folders(self) -> dict:
-        """감시 중인 모든 폴더와 수정 시간을 반환"""
-        monitored_folders = {}
-        for path in self.previous_mtimes.keys():
-            subfolder = os.path.basename(path)
-            mtime = self._get_folder_mtime(path)
-            monitored_folders[subfolder] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
-        return monitored_folders
 
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
