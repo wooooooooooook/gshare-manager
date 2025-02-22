@@ -101,6 +101,21 @@ window.onload = function () {
                 document.querySelector('.last-shutdown-time .readable-time').innerText =
                     data.last_shutdown_time !== '-' ? get_time_ago(data.last_shutdown_time) : '정보없음';
                 document.querySelector('.last-shutdown-time .time-string').innerText = data.last_shutdown_time;
+
+                // 감시 중인 폴더 목록 업데이트
+                const monitoredFoldersContainer = document.querySelector('.grid.grid-cols-2.gap-2:last-child');
+                if (monitoredFoldersContainer) {
+                    let foldersHtml = '';
+                    for (const [folder, mtime] of Object.entries(data.monitored_folders)) {
+                        foldersHtml += `
+                            <div class="flex justify-between items-center bg-white rounded p-2 border border-gray-100">
+                                <span class="text-sm text-gray-700">${folder}</span>
+                                <span class="text-xs text-gray-500">${get_time_ago(mtime)}</span>
+                            </div>
+                        `;
+                    }
+                    monitoredFoldersContainer.innerHTML = foldersHtml;
+                }
             });
 
         // update_log 부분 수정

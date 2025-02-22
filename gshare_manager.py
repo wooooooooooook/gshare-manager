@@ -13,8 +13,17 @@ from dotenv import load_dotenv, set_key
 import os
 from flask import Flask, jsonify, render_template
 import threading
+import sys
+
+# Flask 로깅 비활성화
+cli = sys.modules['flask.cli']
+cli.show_server_banner = lambda *x: None
 
 app = Flask(__name__)
+# Flask 기본 로거 비활성화
+app.logger.disabled = True
+log = logging.getLogger('werkzeug')
+log.disabled = True
 
 # 전역 변수로 상태와 관리자 객체 선언
 current_state = None
@@ -31,6 +40,7 @@ class State:
     low_cpu_count: int
     uptime: str
     last_shutdown_time: str
+    monitored_folders: dict    # 감시 중인 폴더들과 수정 시간
     
     def to_dict(self):
         return asdict(self)
@@ -311,6 +321,15 @@ class FolderMonitor:
                 logging.error(f"폴더 크기 계산 중 오류 발생 ({path}): {e}")
         return total
 
+    def get_monitored_folders(self) -> dict:
+        """감시 중인 모든 폴더와 수정 시간을 반환"""
+        monitored_folders = {}
+        for path in self.previous_mtimes.keys():
+            subfolder = os.path.basename(path)
+            mtime = self._get_folder_mtime(path)
+            monitored_folders[subfolder] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+        return monitored_folders
+
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
         self.config = config
@@ -370,7 +389,8 @@ class GShareManager:
                 last_action=self.last_action,
                 low_cpu_count=self.low_cpu_count,
                 uptime=uptime_str,
-                last_shutdown_time=self.last_shutdown_time
+                last_shutdown_time=self.last_shutdown_time,
+                monitored_folders=self.folder_monitor.get_monitored_folders()
             )
             logging.debug(f"상태 업데이트: {current_state.to_dict()}")
         except Exception as e:
@@ -647,7 +667,7 @@ def shutdown_vm():
         return jsonify({"status": "error", "message": f"VM 종료 요청 실패: {str(e)}"}), 500
 
 def run_flask_app():
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
 
 if __name__ == '__main__':
     logger = setup_logging()
