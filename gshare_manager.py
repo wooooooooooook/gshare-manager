@@ -701,15 +701,14 @@ if __name__ == '__main__':
     
     try:
         logging.info("───────────────────────────────────────────────")
-        flask_thread = threading.Thread(target=run_flask_app)
-        flask_thread.daemon = True
-        flask_thread.start()
-        logging.info("Flask 서버 시작")
         proxmox_api = ProxmoxAPI(config)
         gshare_manager = GShareManager(config, proxmox_api)
         logging.info(f"VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}")
         logging.info("GShare 관리 시작")
         
+        flask_thread = threading.Thread(target=run_flask_app)
+        flask_thread.daemon = True
+        flask_thread.start()
         
         gshare_manager.monitor()
     except KeyboardInterrupt:
