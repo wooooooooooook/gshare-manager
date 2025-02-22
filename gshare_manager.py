@@ -174,15 +174,39 @@ class FolderMonitor:
     def _get_subfolders(self) -> list[str]:
         """마운트 경로의 모든 서브폴더를 재귀적으로 반환"""
         try:
+            if not os.path.exists(self.config.MOUNT_PATH):
+                logging.error(f"마운트 경로가 존재하지 않음: {self.config.MOUNT_PATH}")
+                return []
+
+            logging.debug(f"마운트 경로 스캔 시작: {self.config.MOUNT_PATH}")
             subfolders = []
-            for root, dirs, _ in os.walk(self.config.MOUNT_PATH):
-                for dir_name in dirs:
-                    # 마운트 경로로부터의 상대 경로 계산
-                    rel_path = os.path.relpath(os.path.join(root, dir_name), self.config.MOUNT_PATH)
-                    # 숨김 폴더 제외
-                    if not any(part.startswith('.') for part in rel_path.split(os.sep)):
-                        subfolders.append(rel_path)
+            
+            try:
+                for root, dirs, _ in os.walk(self.config.MOUNT_PATH, followlinks=True):
+                    for dir_name in dirs:
+                        try:
+                            full_path = os.path.join(root, dir_name)
+                            # 마운트 경로로부터의 상대 경로 계산
+                            rel_path = os.path.relpath(full_path, self.config.MOUNT_PATH)
+                            
+                            # 숨김 폴더 제외
+                            if not any(part.startswith('.') for part in rel_path.split(os.sep)):
+                                # 폴더 접근 권한 확인
+                                if os.access(full_path, os.R_OK):
+                                    subfolders.append(rel_path)
+                                    logging.debug(f"폴더 감지됨: {rel_path}")
+                                else:
+                                    logging.warning(f"폴더 접근 권한 없음: {rel_path}")
+                        except Exception as e:
+                            logging.error(f"개별 폴더 처리 중 오류 발생 ({dir_name}): {e}")
+                            continue
+            except Exception as e:
+                logging.error(f"폴더 순회 중 오류 발생: {e}")
+                return []
+
+            logging.debug(f"감지된 전체 폴더 수: {len(subfolders)}")
             return subfolders
+            
         except Exception as e:
             logging.error(f"서브폴더 목록 가져오기 실패: {e}")
             return []
