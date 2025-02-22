@@ -25,8 +25,8 @@ class State:
     last_check_time: str
     vm_status: str  # 🔴 (정지), 🟢 (실행 중)
     cpu_usage: float
-    folder_size: int  # 실제 바이트 단위 저장
-    folder_size_readable: str  # 사람이 읽기 쉬운 형식
+    last_modified_folder: str  # 가장 최근에 수정된 폴더 이름
+    last_modified_time: str    # 해당 폴더의 수정 시간
     last_action: str
     low_cpu_count: int
     uptime: str
@@ -104,10 +104,11 @@ class ProxmoxAPI:
 class FolderMonitor:
     def __init__(self, config: Config):
         self.config = config
-        self.get_folder_size_timeout = self.config.GET_FOLDER_SIZE_TIMEOUT
-        self.previous_sizes = {}  # 각 서브폴더별 이전 크기를 저장
+        self.previous_mtimes = {}  # 각 서브폴더별 이전 수정 시간을 저장
         self.active_shares = set()  # 현재 활성화된 SMB 공유 목록
-        self._update_subfolder_sizes()
+        self.last_modified_folder = "-"
+        self.last_modified_time = "-"
+        self._update_subfolder_mtimes()
         self._ensure_smb_installed()
         self._init_smb_config()
 
@@ -263,66 +264,54 @@ class FolderMonitor:
             logging.error(f"서브폴더 목록 가져오기 실패: {e}")
             return []
 
-    def _get_folder_size(self, path: str) -> int:
-        """지정된 경로의 폴더 크기를 반환"""
+    def _get_folder_mtime(self, path: str) -> float:
+        """지정된 경로의 폴더 수정 시간을 반환"""
         try:
-            cmd = f"du -sb {path} 2>/dev/null | cut -f1"
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=self.get_folder_size_timeout
-            )
-            
-            if result.returncode != 0:
-                logging.error(f"폴더 용량 확인 명령어 실행 실패: {result.stderr}")
-                return self.previous_sizes.get(path, 0)
-                
-            output = result.stdout.strip()
-            if not output:
-                logging.debug(f"폴더를 찾지 못했습니다: {path}")
-                return 0
-                
-            size = int(output)
-            logging.debug(f"현재 폴더 용량 ({path}): {format_size(size)}")
-            return size
-        except subprocess.TimeoutExpired:
-            logging.error(f"폴더 용량 확인 시간 초과 ({path}). NAS가 살아있나요?")
-            return self.previous_sizes.get(path, 0)
+            return os.path.getmtime(path)
         except Exception as e:
-            logging.error(f"폴더 용량 확인 중 오류 발생 ({path}): {e}")
-            return self.previous_sizes.get(path, 0)
+            logging.error(f"폴더 수정 시간 확인 중 오류 발생 ({path}): {e}")
+            return self.previous_mtimes.get(path, 0)
 
-    def _update_subfolder_sizes(self) -> None:
-        """모든 서브폴더의 크기를 업데이트"""
+    def _update_subfolder_mtimes(self) -> None:
+        """모든 서브폴더의 수정 시간을 업데이트"""
         subfolders = self._get_subfolders()
         for subfolder in subfolders:
             full_path = os.path.join(self.config.MOUNT_PATH, subfolder)
-            if full_path not in self.previous_sizes:
-                self.previous_sizes[full_path] = self._get_folder_size(full_path)
+            if full_path not in self.previous_mtimes:
+                self.previous_mtimes[full_path] = self._get_folder_mtime(full_path)
 
     def check_size_changes(self) -> list[str]:
-        """크기가 변경된 서브폴더 목록을 반환"""
+        """수정 시간이 변경된 서브폴더 목록을 반환"""
         changed_folders = []
-        self._update_subfolder_sizes()
+        self._update_subfolder_mtimes()
         
-        for path, prev_size in self.previous_sizes.items():
-            current_size = self._get_folder_size(path)
-            if current_size != prev_size:
-                size_diff = current_size - prev_size
-                if size_diff > 0:
-                    subfolder = os.path.basename(path)
-                    logging.info(f"폴더 용량 변화 감지 ({subfolder}): {format_size(size_diff)} 증가 (현재: {format_size(current_size)})")
-                    changed_folders.append(subfolder)
-                self.previous_sizes[path] = current_size
+        for path, prev_mtime in self.previous_mtimes.items():
+            current_mtime = self._get_folder_mtime(path)
+            if current_mtime != prev_mtime:
+                subfolder = os.path.basename(path)
+                last_modified = datetime.fromtimestamp(current_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                logging.info(f"폴더 수정 시간 변화 감지 ({subfolder}): {last_modified}")
+                changed_folders.append(subfolder)
+                self.previous_mtimes[path] = current_mtime
+                # 최근 수정 정보 업데이트
+                self.last_modified_folder = subfolder
+                self.last_modified_time = last_modified
         
         return changed_folders
 
     @property
     def total_size(self) -> int:
-        """전체 폴더 크기 반환"""
-        return sum(self.previous_sizes.values())
+        """전체 폴더 크기 반환 (웹 인터페이스 표시용)"""
+        total = 0
+        for path in self.previous_mtimes.keys():
+            try:
+                cmd = f"du -sb {path} 2>/dev/null | cut -f1"
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=self.config.GET_FOLDER_SIZE_TIMEOUT)
+                if result.returncode == 0:
+                    total += int(result.stdout.strip())
+            except Exception as e:
+                logging.error(f"폴더 크기 계산 중 오류 발생 ({path}): {e}")
+        return total
 
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
@@ -372,7 +361,6 @@ class GShareManager:
             current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
             vm_status = "🟢" if self.proxmox_api.is_vm_running() else "🔴"
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
-            folder_size = self.folder_monitor.total_size
             uptime = self.proxmox_api.get_vm_uptime()
             uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
 
@@ -380,8 +368,8 @@ class GShareManager:
                 last_check_time=current_time,
                 vm_status=vm_status,
                 cpu_usage=round(cpu_usage, 2),
-                folder_size=folder_size,
-                folder_size_readable=format_size(folder_size),
+                last_modified_folder=self.folder_monitor.last_modified_folder,
+                last_modified_time=self.folder_monitor.last_modified_time,
                 last_action=self.last_action,
                 low_cpu_count=self.low_cpu_count,
                 uptime=uptime_str,
@@ -401,7 +389,7 @@ class GShareManager:
                 logging.debug("모니터링 루프 시작")
                 
                 try:
-                    logging.debug("폴더 용량 변화 확인 중")
+                    logging.debug("폴더 수정 시간 변화 확인 중")
                     changed_folders = self.folder_monitor.check_size_changes()
                     if changed_folders:
                         self.last_size_change_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
