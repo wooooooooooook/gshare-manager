@@ -32,6 +32,20 @@ class Config:
     ## macrodroid 종료 웹훅 URL
     SHUTDOWN_WEBHOOK_URL: str = os.getenv('SHUTDOWN_WEBHOOK_URL')
     
+    # SMB 설정
+    ## SMB 공유 이름
+    SMB_SHARE_NAME: str = os.getenv('SMB_SHARE_NAME', 'gshare')
+    ## SMB 사용자 이름
+    SMB_USERNAME: str = os.getenv('SMB_USERNAME')
+    ## SMB 비밀번호
+    SMB_PASSWORD: str = os.getenv('SMB_PASSWORD')
+    ## SMB 설명
+    SMB_COMMENT: str = os.getenv('SMB_COMMENT', 'GShare Folder')
+    ## SMB 게스트 허용 여부
+    SMB_GUEST_OK: bool = os.getenv('SMB_GUEST_OK', 'yes').lower() == 'yes'
+    ## SMB 읽기 전용 여부
+    SMB_READ_ONLY: bool = os.getenv('SMB_READ_ONLY', 'no').lower() == 'yes'
+    
     # 로그 시간대
     TIMEZONE: str = "Asia/Seoul"
 
@@ -40,7 +54,9 @@ class Config:
             'PROXMOX_HOST': self.PROXMOX_HOST,
             'TOKEN_ID': self.TOKEN_ID,
             'SECRET': self.SECRET,
-            'SHUTDOWN_WEBHOOK_URL': self.SHUTDOWN_WEBHOOK_URL
+            'SHUTDOWN_WEBHOOK_URL': self.SHUTDOWN_WEBHOOK_URL,
+            'SMB_USERNAME': self.SMB_USERNAME,
+            'SMB_PASSWORD': self.SMB_PASSWORD
         }
         
         missing_vars = [var for var, value in required_env_vars.items() if not value]

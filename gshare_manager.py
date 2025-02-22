@@ -9,8 +9,16 @@ from datetime import datetime
 import pytz
 import json
 from config import Config  # 새로운 import 추가
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 import os
+from flask import Flask, jsonify, render_template
+import threading
+
+app = Flask(__name__)
+
+# 전역 변수로 상태와 관리자 객체 선언
+current_state = None
+gshare_manager = None
 
 @dataclass
 class State:
@@ -25,8 +33,8 @@ class State:
     last_size_change_time: str
     last_shutdown_time: str
     
-    def to_json(self):
-        return json.dumps(asdict(self), ensure_ascii=False, indent=2)
+    def to_dict(self):
+        return asdict(self)
 
 class ProxmoxAPI:
     def __init__(self, config: Config):
@@ -97,31 +105,168 @@ class FolderMonitor:
     def __init__(self, config: Config):
         self.config = config
         self.get_folder_size_timeout = self.config.GET_FOLDER_SIZE_TIMEOUT
-        self.previous_size = self._load_previous_size()
-        if self.previous_size == 0:  # 파일에서 불러오기 실패시 현재 용량으로 초기화
-            self.previous_size = self._get_folder_size()
+        self.previous_sizes = {}  # 각 서브폴더별 이전 크기를 저장
+        self.active_shares = set()  # 현재 활성화된 SMB 공유 목록
+        self._update_subfolder_sizes()
+        self._ensure_smb_installed()
+        self._init_smb_config()
 
-    def _load_previous_size(self) -> int:
+    def _ensure_smb_installed(self):
+        """Samba가 설치되어 있는지 확인하고 설치"""
         try:
-            with open('current_state.json', 'r', encoding='utf-8') as f:
-                state = json.loads(f.read())
-                size = state.get('folder_size', 0)
-                logging.info(f"이전 상태 파일에서 폴더 용량 불러옴: {format_size(size)}")
-                return size
-        except FileNotFoundError:
-            logging.info("이전 상태 파일이 없습니다.")
-            return 0
-        except json.JSONDecodeError:
-            logging.error("상태 파일 파싱 실패")
-            return 0
+            subprocess.run(['which', 'smbd'], check=True, capture_output=True)
+        except subprocess.CalledProcessError:
+            logging.info("Samba가 설치되어 있지 않습니다. 설치를 시도합니다.")
+            try:
+                subprocess.run(['sudo', 'apt-get', 'update'], check=True)
+                subprocess.run(['sudo', 'apt-get', 'install', '-y', 'samba'], check=True)
+                logging.info("Samba 설치 완료")
+            except subprocess.CalledProcessError as e:
+                logging.error(f"Samba 설치 실패: {e}")
+                raise
+
+    def _init_smb_config(self):
+        """기본 SMB 설정 초기화"""
+        try:
+            # smb.conf 파일 백업
+            if not os.path.exists('/etc/samba/smb.conf.backup'):
+                subprocess.run(['sudo', 'cp', '/etc/samba/smb.conf', '/etc/samba/smb.conf.backup'], check=True)
+
+            # 기본 설정 생성
+            base_config = """[global]
+   workgroup = WORKGROUP
+   server string = Samba Server
+   server role = standalone server
+   log file = /var/log/samba/log.%m
+   max log size = 50
+   dns proxy = no
+   # SMB1 설정
+   server min protocol = NT1
+   server max protocol = NT1
+"""
+            # 기본 설정 저장
+            with open('/etc/samba/smb.conf', 'w') as f:
+                f.write(base_config)
+
+            # Samba 사용자 추가
+            try:
+                subprocess.run(['sudo', 'smbpasswd', '-a', self.config.SMB_USERNAME],
+                             input=f"{self.config.SMB_PASSWORD}\n{self.config.SMB_PASSWORD}\n".encode(),
+                             capture_output=True)
+            except subprocess.CalledProcessError:
+                pass  # 사용자가 이미 존재하는 경우 무시
+
+            logging.info("SMB 기본 설정 초기화 완료")
         except Exception as e:
-            logging.error(f"이전 상태 불러오기 실패: {e}")
-            return 0
+            logging.error(f"SMB 기본 설정 초기화 실패: {e}")
+            raise
 
-    def _get_folder_size(self) -> int:
+    def _activate_smb_share(self, subfolder: str) -> bool:
+        """특정 서브폴더의 SMB 공유를 활성화"""
         try:
-            # 전체 폴더 용량 확인
-            cmd = f"du -sb {self.config.MOUNT_PATH} 2>/dev/null | cut -f1"
+            if subfolder in self.active_shares:
+                return True
+
+            source_path = os.path.join(self.config.MOUNT_PATH, subfolder)
+            share_name = f"{self.config.SMB_SHARE_NAME}_{subfolder}"
+            
+            # 공유 설정 생성
+            share_config = f"""
+[{share_name}]
+   path = {source_path}
+   comment = {self.config.SMB_COMMENT} - {subfolder}
+   browseable = yes
+   guest ok = {'yes' if self.config.SMB_GUEST_OK else 'no'}
+   read only = {'yes' if self.config.SMB_READ_ONLY else 'no'}
+   create mask = 0777
+   directory mask = 0777
+   force user = {self.config.SMB_USERNAME}
+"""
+            # 설정 추가
+            with open('/etc/samba/smb.conf', 'a') as f:
+                f.write(share_config)
+            
+            # Samba 서비스 재시작
+            subprocess.run(['sudo', 'systemctl', 'restart', 'smbd'], check=True)
+            subprocess.run(['sudo', 'systemctl', 'restart', 'nmbd'], check=True)
+            
+            self.active_shares.add(subfolder)
+            logging.info(f"SMB 공유 활성화 성공: {subfolder}")
+            return True
+        except Exception as e:
+            logging.error(f"SMB 공유 활성화 실패 ({subfolder}): {e}")
+            return False
+
+    def _deactivate_smb_share(self, subfolder: str = None) -> bool:
+        """SMB 공유를 비활성화. subfolder가 None이면 모든 공유 비활성화"""
+        try:
+            if subfolder is not None and subfolder not in self.active_shares:
+                return True
+
+            # smb.conf 파일 읽기
+            with open('/etc/samba/smb.conf', 'r') as f:
+                lines = f.readlines()
+
+            # 기본 설정만 유지
+            if subfolder is None:
+                # [global] 섹션까지만 유지
+                new_lines = []
+                for line in lines:
+                    if line.strip().startswith('[') and not line.strip() == '[global]':
+                        break
+                    new_lines.append(line)
+                lines = new_lines
+                self.active_shares.clear()
+            else:
+                # 특정 공유 설정만 제거
+                share_name = f"{self.config.SMB_SHARE_NAME}_{subfolder}"
+                new_lines = []
+                skip = False
+                for line in lines:
+                    if line.strip() == f'[{share_name}]':
+                        skip = True
+                        continue
+                    if skip and line.strip().startswith('['):
+                        skip = False
+                    if not skip:
+                        new_lines.append(line)
+                lines = new_lines
+                self.active_shares.discard(subfolder)
+
+            # 설정 파일 저장
+            with open('/etc/samba/smb.conf', 'w') as f:
+                f.writelines(lines)
+
+            # Samba 서비스 재시작
+            subprocess.run(['sudo', 'systemctl', 'restart', 'smbd'], check=True)
+            subprocess.run(['sudo', 'systemctl', 'restart', 'nmbd'], check=True)
+
+            if subfolder is None:
+                logging.info("모든 SMB 공유 비활성화 완료")
+            else:
+                logging.info(f"SMB 공유 비활성화 완료: {subfolder}")
+            return True
+        except Exception as e:
+            logging.error(f"SMB 공유 비활성화 실패: {e}")
+            return False
+
+    def _get_subfolders(self) -> list[str]:
+        """마운트 경로의 서브폴더 목록을 반환"""
+        try:
+            subfolders = []
+            for item in os.listdir(self.config.MOUNT_PATH):
+                full_path = os.path.join(self.config.MOUNT_PATH, item)
+                if os.path.isdir(full_path):
+                    subfolders.append(item)
+            return subfolders
+        except Exception as e:
+            logging.error(f"서브폴더 목록 가져오기 실패: {e}")
+            return []
+
+    def _get_folder_size(self, path: str) -> int:
+        """지정된 경로의 폴더 크기를 반환"""
+        try:
+            cmd = f"du -sb {path} 2>/dev/null | cut -f1"
             result = subprocess.run(
                 cmd,
                 shell=True,
@@ -132,39 +277,52 @@ class FolderMonitor:
             
             if result.returncode != 0:
                 logging.error(f"폴더 용량 확인 명령어 실행 실패: {result.stderr}")
-                return self.previous_size
+                return self.previous_sizes.get(path, 0)
                 
             output = result.stdout.strip()
             if not output:
-                logging.debug("폴더를 찾지 못했습니다.")
+                logging.debug(f"폴더를 찾지 못했습니다: {path}")
                 return 0
                 
             size = int(output)
-            logging.debug(f"현재 폴더 전체 용량: {format_size(size)}")
-            if size < 1024 * 1024:
-                subprocess.run(['mount', config.MOUNT_PATH], check=True)
-                logging.warning(f"폴더 용량이 1MB 미만입니다. 마운트를 재시도합니다. 이 메시지가 지속적으로 표시된다면 {config.MOUNT_PATH} 경로에 감시 폴더가 정상적으로 마운트되어 있는지 확인하세요.")
+            logging.debug(f"현재 폴더 용량 ({path}): {format_size(size)}")
             return size
         except subprocess.TimeoutExpired:
-            logging.error("폴더 용량 확인 시간 초과. NAS가 살아있나요?")
-            return self.previous_size
-        except (subprocess.SubprocessError, ValueError) as e:
-            logging.error(f"폴더 용량 확인 중 오류 발생: {e}")
-            return self.previous_size
+            logging.error(f"폴더 용량 확인 시간 초과 ({path}). NAS가 살아있나요?")
+            return self.previous_sizes.get(path, 0)
         except Exception as e:
-            logging.error(f"폴더 용량 확인 중 예상치 못한 오류: {e}")
-            return self.previous_size
+            logging.error(f"폴더 용량 확인 중 오류 발생 ({path}): {e}")
+            return self.previous_sizes.get(path, 0)
 
-    def has_size_changed(self) -> bool:
-        current_size = self._get_folder_size()
-        if current_size != self.previous_size:
-            size_diff = current_size - self.previous_size
-            if size_diff > 0:
-                logging.info(f"폴더 용량 변화: {format_size(size_diff)} (현재: {format_size(current_size)})")
-            self.previous_size = current_size
-            return True
-        logging.debug("폴더 용량 변화 없음")
-        return False
+    def _update_subfolder_sizes(self) -> None:
+        """모든 서브폴더의 크기를 업데이트"""
+        subfolders = self._get_subfolders()
+        for subfolder in subfolders:
+            full_path = os.path.join(self.config.MOUNT_PATH, subfolder)
+            if full_path not in self.previous_sizes:
+                self.previous_sizes[full_path] = self._get_folder_size(full_path)
+
+    def check_size_changes(self) -> list[str]:
+        """크기가 변경된 서브폴더 목록을 반환"""
+        changed_folders = []
+        self._update_subfolder_sizes()
+        
+        for path, prev_size in self.previous_sizes.items():
+            current_size = self._get_folder_size(path)
+            if current_size != prev_size:
+                size_diff = current_size - prev_size
+                if size_diff > 0:
+                    subfolder = os.path.basename(path)
+                    logging.info(f"폴더 용량 변화 감지 ({subfolder}): {format_size(size_diff)} 증가 (현재: {format_size(current_size)})")
+                    changed_folders.append(subfolder)
+                self.previous_sizes[path] = current_size
+        
+        return changed_folders
+
+    @property
+    def total_size(self) -> int:
+        """전체 폴더 크기 반환"""
+        return sum(self.previous_sizes.values())
 
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
@@ -198,6 +356,10 @@ class GShareManager:
                 uptime = self.proxmox_api.get_vm_uptime()
                 uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
                 self.last_shutdown_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
+                
+                # VM 종료 시 모든 SMB 공유 비활성화
+                self.folder_monitor._deactivate_smb_share()
+                
                 logging.info(f"종료 웹훅 전송 성공, 업타임: {uptime_str}")
             except Exception as e:
                 logging.error(f"종료 웹훅 전송 실패: {e}")
@@ -206,14 +368,15 @@ class GShareManager:
 
     def _update_state(self) -> None:
         try:
+            global current_state
             current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
             vm_status = "🟢" if self.proxmox_api.is_vm_running() else "🔴"
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
-            folder_size = self.folder_monitor.previous_size
+            folder_size = self.folder_monitor.total_size
             uptime = self.proxmox_api.get_vm_uptime()
             uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
 
-            state = State(
+            current_state = State(
                 last_check_time=current_time,
                 vm_status=vm_status,
                 cpu_usage=round(cpu_usage, 2),
@@ -225,10 +388,7 @@ class GShareManager:
                 last_size_change_time=self.last_size_change_time,
                 last_shutdown_time=self.last_shutdown_time
             )
-
-            with open('current_state.json', 'w', encoding='utf-8') as f:
-                f.write(state.to_json())
-            logging.debug(f"상태 업데이트: {state.to_json()}")
+            logging.debug(f"상태 업데이트: {current_state.to_dict()}")
         except Exception as e:
             logging.error(f"상태 업데이트 실패: {e}")
 
@@ -242,9 +402,16 @@ class GShareManager:
                 
                 try:
                     logging.debug("폴더 용량 변화 확인 중")
-                    if self.folder_monitor.has_size_changed():
+                    changed_folders = self.folder_monitor.check_size_changes()
+                    if changed_folders:
                         self.last_size_change_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
-                        logging.info(f"VM 시작을 시도합니다: {self.last_size_change_time}")
+                        
+                        # 변경된 폴더들의 SMB 공유 활성화
+                        for folder in changed_folders:
+                            if self.folder_monitor._activate_smb_share(folder):
+                                self.last_action = f"SMB 공유 활성화: {folder}"
+                        
+                        # VM이 정지 상태인 경우 시작
                         if not self.proxmox_api.is_vm_running():
                             self.last_action = "VM 시작"
                             if self.proxmox_api.start_vm():
@@ -327,6 +494,181 @@ def format_size(size_in_bytes: int) -> str:
         size_in_bytes /= 1024.0
     return f"{size_in_bytes:.2f} PB"
 
+def get_time_ago(timestamp_str):
+    try:
+        seoul_tz = pytz.timezone('Asia/Seoul')
+        last_check = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+        last_check = seoul_tz.localize(last_check)
+        now = datetime.now(seoul_tz)
+        
+        diff = now - last_check
+        seconds = diff.total_seconds()
+        
+        time_ago = ""
+        if seconds < 150:
+            time_ago = f"{int(seconds)}초 전"
+        elif seconds < 3600:  # 1시간
+            time_ago = f"{int(seconds / 60)}분 전"
+        elif seconds < 86400:  # 1일
+            time_ago = f"{int(seconds / 3600)}시간 전"
+        else:
+            time_ago = f"{int(seconds / 86400)}일 전"
+            
+        return time_ago
+    except:
+        return timestamp_str
+
+@app.route('/')
+def show_log():
+    log_content = ""
+    if os.path.exists('gshare_manager.log'):
+        with open('gshare_manager.log', 'r') as file:
+            log_content = file.read()
+    else:
+        return "Log file not found.", 404
+
+    if current_state is None:
+        return "State not initialized.", 404
+
+    return render_template('index.html', 
+                         state=current_state.to_dict(), 
+                         log_content=log_content, 
+                         get_time_ago=get_time_ago)
+
+@app.route('/update_state')
+def update_state():
+    if current_state is None:
+        return jsonify({"error": "State not initialized."}), 404
+    return jsonify(current_state.to_dict())
+
+@app.route('/update_log')
+def update_log():
+    if os.path.exists('gshare_manager.log'):
+        with open('gshare_manager.log', 'r') as file:
+            log_content = file.read()
+            return log_content
+    else:
+        return "Log file not found.", 404
+
+@app.route('/restart_service')
+def restart_service():
+    try:
+        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager.service'], check=True)
+        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager_log_server.service'], check=True)
+        return jsonify({"status": "success", "message": "서비스가 재시작되었습니다."})
+    except subprocess.CalledProcessError as e:
+        return jsonify({"status": "error", "message": f"서비스 재시작 실패: {str(e)}"}), 500
+
+@app.route('/retry_mount')
+def retry_mount():
+    try:
+        subprocess.run(['sudo', 'mount', config.MOUNT_PATH], check=True)
+        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager.service'], check=True)
+        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager_log_server.service'], check=True)
+        return jsonify({"status": "success", "message": "마운트 재시도 및 서비스를 재시작했습니다."})
+    except subprocess.CalledProcessError as e:
+        return jsonify({"status": "error", "message": f"마운트 재시도 실패: {str(e)}"}), 500
+
+@app.route('/clear_log')
+def clear_log():
+    try:
+        open('gshare_manager.log', 'w').close()
+        return jsonify({"status": "success", "message": "로그가 성공적으로 삭제되었습니다."})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"로그 삭제 실패: {str(e)}"}), 500
+
+@app.route('/trim_log/<int:lines>')
+def trim_log(lines):
+    try:
+        with open('gshare_manager.log', 'r') as file:
+            log_lines = file.readlines()
+        
+        trimmed_lines = log_lines[-lines:] if len(log_lines) > lines else log_lines
+        
+        with open('gshare_manager.log', 'w') as file:
+            file.writelines(trimmed_lines)
+            
+        return jsonify({
+            "status": "success", 
+            "message": f"로그가 마지막 {lines}줄만 남도록 정리되었습니다.",
+            "total_lines": len(trimmed_lines)
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"로그 정리 실패: {str(e)}"}), 500
+
+@app.route('/set_log_level/<string:level>')
+def set_log_level(level):
+    try:
+        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        
+        if level.upper() not in valid_levels:
+            return jsonify({
+                "status": "error",
+                "message": f"유효하지 않은 로그 레벨입니다. 가능한 레벨: {', '.join(valid_levels)}"
+            }), 400
+
+        set_key('.env', 'LOG_LEVEL', level.upper())
+        
+        return jsonify({
+            "status": "success",
+            "message": f"로그 레벨이 {level.upper()}로 변경되었습니다. 최대 {Config().CHECK_INTERVAL}초 후 다음 모니터링 루프에서 적용됩니다."
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"로그 레벨 변경 실패: {str(e)}"
+        }), 500
+
+@app.route('/get_log_level')
+def get_log_level():
+    try:
+        load_dotenv()
+        level = os.getenv('LOG_LEVEL', 'INFO')
+            
+        return jsonify({
+            "status": "success",
+            "current_level": level
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"로그 레벨 확인 실패: {str(e)}"
+        }), 500
+
+@app.route('/start_vm')
+def start_vm():
+    try:
+        if current_state is None:
+            return jsonify({"status": "error", "message": "State not initialized."}), 404
+
+        if current_state.vm_status == '🟢':
+            return jsonify({"status": "error", "message": "VM이 이미 실행 중입니다."}), 400
+
+        if gshare_manager.proxmox_api.start_vm():
+            return jsonify({"status": "success", "message": "VM 시작이 요청되었습니다."})
+        else:
+            return jsonify({"status": "error", "message": "VM 시작 실패"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"VM 시작 요청 실패: {str(e)}"}), 500
+
+@app.route('/shutdown_vm')
+def shutdown_vm():
+    try:
+        if current_state is None:
+            return jsonify({"status": "error", "message": "State not initialized."}), 404
+
+        if current_state.vm_status == '🔴':
+            return jsonify({"status": "error", "message": "VM이 이미 종료되어 있습니다."}), 400
+        
+        response = requests.post(config.SHUTDOWN_WEBHOOK_URL, timeout=5)
+        response.raise_for_status()
+        return jsonify({"status": "success", "message": "VM 종료가 요청되었습니다."})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"VM 종료 요청 실패: {str(e)}"}), 500
+
+def run_flask_app():
+    app.run(host='0.0.0.0', port=5000)
+
 if __name__ == '__main__':
     logger = setup_logging()
     config = Config()
@@ -336,8 +678,15 @@ if __name__ == '__main__':
         proxmox_api = ProxmoxAPI(config)
         gshare_manager = GShareManager(config, proxmox_api)
         logging.info(f"VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}")
-        logging.info(f"폴더 용량 - {format_size(gshare_manager.folder_monitor.previous_size)}")
+        logging.info(f"폴더 용량 - {format_size(gshare_manager.folder_monitor.total_size)}")
         logging.info("GShare 관리 시작")
+        
+        # Flask 웹 서버를 별도 스레드에서 실행
+        flask_thread = threading.Thread(target=run_flask_app)
+        flask_thread.daemon = True  # 메인 프로그램이 종료되면 웹 서버도 종료
+        flask_thread.start()
+        
+        # 메인 모니터링 루프 실행
         gshare_manager.monitor()
     except KeyboardInterrupt:
         logging.info("프로그램 종료")
