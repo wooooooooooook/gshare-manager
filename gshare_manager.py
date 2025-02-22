@@ -117,9 +117,31 @@ class FolderMonitor:
         self.active_shares = set()  # 현재 활성화된 SMB 공유 목록
         self.last_modified_folder = "-"
         self.last_modified_time = "-"
+        self.last_vm_start_time = self._load_last_vm_start_time()  # VM 마지막 시작 시간
         self._update_subfolder_mtimes()
         self._ensure_smb_installed()
         self._init_smb_config()
+
+    def _load_last_vm_start_time(self) -> float:
+        """VM 마지막 시작 시간을 로드"""
+        try:
+            if os.path.exists('last_vm_start.txt'):
+                with open('last_vm_start.txt', 'r') as f:
+                    return float(f.read().strip())
+        except Exception as e:
+            logging.error(f"VM 마지막 시작 시간 로드 실패: {e}")
+        return 0
+
+    def _save_last_vm_start_time(self) -> None:
+        """현재 시간을 VM 마지막 시작 시간으로 저장"""
+        try:
+            current_time = time.time()
+            with open('last_vm_start.txt', 'w') as f:
+                f.write(str(current_time))
+            self.last_vm_start_time = current_time
+            logging.info(f"VM 시작 시간 저장됨: {datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')}")
+        except Exception as e:
+            logging.error(f"VM 시작 시간 저장 실패: {e}")
 
     def _ensure_smb_installed(self):
         """Samba가 설치되어 있는지 확인하고 설치"""
@@ -183,6 +205,9 @@ class FolderMonitor:
             
             try:
                 for root, dirs, _ in os.walk(self.config.MOUNT_PATH, followlinks=True):
+                    # @로 시작하는 폴더 제외
+                    dirs[:] = [d for d in dirs if not d.startswith('@')]
+                    
                     for dir_name in dirs:
                         try:
                             full_path = os.path.join(root, dir_name)
@@ -227,9 +252,10 @@ class FolderMonitor:
             if subfolder not in self.previous_mtimes:
                 self.previous_mtimes[subfolder] = self._get_folder_mtime(subfolder)
 
-    def check_modifications(self) -> list[str]:
-        """수정 시간이 변경된 서브폴더 목록을 반환"""
+    def check_modifications(self) -> tuple[list[str], bool]:
+        """수정 시간이 변경된 서브폴더 목록과 VM 시작 필요 여부를 반환"""
         changed_folders = []
+        should_start_vm = False
         self._update_subfolder_mtimes()
         
         for path, prev_mtime in self.previous_mtimes.items():
@@ -241,8 +267,17 @@ class FolderMonitor:
                 self.previous_mtimes[path] = current_mtime
                 self.last_modified_folder = path
                 self.last_modified_time = last_modified
+                
+                # VM 마지막 시작 시간보다 수정 시간이 더 최근인 경우
+                if current_mtime > self.last_vm_start_time:
+                    should_start_vm = True
+                    logging.info(f"VM 시작 조건 충족 - 수정 시간: {last_modified}")
         
-        return changed_folders
+        return changed_folders, should_start_vm
+
+    def update_vm_start_time(self) -> None:
+        """VM이 시작될 때 호출하여 시작 시간을 업데이트"""
+        self._save_last_vm_start_time()
 
     @property
     def total_size(self) -> int:
@@ -430,18 +465,19 @@ class GShareManager:
                 
                 try:
                     logging.debug("폴더 수정 시간 변화 확인 중")
-                    changed_folders = self.folder_monitor.check_modifications()
+                    changed_folders, should_start_vm = self.folder_monitor.check_modifications()
                     if changed_folders:
                         # 변경된 폴더들의 SMB 공유 활성화
                         for folder in changed_folders:
                             if self.folder_monitor._activate_smb_share(folder):
                                 self.last_action = f"SMB 공유 활성화: {folder}"
                         
-                        # VM이 정지 상태인 경우 시작
-                        if not self.proxmox_api.is_vm_running():
+                        # VM이 정지 상태이고 최근 수정된 파일이 있는 경우에만 시작
+                        if not self.proxmox_api.is_vm_running() and should_start_vm:
                             self.last_action = "VM 시작"
                             if self.proxmox_api.start_vm():
                                 logging.info("VM 시작 성공")
+                                self.folder_monitor.update_vm_start_time()
                             else:
                                 logging.error("VM 시작 실패")
                 except Exception as e:
