@@ -123,13 +123,27 @@ class FolderMonitor:
         self.links_dir = "/mnt/gshare_links"
         self._ensure_links_directory()
         
+        # 시작 시 기존 심볼릭 링크 모두 제거
+        try:
+            if os.path.exists(self.links_dir):
+                for filename in os.listdir(self.links_dir):
+                    file_path = os.path.join(self.links_dir, filename)
+                    if os.path.islink(file_path):
+                        try:
+                            os.remove(file_path)
+                            logging.debug(f"기존 심볼릭 링크 제거: {file_path}")
+                        except Exception as e:
+                            logging.error(f"심볼릭 링크 제거 실패 ({file_path}): {e}")
+        except Exception as e:
+            logging.error(f"기존 심볼릭 링크 제거 중 오류 발생: {e}")
+        
         self._update_subfolder_mtimes()
         self._ensure_smb_installed()
         self._init_smb_config()
         
         # NFS 마운트 경로의 UID/GID 확인
         self.nfs_uid, self.nfs_gid = self._get_nfs_ownership()
-        logging.info(f"NFS 마운트 경로의 UID/GID: {self.nfs_uid}/{self.nfs_gid}")
+        logging.debug(f"NFS 마운트 경로의 UID/GID: {self.nfs_uid}/{self.nfs_gid}")
         
         # SMB 사용자의 UID/GID 설정
         self._set_smb_user_ownership()
@@ -378,7 +392,7 @@ class FolderMonitor:
             try:
                 # 그룹 존재 여부 확인
                 subprocess.run(['getent', 'group', self.config.SMB_USERNAME], check=True, capture_output=True)
-                logging.info(f"그룹 '{self.config.SMB_USERNAME}' 이미 존재함")
+                # logging.info(f"그룹 '{self.config.SMB_USERNAME}' 이미 존재함")
             except subprocess.CalledProcessError:
                 # 그룹이 없으면 생성
                 logging.info(f"그룹 '{self.config.SMB_USERNAME}' 생성 시도...")
@@ -388,7 +402,7 @@ class FolderMonitor:
             try:
                 # 사용자 존재 여부 확인
                 subprocess.run(['id', self.config.SMB_USERNAME], check=True, capture_output=True)
-                logging.info(f"사용자 '{self.config.SMB_USERNAME}' 이미 존재함")
+                # logging.info(f"사용자 '{self.config.SMB_USERNAME}' 이미 존재함")
             except subprocess.CalledProcessError:
                 # 사용자가 없으면 생성
                 logging.info(f"사용자 '{self.config.SMB_USERNAME}' 생성 시도...")
@@ -694,7 +708,7 @@ class FolderMonitor:
             return True
         except Exception as e:
             logging.error(f"SMB 공유 비활성화 실패: {e}")
-            return False
+        return False
 
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
