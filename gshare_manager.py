@@ -785,9 +785,8 @@ class GShareManager:
                     changed_folders, should_start_vm = self.folder_monitor.check_modifications()
                     if changed_folders:
                         # 변경된 폴더들의 SMB 공유 활성화
-                        for folder in changed_folders:
-                            if self.folder_monitor._activate_smb_share(folder):
-                                self.last_action = f"SMB 공유 활성화: {folder}"
+                        if self.folder_monitor._activate_smb_share():
+                            self.last_action = f"SMB 공유 활성화: {', '.join(changed_folders)}"
                         
                         # VM이 정지 상태이고 최근 수정된 파일이 있는 경우에만 시작
                         if not self.proxmox_api.is_vm_running() and should_start_vm:
@@ -1061,7 +1060,7 @@ def toggle_mount(folder):
                 return jsonify({"status": "error", "message": f"{folder} 마운트 해제 실패"}), 500
         else:
             # 마운트
-            if gshare_manager.folder_monitor._activate_smb_share(folder):
+            if gshare_manager.folder_monitor._create_symlink(folder) and gshare_manager.folder_monitor._activate_smb_share():
                 return jsonify({"status": "success", "message": f"{folder} 마운트가 활성화되었습니다."})
             else:
                 return jsonify({"status": "error", "message": f"{folder} 마운트 활성화 실패"}), 500
