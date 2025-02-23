@@ -199,6 +199,11 @@ class FolderMonitor:
    # SMB1 설정
    server min protocol = NT1
    server max protocol = NT1
+   # 심볼릭 링크 설정
+   follow symlinks = yes
+   wide links = yes
+   unix extensions = no
+   allow insecure wide links = yes
 """
             # 기본 설정 저장
             with open('/etc/samba/smb.conf', 'w') as f:
@@ -420,6 +425,11 @@ class FolderMonitor:
             
             # 심볼릭 링크 생성
             os.symlink(source_path, link_path)
+            
+            # 링크 및 대상 디렉토리 권한 설정
+            subprocess.run(['sudo', 'chmod', '755', link_path], check=True)
+            subprocess.run(['sudo', 'chown', '-h', f"{self.config.SMB_USERNAME}:{self.config.SMB_USERNAME}", link_path], check=True)
+            
             self.active_links.add(subfolder)
             logging.info(f"심볼릭 링크 생성됨: {link_path} -> {source_path}")
             return True
@@ -476,12 +486,16 @@ class FolderMonitor:
    browseable = yes
    guest ok = {'yes' if self.config.SMB_GUEST_OK else 'no'}
    read only = yes
-   create mask = 0555
-   directory mask = 0555
+   create mask = 0644
+   directory mask = 0755
    force user = {self.config.SMB_USERNAME}
+   force group = {self.config.SMB_USERNAME}
    veto files = /@*
    hide dot files = yes
    delete veto files = no
+   follow symlinks = yes
+   wide links = yes
+   unix extensions = no
 """
             # 설정 파일 읽기
             with open('/etc/samba/smb.conf', 'r') as f:
