@@ -140,8 +140,16 @@ window.onload = function () {
                 // 감시 중인 폴더 목록 업데이트
                 const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
                 if (monitoredFoldersContainer) {
+                    // 폴더 정보를 배열로 변환하고 수정 시간 기준으로 정렬
+                    const sortedFolders = Object.entries(data.monitored_folders)
+                        .sort((a, b) => {
+                            const timeA = new Date(a[1].mtime);
+                            const timeB = new Date(b[1].mtime);
+                            return timeB - timeA; // 최신순 정렬
+                        });
+
                     let foldersHtml = '';
-                    for (const [folder, info] of Object.entries(data.monitored_folders)) {
+                    for (const [folder, info] of sortedFolders) {
                         foldersHtml += `
                             <div class="flex justify-between items-center bg-white rounded p-2 border border-gray-100">
                                 <div class="flex flex-col">
@@ -402,8 +410,16 @@ function toggleMount(folder) {
                         // 감시 중인 폴더 목록 업데이트
                         const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
                         if (monitoredFoldersContainer) {
+                            // 폴더 정보를 배열로 변환하고 수정 시간 기준으로 정렬
+                            const sortedFolders = Object.entries(data.monitored_folders)
+                                .sort((a, b) => {
+                                    const timeA = new Date(a[1].mtime);
+                                    const timeB = new Date(b[1].mtime);
+                                    return timeB - timeA; // 최신순 정렬
+                                });
+
                             let foldersHtml = '';
-                            for (const [folder, info] of Object.entries(data.monitored_folders)) {
+                            for (const [folder, info] of sortedFolders) {
                                 foldersHtml += `
                                     <div class="flex justify-between items-center bg-white rounded p-2 border border-gray-100">
                                         <div class="flex flex-col">
