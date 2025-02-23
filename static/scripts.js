@@ -151,10 +151,16 @@ window.onload = function () {
                     let foldersHtml = '';
                     for (const [folder, info] of sortedFolders) {
                         foldersHtml += `
-                            <div class="flex justify-between items-center bg-white rounded p-2 border border-gray-100">
-                                <div class="flex flex-col">
-                                    <span class="text-sm text-gray-700">${folder}</span>
-                                    <span class="text-xs text-gray-500">${get_time_ago(info.mtime)}</span>
+                            <div class="flex justify-between items-center bg-white rounded p-2 border ${info.is_mounted ? 'border-green-200' : 'border-red-200'} hover:bg-gray-50 transition-colors duration-200">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full ${info.is_mounted ? 'bg-green-500' : 'bg-red-500'}"></span>
+                                    <div class="flex flex-col">
+                                        <span class="text-sm text-gray-700">${folder}</span>
+                                        <span class="text-xs text-gray-500 toggle-text">
+                                            <span class="readable-time">${get_time_ago(info.mtime)}</span>
+                                            <span class="time-string hidden">${info.mtime}</span>
+                                        </span>
+                                    </div>
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <span class="text-xs ${info.is_mounted ? 'text-green-600' : 'text-red-600'}">
@@ -421,10 +427,16 @@ function toggleMount(folder) {
                             let foldersHtml = '';
                             for (const [folder, info] of sortedFolders) {
                                 foldersHtml += `
-                                    <div class="flex justify-between items-center bg-white rounded p-2 border border-gray-100">
-                                        <div class="flex flex-col">
-                                            <span class="text-sm text-gray-700">${folder}</span>
-                                            <span class="text-xs text-gray-500">${get_time_ago(info.mtime)}</span>
+                                    <div class="flex justify-between items-center bg-white rounded p-2 border ${info.is_mounted ? 'border-green-200' : 'border-red-200'} hover:bg-gray-50 transition-colors duration-200">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-2 h-2 rounded-full ${info.is_mounted ? 'bg-green-500' : 'bg-red-500'}"></span>
+                                            <div class="flex flex-col">
+                                                <span class="text-sm text-gray-700">${folder}</span>
+                                                <span class="text-xs text-gray-500 toggle-text">
+                                                    <span class="readable-time">${get_time_ago(info.mtime)}</span>
+                                                    <span class="time-string hidden">${info.mtime}</span>
+                                                </span>
+                                            </div>
                                         </div>
                                         <div class="flex items-center gap-2">
                                             <span class="text-xs ${info.is_mounted ? 'text-green-600' : 'text-red-600'}">
