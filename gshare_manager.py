@@ -568,7 +568,7 @@ class FolderMonitor:
                 if len(parts) >= 4:
                     uid = int(parts[2])
                     gid = int(parts[3])
-                    logging.info(f"ls -n 명령어로 확인한 NFS 마운트 경로의 UID/GID: {uid}/{gid}")
+                    logging.info(f"NFS 마운트 경로의 UID/GID: {uid}/{gid}")
                     return uid, gid
             raise Exception("마운트 경로에서 파일/디렉토리를 찾을 수 없습니다.")
         except Exception as e:
@@ -579,13 +579,13 @@ class FolderMonitor:
         """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
         try:
             # 먼저 Samba 서비스 중지
-            logging.info("Samba 서비스 중지 시도...")
+            logging.debug("Samba 서비스 중지 시도...")
             subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=True)
             subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=True)
-            logging.info("Samba 서비스 중지 완료")
+            logging.debug("Samba 서비스 중지 완료")
             
             # 사용자 존재 여부 확인
-            logging.info(f"사용자 '{self.config.SMB_USERNAME}' 존재 여부 확인...")
+            # logging.info(f"사용자 '{self.config.SMB_USERNAME}' 존재 여부 확인...")
             user_exists = subprocess.run(['id', self.config.SMB_USERNAME], capture_output=True).returncode == 0
             
             if not user_exists:
@@ -601,13 +601,19 @@ class FolderMonitor:
                 ], capture_output=True, text=True)
                 
                 if useradd_result.returncode != 0:
-                    raise Exception(f"사용자 생성 실패: {useradd_result.stderr}")
-                logging.info(f"사용자 '{self.config.SMB_USERNAME}' 생성 완료")
+                    # UID가 이미 존재하는 경우는 무시
+                    if "already exists" not in useradd_result.stderr:
+                        raise Exception(f"사용자 생성 실패: {useradd_result.stderr}")
+                    logging.debug(f"UID {self.nfs_uid}가 이미 존재합니다.")
+                else:
+                    logging.debug("사용자 생성 완료")
             else:
                 # 사용자가 있으면 UID/GID 변경
                 logging.info(f"사용자 '{self.config.SMB_USERNAME}'의 프로세스 확인...")
                 ps_result = subprocess.run(['ps', '-u', self.config.SMB_USERNAME], capture_output=True, text=True)
-                if ps_result.stdout.strip():
+                # 출력 라인을 분리하고 헤더 라인(PID TTY TIME CMD)을 제외한 실제 프로세스 확인
+                process_lines = [line for line in ps_result.stdout.strip().split('\n') if not line.startswith('PID')]
+                if process_lines:
                     logging.info(f"실행 중인 프로세스 목록:\n{ps_result.stdout}")
                     
                     # 프로세스 강제 종료 시도
@@ -617,7 +623,8 @@ class FolderMonitor:
                     
                     # 여전히 실행 중인 프로세스가 있다면 SIGKILL로 강제 종료
                     ps_check = subprocess.run(['ps', '-u', self.config.SMB_USERNAME], capture_output=True, text=True)
-                    if ps_check.stdout.strip():
+                    check_lines = [line for line in ps_check.stdout.strip().split('\n') if not line.startswith('PID')]
+                    if check_lines:
                         logging.info("일부 프로세스가 여전히 실행 중. SIGKILL 사용...")
                         subprocess.run(['sudo', 'pkill', '-KILL', '-u', self.config.SMB_USERNAME], check=False)
                         time.sleep(1)
@@ -625,21 +632,29 @@ class FolderMonitor:
                     logging.info("실행 중인 프로세스가 없습니다.")
 
                 # usermod 명령으로 SMB 사용자의 UID 변경
-                logging.info(f"사용자 UID 변경 시도 ({self.config.SMB_USERNAME} -> {self.nfs_uid})...")
+                logging.debug(f"사용자 UID 변경 시도 ({self.config.SMB_USERNAME} -> {self.nfs_uid})...")
                 usermod_result = subprocess.run(['sudo', 'usermod', '-u', str(self.nfs_uid), self.config.SMB_USERNAME], 
                                              capture_output=True, text=True)
                 if usermod_result.returncode != 0:
-                    raise Exception(f"usermod 실패: {usermod_result.stderr}")
-                logging.info("사용자 UID 변경 완료")
+                    # UID가 이미 존재하는 경우는 무시
+                    if "already exists" not in usermod_result.stderr:
+                        raise Exception(f"usermod 실패: {usermod_result.stderr}")
+                    logging.debug(f"UID {self.nfs_uid}가 이미 존재합니다.")
+                else:
+                    logging.debug("사용자 UID 변경 완료")
                 
                 # groupmod 명령으로 SMB 사용자의 기본 그룹 GID 변경
                 group_name = self.config.SMB_USERNAME  # 일반적으로 사용자명과 동일한 그룹명 사용
-                logging.info(f"그룹 GID 변경 시도 ({group_name} -> {self.nfs_gid})...")
+                logging.debug(f"그룹 GID 변경 시도 ({group_name} -> {self.nfs_gid})...")
                 groupmod_result = subprocess.run(['sudo', 'groupmod', '-g', str(self.nfs_gid), group_name],
                                               capture_output=True, text=True)
                 if groupmod_result.returncode != 0:
-                    raise Exception(f"groupmod 실패: {groupmod_result.stderr}")
-                logging.info("그룹 GID 변경 완료")
+                    # GID가 이미 존재하는 경우는 무시
+                    if "already exists" not in groupmod_result.stderr:
+                        raise Exception(f"groupmod 실패: {groupmod_result.stderr}")
+                    logging.debug(f"GID {self.nfs_gid}가 이미 존재합니다.")
+                else:
+                    logging.debug("그룹 GID 변경 완료")
             
             # Samba 사용자 비밀번호 설정
             logging.info(f"Samba 사용자 비밀번호 설정 시도...")

@@ -94,13 +94,48 @@ window.onload = function () {
                 document.querySelector('.cpu-usage').innerText = data.cpu_usage + '%';
                 document.querySelector('.low-cpu-count').innerText = data.low_cpu_count;
                 document.querySelector('.uptime').innerText = data.uptime;
-                document.querySelector('.folder-files').innerText = data.folder_size_readable;
-                document.querySelector('.last-files-change-time .readable-time').innerText =
-                    data.last_size_change_time !== '-' ? get_time_ago(data.last_size_change_time) : '정보없음';
-                document.querySelector('.last-files-change-time .time-string').innerText = data.last_size_change_time;
-                document.querySelector('.last-shutdown-time .readable-time').innerText =
-                    data.last_shutdown_time !== '-' ? get_time_ago(data.last_shutdown_time) : '정보없음';
-                document.querySelector('.last-shutdown-time .time-string').innerText = data.last_shutdown_time;
+
+                // 필수 요소들도 존재 여부 확인
+                const elements = {
+                    lastCheckTimeString: document.querySelector('.last-check-time .time-string'),
+                    lastAction: document.querySelector('.last-action'),
+                    vmStatus: document.querySelector('.vm-status'),
+                    cpuUsage: document.querySelector('.cpu-usage'),
+                    lowCpuCount: document.querySelector('.low-cpu-count'),
+                    uptime: document.querySelector('.uptime')
+                };
+
+                // 각 요소가 존재할 때만 업데이트
+                if (elements.lastCheckTimeString) elements.lastCheckTimeString.innerText = data.last_check_time;
+                if (elements.lastAction) elements.lastAction.innerText = data.last_action;
+                if (elements.vmStatus) {
+                    elements.vmStatus.innerText = data.vm_status;
+                    updateVMStatus(data.vm_status);
+                }
+                if (elements.cpuUsage) elements.cpuUsage.innerText = data.cpu_usage + '%';
+                if (elements.lowCpuCount) elements.lowCpuCount.innerText = data.low_cpu_count;
+                if (elements.uptime) elements.uptime.innerText = data.uptime;
+
+                // 옵셔널한 요소들은 존재 여부 확인 후 업데이트
+                const lastFilesChangeTimeReadable = document.querySelector('.last-files-change-time .readable-time');
+                const lastFilesChangeTimeString = document.querySelector('.last-files-change-time .time-string');
+                const lastShutdownTimeReadable = document.querySelector('.last-shutdown-time .readable-time');
+                const lastShutdownTimeString = document.querySelector('.last-shutdown-time .time-string');
+
+                if (lastFilesChangeTimeReadable) {
+                    lastFilesChangeTimeReadable.innerText = data.last_size_change_time !== '-' ? 
+                        get_time_ago(data.last_size_change_time) : '정보없음';
+                }
+                if (lastFilesChangeTimeString) {
+                    lastFilesChangeTimeString.innerText = data.last_size_change_time;
+                }
+                if (lastShutdownTimeReadable) {
+                    lastShutdownTimeReadable.innerText = data.last_shutdown_time !== '-' ? 
+                        get_time_ago(data.last_shutdown_time) : '정보없음';
+                }
+                if (lastShutdownTimeString) {
+                    lastShutdownTimeString.innerText = data.last_shutdown_time;
+                }
 
                 // 감시 중인 폴더 목록 업데이트
                 const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
