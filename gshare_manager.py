@@ -472,8 +472,22 @@ class FolderMonitor:
     def _get_nfs_ownership(self) -> tuple[int, int]:
         """NFS 마운트 경로의 UID/GID를 반환"""
         try:
-            stat_info = os.stat(self.config.MOUNT_PATH)
-            return stat_info.st_uid, stat_info.st_gid
+            # ls -n 명령어로 마운트 경로의 첫 번째 항목의 UID/GID 확인
+            result = subprocess.run(['ls', '-n', self.config.MOUNT_PATH], capture_output=True, text=True, check=True)
+            # 출력 결과를 줄 단위로 분리
+            lines = result.stdout.strip().split('\n')
+            # 첫 번째 파일/디렉토리 정보가 있는 줄 찾기 (total 제외)
+            for line in lines:
+                if line.startswith('total'):
+                    continue
+                # 공백으로 분리하여 UID(3번째 필드)와 GID(4번째 필드) 추출
+                parts = line.split()
+                if len(parts) >= 4:
+                    uid = int(parts[2])
+                    gid = int(parts[3])
+                    logging.info(f"ls -n 명령어로 확인한 NFS 마운트 경로의 UID/GID: {uid}/{gid}")
+                    return uid, gid
+            raise Exception("마운트 경로에서 파일/디렉토리를 찾을 수 없습니다.")
         except Exception as e:
             logging.error(f"NFS 마운트 경로의 소유자 정보 확인 실패: {e}")
             return 0, 0
