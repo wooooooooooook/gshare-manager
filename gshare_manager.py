@@ -114,10 +114,15 @@ class FolderMonitor:
     def __init__(self, config: Config):
         self.config = config
         self.previous_mtimes = {}  # 각 서브폴더별 이전 수정 시간을 저장
-        self.active_shares = set()  # 현재 활성화된 SMB 공유 목록
+        self.active_links = set()  # 현재 활성화된 심볼릭 링크 목록
         self.last_modified_folder = "-"
         self.last_modified_time = "-"
         self.last_vm_start_time = self._load_last_vm_start_time()  # VM 마지막 시작 시간
+        
+        # 공유용 링크 디렉토리 생성
+        self.links_dir = "/mnt/gshare_links"
+        self._ensure_links_directory()
+        
         self._update_subfolder_mtimes()
         self._ensure_smb_installed()
         self._init_smb_config()
@@ -129,8 +134,8 @@ class FolderMonitor:
         # SMB 사용자의 UID/GID 설정
         self._set_smb_user_ownership()
         
-        # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들 마운트
-        self._mount_recently_modified_folders()
+        # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성
+        self._create_links_for_recently_modified()
 
     def _load_last_vm_start_time(self) -> float:
         """VM 마지막 시작 시간을 로드"""
@@ -283,8 +288,8 @@ class FolderMonitor:
         for folder in deleted_folders:
             del self.previous_mtimes[folder]
             # SMB 공유도 비활성화
-            if folder in self.active_shares:
-                self._deactivate_smb_share(folder)
+            if folder in self.active_links:
+                self._remove_symlink(folder)
         
         # 기존 폴더 업데이트 (삭제되지 않은 폴더만)
         for folder in current_subfolders & previous_subfolders:
@@ -314,6 +319,10 @@ class FolderMonitor:
                 self.last_modified_folder = path
                 self.last_modified_time = last_modified
                 
+                # 심볼릭 링크 생성
+                if self._create_symlink(path):
+                    logging.info(f"심볼릭 링크 생성됨: {path}")
+                
                 # VM 마지막 시작 시간보다 수정 시간이 더 최근인 경우
                 if current_mtime > self.last_vm_start_time:
                     should_start_vm = True
@@ -340,7 +349,7 @@ class FolderMonitor:
         return total
 
     def get_monitored_folders(self) -> dict:
-        """감시 중인 모든 폴더와 수정 시간, 마운트 상태를 반환 (최근 수정된 순으로 정렬)"""
+        """감시 중인 모든 폴더와 수정 시간, 링크 상태를 반환"""
         folder_times = []
         for path in self.previous_mtimes.keys():
             mtime = self._get_folder_mtime(path)
@@ -352,25 +361,90 @@ class FolderMonitor:
         for path, mtime in folder_times:
             monitored_folders[path] = {
                 'mtime': datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S'),
-                'is_mounted': path in self.active_shares
+                'is_mounted': path in self.active_links
             }
         
         return monitored_folders
 
-    def _activate_smb_share(self, subfolder: str) -> bool:
-        """특정 서브폴더의 SMB 공유를 활성화"""
+    def _ensure_links_directory(self):
+        """공유용 링크 디렉토리 생성"""
         try:
-            if subfolder in self.active_shares:
-                return True
+            if not os.path.exists(self.links_dir):
+                os.makedirs(self.links_dir)
+                logging.info(f"공유용 링크 디렉토리 생성됨: {self.links_dir}")
+            
+            # 디렉토리 권한 설정
+            os.chmod(self.links_dir, 0o755)
+            subprocess.run(['sudo', 'chown', f"{self.config.SMB_USERNAME}:{self.config.SMB_USERNAME}", self.links_dir], check=True)
+            logging.info("공유용 링크 디렉토리 권한 설정 완료")
+        except Exception as e:
+            logging.error(f"공유용 링크 디렉토리 생성/설정 실패: {e}")
+            raise
 
+    def _create_symlink(self, subfolder: str) -> bool:
+        """특정 폴더의 심볼릭 링크 생성"""
+        try:
             source_path = os.path.join(self.config.MOUNT_PATH, subfolder)
-            # 공유 이름을 gshare로 고정하고, 경로를 gshare 아래에 위치하도록 설정
+            link_path = os.path.join(self.links_dir, subfolder.replace(os.sep, '_'))
+            
+            # 이미 존재하는 링크 제거
+            if os.path.exists(link_path):
+                os.remove(link_path)
+            
+            # 심볼릭 링크 생성
+            os.symlink(source_path, link_path)
+            self.active_links.add(subfolder)
+            logging.info(f"심볼릭 링크 생성됨: {link_path} -> {source_path}")
+            return True
+        except Exception as e:
+            logging.error(f"심볼릭 링크 생성 실패 ({subfolder}): {e}")
+            return False
+
+    def _remove_symlink(self, subfolder: str) -> bool:
+        """특정 폴더의 심볼릭 링크 제거"""
+        try:
+            link_path = os.path.join(self.links_dir, subfolder.replace(os.sep, '_'))
+            if os.path.exists(link_path):
+                os.remove(link_path)
+                self.active_links.discard(subfolder)
+                logging.info(f"심볼릭 링크 제거됨: {link_path}")
+            return True
+        except Exception as e:
+            logging.error(f"심볼릭 링크 제거 실패 ({subfolder}): {e}")
+            return False
+
+    def _create_links_for_recently_modified(self) -> None:
+        """마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성"""
+        try:
+            recently_modified = []
+            for path, mtime in self.previous_mtimes.items():
+                if mtime > self.last_vm_start_time:
+                    recently_modified.append(path)
+                    last_modified = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+                    logging.info(f"최근 수정된 폴더 감지 ({path}): {last_modified}")
+            
+            if recently_modified:
+                logging.info(f"마지막 VM 시작({datetime.fromtimestamp(self.last_vm_start_time).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(recently_modified)}개의 링크를 생성합니다.")
+                for folder in recently_modified:
+                    if self._create_symlink(folder):
+                        logging.info(f"초기 링크 생성 성공: {folder}")
+                    else:
+                        logging.error(f"초기 링크 생성 실패: {folder}")
+                
+                # SMB 공유 활성화
+                self._activate_smb_share()
+        except Exception as e:
+            logging.error(f"최근 수정된 폴더 링크 생성 중 오류 발생: {e}")
+
+    def _activate_smb_share(self) -> bool:
+        """links_dir의 SMB 공유를 활성화"""
+        try:
             share_name = self.config.SMB_SHARE_NAME
             
-            # 공유 설정 생성 (읽기 전용으로 설정)
+            # 공유 설정 생성
             share_config = f"""
 [{share_name}]
-   path = {self.config.MOUNT_PATH}
+   path = {self.links_dir}
    comment = {self.config.SMB_COMMENT}
    browseable = yes
    guest ok = {'yes' if self.config.SMB_GUEST_OK else 'no'}
@@ -382,93 +456,33 @@ class FolderMonitor:
    hide dot files = yes
    delete veto files = no
 """
-            # 설정 추가
-            with open('/etc/samba/smb.conf', 'a') as f:
-                f.write(share_config)
-            
-            # Samba 서비스 재시작
-            subprocess.run(['sudo', 'systemctl', 'restart', 'smbd'], check=True)
-            subprocess.run(['sudo', 'systemctl', 'restart', 'nmbd'], check=True)
-            
-            self.active_shares.add(subfolder)
-            logging.info(f"SMB 공유 활성화 성공: {subfolder}")
-            return True
-        except Exception as e:
-            logging.error(f"SMB 공유 활성화 실패 ({subfolder}): {e}")
-            return False
-
-    def _deactivate_smb_share(self, subfolder: str = None) -> bool:
-        """SMB 공유를 비활성화. subfolder가 None이면 모든 공유 비활성화"""
-        try:
-            if subfolder is not None and subfolder not in self.active_shares:
-                return True
-
-            # smb.conf 파일 읽기
+            # 설정 파일 읽기
             with open('/etc/samba/smb.conf', 'r') as f:
                 lines = f.readlines()
 
-            # 기본 설정만 유지
-            if subfolder is None:
-                # [global] 섹션까지만 유지
-                new_lines = []
-                for line in lines:
-                    if line.strip().startswith('[') and not line.strip() == '[global]':
-                        break
-                    new_lines.append(line)
-                lines = new_lines
-                self.active_shares.clear()
-            else:
-                # 특정 공유 설정만 제거
-                share_name = f"{self.config.SMB_SHARE_NAME}_{subfolder}"
-                new_lines = []
-                skip = False
-                for line in lines:
-                    if line.strip() == f'[{share_name}]':
-                        skip = True
-                        continue
-                    if skip and line.strip().startswith('['):
-                        skip = False
-                    if not skip:
-                        new_lines.append(line)
-                lines = new_lines
-                self.active_shares.discard(subfolder)
-
+            # [global] 섹션만 유지
+            new_lines = []
+            for line in lines:
+                if line.strip().startswith('[') and not line.strip() == '[global]':
+                    break
+                new_lines.append(line)
+            
+            # 새로운 공유 설정 추가
+            new_lines.append(share_config)
+            
             # 설정 파일 저장
             with open('/etc/samba/smb.conf', 'w') as f:
-                f.writelines(lines)
-
+                f.writelines(new_lines)
+            
             # Samba 서비스 재시작
             subprocess.run(['sudo', 'systemctl', 'restart', 'smbd'], check=True)
             subprocess.run(['sudo', 'systemctl', 'restart', 'nmbd'], check=True)
-
-            if subfolder is None:
-                logging.info("모든 SMB 공유 비활성화 완료")
-            else:
-                logging.info(f"SMB 공유 비활성화 완료: {subfolder}")
+            
+            logging.info(f"SMB 공유 활성화 성공: {self.links_dir}")
             return True
         except Exception as e:
-            logging.error(f"SMB 공유 비활성화 실패: {e}")
-        return False
-
-    def _mount_recently_modified_folders(self) -> None:
-        """마지막 VM 시작 시간 이후에 수정된 폴더들을 마운트"""
-        try:
-            recently_modified = []
-            for path, mtime in self.previous_mtimes.items():
-                if mtime > self.last_vm_start_time:
-                    recently_modified.append(path)
-                    last_modified = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
-                    logging.info(f"최근 수정된 폴더 감지 ({path}): {last_modified}")
-            
-            if recently_modified:
-                logging.info(f"마지막 VM 시작({datetime.fromtimestamp(self.last_vm_start_time).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(recently_modified)}개를 마운트합니다.")
-                for folder in recently_modified:
-                    if self._activate_smb_share(folder):
-                        logging.info(f"초기 마운트 성공: {folder}")
-                    else:
-                        logging.error(f"초기 마운트 실패: {folder}")
-        except Exception as e:
-            logging.error(f"최근 수정된 폴더 마운트 중 오류 발생: {e}")
+            logging.error(f"SMB 공유 활성화 실패: {e}")
+            return False
 
     def _get_nfs_ownership(self) -> tuple[int, int]:
         """NFS 마운트 경로의 UID/GID를 반환"""
@@ -934,9 +948,9 @@ def toggle_mount(folder):
         if current_state is None:
             return jsonify({"status": "error", "message": "State not initialized."}), 404
 
-        if folder in gshare_manager.folder_monitor.active_shares:
+        if folder in gshare_manager.folder_monitor.active_links:
             # 마운트 해제
-            if gshare_manager.folder_monitor._deactivate_smb_share(folder):
+            if gshare_manager.folder_monitor._remove_symlink(folder):
                 return jsonify({"status": "success", "message": f"{folder} 마운트가 해제되었습니다."})
             else:
                 return jsonify({"status": "error", "message": f"{folder} 마운트 해제 실패"}), 500
