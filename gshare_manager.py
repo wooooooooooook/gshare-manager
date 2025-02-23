@@ -249,10 +249,13 @@ class FolderMonitor:
             return []
 
     def _get_folder_mtime(self, path: str) -> float:
-        """지정된 경로의 폴더 수정 시간을 반환"""
+        """지정된 경로의 폴더 수정 시간을 반환 (UTC -> KST 변환)"""
         try:
             full_path = os.path.join(self.config.MOUNT_PATH, path)
-            return os.path.getmtime(full_path)
+            utc_time = os.path.getmtime(full_path)
+            # UTC -> KST 변환 (9시간 추가)
+            kst_time = utc_time + (9 * 3600)  # 9시간을 초 단위로 추가
+            return kst_time
         except Exception as e:
             logging.error(f"폴더 수정 시간 확인 중 오류 발생 ({path}): {e}")
             return self.previous_mtimes.get(path, 0)
@@ -437,7 +440,7 @@ class FolderMonitor:
             return True
         except Exception as e:
             logging.error(f"SMB 공유 비활성화 실패: {e}")
-            return False
+        return False
 
     def _mount_recently_modified_folders(self) -> None:
         """마지막 VM 시작 시간 이후에 수정된 폴더들을 마운트"""
