@@ -371,12 +371,22 @@ class FolderMonitor:
         try:
             # 사용자와 그룹이 없으면 생성
             try:
-                subprocess.run(['id', self.config.SMB_USERNAME], check=True, capture_output=True)
+                # 그룹 존재 여부 확인
+                subprocess.run(['getent', 'group', self.config.SMB_USERNAME], check=True, capture_output=True)
+                logging.info(f"그룹 '{self.config.SMB_USERNAME}' 이미 존재함")
             except subprocess.CalledProcessError:
+                # 그룹이 없으면 생성
+                logging.info(f"그룹 '{self.config.SMB_USERNAME}' 생성 시도...")
+                subprocess.run(['sudo', 'groupadd', self.config.SMB_USERNAME], check=True)
+                logging.info(f"그룹 '{self.config.SMB_USERNAME}' 생성 완료")
+
+            try:
+                # 사용자 존재 여부 확인
+                subprocess.run(['id', self.config.SMB_USERNAME], check=True, capture_output=True)
+                logging.info(f"사용자 '{self.config.SMB_USERNAME}' 이미 존재함")
+            except subprocess.CalledProcessError:
+                # 사용자가 없으면 생성
                 logging.info(f"사용자 '{self.config.SMB_USERNAME}' 생성 시도...")
-                # 그룹 생성
-                subprocess.run(['sudo', 'groupadd', self.config.SMB_USERNAME], check=False)
-                # 사용자 생성
                 subprocess.run([
                     'sudo', 'useradd',
                     '-M',  # 홈 디렉토리 생성하지 않음
