@@ -378,6 +378,9 @@ class FolderMonitor:
    create mask = 0555
    directory mask = 0555
    force user = {self.config.SMB_USERNAME}
+   veto files = /@*
+   hide dot files = yes
+   delete veto files = no
 """
             # 설정 추가
             with open('/etc/samba/smb.conf', 'a') as f:
@@ -555,6 +558,18 @@ class FolderMonitor:
                 if groupmod_result.returncode != 0:
                     raise Exception(f"groupmod 실패: {groupmod_result.stderr}")
                 logging.info("그룹 GID 변경 완료")
+            
+            # Samba 사용자 비밀번호 설정
+            logging.info(f"Samba 사용자 비밀번호 설정 시도...")
+            smbpasswd_result = subprocess.run(['sudo', 'smbpasswd', '-a', self.config.SMB_USERNAME],
+                                          input=f"{self.config.SMB_PASSWORD}\n{self.config.SMB_PASSWORD}\n".encode(),
+                                          capture_output=True, text=True)
+            if smbpasswd_result.returncode != 0:
+                raise Exception(f"Samba 비밀번호 설정 실패: {smbpasswd_result.stderr}")
+            
+            # Samba 사용자 활성화
+            subprocess.run(['sudo', 'smbpasswd', '-e', self.config.SMB_USERNAME], check=True)
+            logging.info("Samba 사용자 비밀번호 설정 완료")
             
             # 소유권 변경이 완료된 후 Samba 서비스 재시작
             logging.info("Samba 서비스 재시작...")
