@@ -103,7 +103,7 @@ window.onload = function () {
                 document.querySelector('.last-shutdown-time .time-string').innerText = data.last_shutdown_time;
 
                 // 감시 중인 폴더 목록 업데이트
-                const monitoredFoldersContainer = document.querySelector('.grid.grid-cols-2.gap-2:last-child');
+                const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
                 if (monitoredFoldersContainer) {
                     let foldersHtml = '';
                     for (const [folder, info] of Object.entries(data.monitored_folders)) {
@@ -365,7 +365,7 @@ function toggleMount(folder) {
                     .then(response => response.json())
                     .then(data => {
                         // 감시 중인 폴더 목록 업데이트
-                        const monitoredFoldersContainer = document.querySelector('.grid.grid-cols-2.gap-2:last-child');
+                        const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
                         if (monitoredFoldersContainer) {
                             let foldersHtml = '';
                             for (const [folder, info] of Object.entries(data.monitored_folders)) {
