@@ -515,9 +515,25 @@ class FolderMonitor:
             with open('/etc/samba/smb.conf', 'w') as f:
                 f.writelines(new_lines)
             
-            # Samba 서비스 재시작
-            subprocess.run(['sudo', 'systemctl', 'restart', 'smbd'], check=True)
-            subprocess.run(['sudo', 'systemctl', 'restart', 'nmbd'], check=True)
+            # Samba 서비스 상태 확인 및 시작/재시작
+            try:
+                # smbd 상태 확인
+                smbd_status = subprocess.run(['systemctl', 'is-active', 'smbd'], capture_output=True, text=True).stdout.strip()
+                nmbd_status = subprocess.run(['systemctl', 'is-active', 'nmbd'], capture_output=True, text=True).stdout.strip()
+                
+                if smbd_status == 'active' or nmbd_status == 'active':
+                    # 서비스가 실행 중이면 재시작
+                    logging.info("Samba 서비스가 실행 중입니다. 재시작합니다.")
+                    subprocess.run(['sudo', 'systemctl', 'restart', 'smbd'], check=True)
+                    subprocess.run(['sudo', 'systemctl', 'restart', 'nmbd'], check=True)
+                else:
+                    # 서비스가 중지되어 있으면 시작
+                    logging.info("Samba 서비스를 시작합니다.")
+                    subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
+                    subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
+            except subprocess.CalledProcessError as e:
+                logging.error(f"Samba 서비스 제어 중 오류 발생: {e}")
+                raise
             
             logging.info(f"SMB 공유 활성화 성공: {self.links_dir}")
             return True
@@ -644,6 +660,42 @@ class FolderMonitor:
             except Exception as restart_error:
                 logging.error(f"Samba 서비스 재시작 실패: {restart_error}")
 
+    def _deactivate_smb_share(self) -> bool:
+        """모든 SMB 공유와 심볼릭 링크를 비활성화"""
+        try:
+            # 모든 심볼릭 링크 제거
+            active_links = list(self.active_links)  # 복사본 생성
+            for folder in active_links:
+                self._remove_symlink(folder)
+            
+            # SMB 설정에서 공유 제거
+            share_name = self.config.SMB_SHARE_NAME
+            
+            # 설정 파일 읽기
+            with open('/etc/samba/smb.conf', 'r') as f:
+                lines = f.readlines()
+
+            # [global] 섹션만 유지
+            new_lines = []
+            for line in lines:
+                if line.strip().startswith('[') and not line.strip() == '[global]':
+                    break
+                new_lines.append(line)
+            
+            # 설정 파일 저장
+            with open('/etc/samba/smb.conf', 'w') as f:
+                f.writelines(new_lines)
+            
+            # Samba 서비스 중지
+            subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=True)
+            subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=True)
+            
+            logging.info(f"SMB 공유 비활성화 성공")
+            return True
+        except Exception as e:
+            logging.error(f"SMB 공유 비활성화 실패: {e}")
+            return False
+
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
         self.config = config
@@ -711,10 +763,22 @@ class GShareManager:
             logging.error(f"상태 업데이트 실패: {e}")
 
     def monitor(self) -> None:
+        last_vm_status = None  # VM 상태 변화 감지를 위한 변수
+        
         while True:
             try:
                 update_log_level()
                 logging.debug("모니터링 루프 시작")
+                
+                # VM 상태 확인
+                current_vm_status = self.proxmox_api.is_vm_running()
+                
+                # VM 상태가 변경되었고, 현재 종료 상태인 경우
+                if last_vm_status is not None and last_vm_status != current_vm_status and not current_vm_status:
+                    logging.info("VM이 종료되어 SMB 공유를 비활성화합니다.")
+                    self.folder_monitor._deactivate_smb_share()
+                
+                last_vm_status = current_vm_status
                 
                 try:
                     logging.debug("폴더 수정 시간 변화 확인 중")
