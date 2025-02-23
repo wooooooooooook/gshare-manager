@@ -162,15 +162,10 @@ window.onload = function () {
                                         </span>
                                     </div>
                                 </div>
-                                <div class="flex items-center gap-2">
-                                    <span class="text-xs ${info.is_mounted ? 'text-green-600' : 'text-red-600'}">
-                                        ${info.is_mounted ? '마운트됨' : '마운트안됨'}
-                                    </span>
-                                    <button onclick="toggleMount('${folder}')" 
-                                        class="text-xs px-2 py-1 ${info.is_mounted ? 'bg-red-50 hover:bg-red-100 text-red-800 border-red-200' : 'bg-green-50 hover:bg-green-100 text-green-800 border-green-200'} rounded border transition-colors duration-200">
-                                        ${info.is_mounted ? '마운트해제' : '마운트'}
-                                    </button>
-                                </div>
+                                <button onclick="toggleMount('${folder}')" 
+                                    class="text-xs px-2 py-1 ${info.is_mounted ? 'bg-red-50 hover:bg-red-100 text-red-800 border-red-200' : 'bg-green-50 hover:bg-green-100 text-green-800 border-green-200'} rounded border transition-colors duration-200">
+                                    ${info.is_mounted ? '마운트해제' : '마운트'}
+                                </button>
                             </div>
                         `;
                     }
