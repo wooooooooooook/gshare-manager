@@ -369,6 +369,23 @@ class FolderMonitor:
     def _ensure_links_directory(self):
         """공유용 링크 디렉토리 생성"""
         try:
+            # 사용자와 그룹이 없으면 생성
+            try:
+                subprocess.run(['id', self.config.SMB_USERNAME], check=True, capture_output=True)
+            except subprocess.CalledProcessError:
+                logging.info(f"사용자 '{self.config.SMB_USERNAME}' 생성 시도...")
+                # 그룹 생성
+                subprocess.run(['sudo', 'groupadd', self.config.SMB_USERNAME], check=False)
+                # 사용자 생성
+                subprocess.run([
+                    'sudo', 'useradd',
+                    '-M',  # 홈 디렉토리 생성하지 않음
+                    '-g', self.config.SMB_USERNAME,  # 기본 그룹 설정
+                    '-s', '/sbin/nologin',  # 로그인 셸 비활성화
+                    self.config.SMB_USERNAME
+                ], check=True)
+                logging.info(f"사용자 '{self.config.SMB_USERNAME}' 생성 완료")
+
             if not os.path.exists(self.links_dir):
                 os.makedirs(self.links_dir)
                 logging.info(f"공유용 링크 디렉토리 생성됨: {self.links_dir}")
