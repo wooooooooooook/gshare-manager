@@ -121,6 +121,9 @@ class FolderMonitor:
         self._update_subfolder_mtimes()
         self._ensure_smb_installed()
         self._init_smb_config()
+        
+        # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들 마운트
+        self._mount_recently_modified_folders()
 
     def _load_last_vm_start_time(self) -> float:
         """VM 마지막 시작 시간을 로드"""
@@ -453,6 +456,26 @@ class FolderMonitor:
         except Exception as e:
             logging.error(f"SMB 공유 비활성화 실패: {e}")
             return False
+
+    def _mount_recently_modified_folders(self) -> None:
+        """마지막 VM 시작 시간 이후에 수정된 폴더들을 마운트"""
+        try:
+            recently_modified = []
+            for path, mtime in self.previous_mtimes.items():
+                if mtime > self.last_vm_start_time:
+                    recently_modified.append(path)
+                    last_modified = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+                    logging.info(f"최근 수정된 폴더 감지 ({path}): {last_modified}")
+            
+            if recently_modified:
+                logging.info(f"마지막 VM 시작({datetime.fromtimestamp(self.last_vm_start_time).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(recently_modified)}개를 마운트합니다.")
+                for folder in recently_modified:
+                    if self._activate_smb_share(folder):
+                        logging.info(f"초기 마운트 성공: {folder}")
+                    else:
+                        logging.error(f"초기 마운트 실패: {folder}")
+        except Exception as e:
+            logging.error(f"최근 수정된 폴더 마운트 중 오류 발생: {e}")
 
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
