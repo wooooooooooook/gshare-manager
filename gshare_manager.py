@@ -41,6 +41,7 @@ class State:
     uptime: str
     last_shutdown_time: str
     monitored_folders: dict    # 감시 중인 폴더들과 수정 시간
+    last_vm_start_time: str    # VM 마지막 시작 시간
     
     def to_dict(self):
         return asdict(self)
@@ -440,10 +441,6 @@ class FolderMonitor:
             # 심볼릭 링크 생성
             os.symlink(source_path, link_path)
             
-            # 링크 및 대상 디렉토리 권한 설정
-            subprocess.run(['sudo', 'chmod', '755', link_path], check=True)
-            subprocess.run(['sudo', 'chown', '-h', f"{self.config.SMB_USERNAME}:{self.config.SMB_USERNAME}", link_path], check=True)
-            
             self.active_links.add(subfolder)
             logging.info(f"심볼릭 링크 생성됨: {link_path} -> {source_path}")
             return True
@@ -760,6 +757,10 @@ class GShareManager:
             uptime = self.proxmox_api.get_vm_uptime()
             uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
 
+            # VM 마지막 시작 시간을 가져옵니다
+            last_vm_start = datetime.fromtimestamp(self.folder_monitor.last_vm_start_time, 
+                                                 pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
+
             current_state = State(
                 last_check_time=current_time,
                 vm_status=vm_status,
@@ -770,7 +771,8 @@ class GShareManager:
                 low_cpu_count=self.low_cpu_count,
                 uptime=uptime_str,
                 last_shutdown_time=self.last_shutdown_time,
-                monitored_folders=self.folder_monitor.get_monitored_folders()
+                monitored_folders=self.folder_monitor.get_monitored_folders(),
+                last_vm_start_time=last_vm_start
             )
             logging.debug(f"상태 업데이트: {current_state.to_dict()}")
         except Exception as e:
