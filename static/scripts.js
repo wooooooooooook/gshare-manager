@@ -140,36 +140,13 @@ window.onload = function () {
                 // 감시 중인 폴더 목록 업데이트
                 const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
                 if (monitoredFoldersContainer) {
-                    // 폴더 정보를 배열로 변환하고 수정 시간 기준으로 정렬
                     const sortedFolders = Object.entries(data.monitored_folders)
                         .sort((a, b) => {
                             const timeA = new Date(a[1].mtime);
                             const timeB = new Date(b[1].mtime);
                             return timeB - timeA; // 최신순 정렬
                         });
-
-                    let foldersHtml = '';
-                    for (const [folder, info] of sortedFolders) {
-                        foldersHtml += `
-                            <div class="flex justify-between items-center bg-white rounded p-2 border ${info.is_mounted ? 'border-green-200' : 'border-red-200'} hover:bg-gray-50 transition-colors duration-200">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-2 h-2 rounded-full ${info.is_mounted ? 'bg-green-500' : 'bg-red-500'}"></span>
-                                    <div class="flex flex-col">
-                                        <span class="text-sm text-gray-700">${folder}</span>
-                                        <span class="text-xs text-gray-500 toggle-text">
-                                            <span class="readable-time">${get_time_ago(info.mtime)}</span>
-                                            <span class="time-string hidden">${info.mtime}</span>
-                                        </span>
-                                    </div>
-                                </div>
-                                <button onclick="toggleMount('${folder}')" 
-                                    class="text-xs px-2 py-1 ${info.is_mounted ? 'bg-red-50 hover:bg-red-100 text-red-800 border-red-200' : 'bg-green-50 hover:bg-green-100 text-green-800 border-green-200'} rounded border transition-colors duration-200">
-                                    ${info.is_mounted ? '마운트해제' : '마운트'}
-                                </button>
-                            </div>
-                        `;
-                    }
-                    monitoredFoldersContainer.innerHTML = foldersHtml;
+                    monitoredFoldersContainer.innerHTML = generateFolderListHtml(sortedFolders);
                 }
             });
 
@@ -208,7 +185,7 @@ function updateVMStatus(status) {
         vmRunningElements.forEach(el => el.classList.add('hidden'));
         vmStoppedElements.forEach(el => el.classList.remove('hidden'));
     }
-} 
+}
 
 function restartService() {
     if (confirm('정말로 서비스를 재시작하시겠습니까?')) {
@@ -399,6 +376,33 @@ function shutdownVM() {
     }
 }
 
+// 폴더 목록 HTML 생성 함수 추가
+function generateFolderListHtml(sortedFolders) {
+    let foldersHtml = '';
+    for (const [folder, info] of sortedFolders) {
+        foldersHtml += `
+            <div class="flex justify-between items-center bg-white rounded p-2 border ${info.is_mounted ? 'border-green-200' : 'border-red-200'} hover:bg-gray-50 transition-colors duration-200">
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full ${info.is_mounted ? 'bg-green-500' : 'bg-red-500'}"></span>
+                    <div class="flex flex-col">
+                        <span class="text-sm text-gray-700">${folder}</span>
+                        <span class="text-xs text-gray-500 toggle-text">
+                            <span class="readable-time">${get_time_ago(info.mtime)}</span>
+                            <span class="time-string hidden">${info.mtime}</span>
+                        </span>
+                    </div>
+                </div>
+                <button onclick="toggleMount('${folder}')" 
+                    class="text-xs px-2 py-1 rounded ${info.is_mounted ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-green-50 text-green-700 hover:bg-green-100'} transition-colors duration-200">
+                    ${info.is_mounted ? '마운트 해제' : '마운트'}
+                </button>
+            </div>
+        `;
+    }
+    return foldersHtml;
+}
+
+// toggleMount 함수 내부 수정
 function toggleMount(folder) {
     fetch(`/toggle_mount/${encodeURIComponent(folder)}`)
         .then(response => response.json())
@@ -408,44 +412,15 @@ function toggleMount(folder) {
                 fetch('/update_state')
                     .then(response => response.json())
                     .then(data => {
-                        // 감시 중인 폴더 목록 업데이트
                         const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
                         if (monitoredFoldersContainer) {
-                            // 폴더 정보를 배열로 변환하고 수정 시간 기준으로 정렬
                             const sortedFolders = Object.entries(data.monitored_folders)
                                 .sort((a, b) => {
                                     const timeA = new Date(a[1].mtime);
                                     const timeB = new Date(b[1].mtime);
-                                    return timeB - timeA; // 최신순 정렬
+                                    return timeB - timeA;
                                 });
-
-                            let foldersHtml = '';
-                            for (const [folder, info] of sortedFolders) {
-                                foldersHtml += `
-                                    <div class="flex justify-between items-center bg-white rounded p-2 border ${info.is_mounted ? 'border-green-200' : 'border-red-200'} hover:bg-gray-50 transition-colors duration-200">
-                                        <div class="flex items-center gap-2">
-                                            <span class="w-2 h-2 rounded-full ${info.is_mounted ? 'bg-green-500' : 'bg-red-500'}"></span>
-                                            <div class="flex flex-col">
-                                                <span class="text-sm text-gray-700">${folder}</span>
-                                                <span class="text-xs text-gray-500 toggle-text">
-                                                    <span class="readable-time">${get_time_ago(info.mtime)}</span>
-                                                    <span class="time-string hidden">${info.mtime}</span>
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <div class="flex items-center gap-2">
-                                            <span class="text-xs ${info.is_mounted ? 'text-green-600' : 'text-red-600'}">
-                                                ${info.is_mounted ? '마운트됨' : '마운트안됨'}
-                                            </span>
-                                            <button onclick="toggleMount('${folder}')" 
-                                                class="text-xs px-2 py-1 ${info.is_mounted ? 'bg-red-50 hover:bg-red-100 text-red-800 border-red-200' : 'bg-green-50 hover:bg-green-100 text-green-800 border-green-200'} rounded border transition-colors duration-200">
-                                                ${info.is_mounted ? '마운트해제' : '마운트'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                `;
-                            }
-                            monitoredFoldersContainer.innerHTML = foldersHtml;
+                            monitoredFoldersContainer.innerHTML = generateFolderListHtml(sortedFolders);
                         }
                     });
             } else {
