@@ -122,6 +122,13 @@ class FolderMonitor:
         self._ensure_smb_installed()
         self._init_smb_config()
         
+        # NFS 마운트 경로의 UID/GID 확인
+        self.nfs_uid, self.nfs_gid = self._get_nfs_ownership()
+        logging.info(f"NFS 마운트 경로의 UID/GID: {self.nfs_uid}/{self.nfs_gid}")
+        
+        # SMB 사용자의 UID/GID 설정
+        self._set_smb_user_ownership()
+        
         # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들 마운트
         self._mount_recently_modified_folders()
 
@@ -461,6 +468,26 @@ class FolderMonitor:
                         logging.error(f"초기 마운트 실패: {folder}")
         except Exception as e:
             logging.error(f"최근 수정된 폴더 마운트 중 오류 발생: {e}")
+
+    def _get_nfs_ownership(self) -> tuple[int, int]:
+        """NFS 마운트 경로의 UID/GID를 반환"""
+        try:
+            stat_info = os.stat(self.config.MOUNT_PATH)
+            return stat_info.st_uid, stat_info.st_gid
+        except Exception as e:
+            logging.error(f"NFS 마운트 경로의 소유자 정보 확인 실패: {e}")
+            return 0, 0
+
+    def _set_smb_user_ownership(self) -> None:
+        """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
+        try:
+            # usermod 명령으로 SMB 사용자의 UID 변경
+            subprocess.run(['sudo', 'usermod', '-u', str(self.nfs_uid), self.config.SMB_USERNAME], check=True)
+            # groupmod 명령으로 SMB 사용자의 기본 그룹 GID 변경
+            subprocess.run(['sudo', 'groupmod', '-g', str(self.nfs_gid), self.config.SMB_USERNAME], check=True)
+            logging.info(f"SMB 사용자({self.config.SMB_USERNAME})의 UID/GID를 {self.nfs_uid}/{self.nfs_gid}로 설정했습니다.")
+        except Exception as e:
+            logging.error(f"SMB 사용자의 UID/GID 설정 실패: {e}")
 
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
