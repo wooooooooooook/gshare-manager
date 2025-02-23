@@ -131,9 +131,18 @@ class FolderMonitor:
             if os.path.exists('last_vm_start.txt'):
                 with open('last_vm_start.txt', 'r') as f:
                     return float(f.read().strip())
+            else:
+                # 파일이 없는 경우 현재 시간을 저장하고 반환
+                current_time = time.time()
+                with open('last_vm_start.txt', 'w') as f:
+                    f.write(str(current_time))
+                logging.info(f"VM 시작 시간 파일이 없어 현재 시간으로 생성: {datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')}")
+                return current_time
         except Exception as e:
-            logging.error(f"VM 마지막 시작 시간 로드 실패: {e}")
-        return 0
+            # 오류 발생 시 현재 시간 사용
+            current_time = time.time()
+            logging.error(f"VM 마지막 시작 시간 로드 실패: {e}, 현재 시간을 사용합니다.")
+            return current_time
 
     def _save_last_vm_start_time(self) -> None:
         """현재 시간을 VM 마지막 시작 시간으로 저장"""
@@ -766,6 +775,8 @@ def start_vm():
             return jsonify({"status": "error", "message": "VM이 이미 실행 중입니다."}), 400
 
         if gshare_manager.proxmox_api.start_vm():
+            # VM 시작 시간 저장
+            gshare_manager.folder_monitor.update_vm_start_time()
             return jsonify({"status": "success", "message": "VM 시작이 요청되었습니다."})
         else:
             return jsonify({"status": "error", "message": "VM 시작 실패"}), 500
