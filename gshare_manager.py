@@ -112,8 +112,9 @@ class ProxmoxAPI:
             return False
 
 class FolderMonitor:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
         self.config = config
+        self.proxmox_api = proxmox_api
         self.previous_mtimes = {}  # 각 서브폴더별 이전 수정 시간을 저장
         self.active_links = set()  # 현재 활성화된 심볼릭 링크 목록
         self.last_modified_folder = "-"
@@ -481,6 +482,15 @@ class FolderMonitor:
                 
                 # SMB 공유 활성화
                 self._activate_smb_share()
+
+                # VM이 정지 상태이고 최근 수정된 파일이 있는 경우 VM 시작
+                if not self.proxmox_api.is_vm_running():
+                    logging.info("최근 수정된 폴더가 있어 VM을 시작합니다.")
+                    if self.proxmox_api.start_vm():
+                        logging.info("VM 시작 성공")
+                        self.update_vm_start_time()
+                    else:
+                        logging.error("VM 시작 실패")
         except Exception as e:
             logging.error(f"최근 수정된 폴더 링크 생성 중 오류 발생: {e}")
 
@@ -729,7 +739,7 @@ class GShareManager:
         self.low_cpu_count = 0
         self.last_action = "프로그램 시작"
         self.last_shutdown_time = "-"
-        self.folder_monitor = FolderMonitor(config)
+        self.folder_monitor = FolderMonitor(config, proxmox_api)
         self._update_state()
 
     def _format_uptime(self, seconds: float) -> str:
@@ -804,6 +814,10 @@ class GShareManager:
                 # VM 상태 확인
                 current_vm_status = self.proxmox_api.is_vm_running()
                 
+                # VM 상태가 변경되었고, 현재 실행 상태인 경우
+                if last_vm_status is not None and last_vm_status != current_vm_status and current_vm_status:
+                    self.folder_monitor.update_vm_start_time()
+                
                 # VM 상태가 변경되었고, 현재 종료 상태인 경우
                 if last_vm_status is not None and last_vm_status != current_vm_status and not current_vm_status:
                     logging.info("VM이 종료되어 SMB 공유를 비활성화합니다.")
@@ -868,7 +882,7 @@ def setup_logging():
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     formatter.converter = lambda *args: datetime.now(tz=pytz.timezone(Config().TIMEZONE)).timetuple()
-    
+
     # 핸들러 설정
     file_handler = RotatingFileHandler('gshare_manager.log', maxBytes=5*1024*1024, backupCount=1)  # 5MB 크기
     file_handler.setFormatter(formatter)
