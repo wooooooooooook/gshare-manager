@@ -350,44 +350,17 @@ class FolderMonitor:
             # 폴더 경로의 슬래시를 언더스코어로 변환하여 공유 이름 생성
             share_name = f"{self.config.SMB_SHARE_NAME}_{subfolder.replace(os.sep, '_')}"
             
-            # 폴더 권한 설정
-            try:
-                # 폴더와 하위 파일들의 권한을 설정
-                subprocess.run(['sudo', 'chmod', '-R', '0777', source_path], check=True)
-                # 소유자 변경
-                subprocess.run(['sudo', 'chown', '-R', f"{self.config.SMB_USERNAME}:", source_path], check=True)
-                logging.info(f"폴더 권한 설정 완료: {source_path}")
-            except Exception as e:
-                logging.error(f"폴더 권한 설정 실패 ({source_path}): {e}")
-                return False
-
-            # SELinux 설정 (SELinux가 활성화된 경우)
-            try:
-                subprocess.run(['which', 'sestatus'], check=True, capture_output=True)
-                # Samba 공유를 위한 SELinux 컨텍스트 설정
-                subprocess.run(['sudo', 'chcon', '-R', '-t', 'samba_share_t', source_path], check=True)
-                logging.info(f"SELinux 컨텍스트 설정 완료: {source_path}")
-            except subprocess.CalledProcessError:
-                logging.debug("SELinux가 설치되어 있지 않음")
-            except Exception as e:
-                logging.error(f"SELinux 설정 실패 ({source_path}): {e}")
-            
-            # 공유 설정 생성
+            # 공유 설정 생성 (읽기 전용으로 설정)
             share_config = f"""
 [{share_name}]
    path = {source_path}
    comment = {self.config.SMB_COMMENT} - {subfolder}
    browseable = yes
    guest ok = {'yes' if self.config.SMB_GUEST_OK else 'no'}
-   read only = {'yes' if self.config.SMB_READ_ONLY else 'no'}
-   create mask = 0777
-   directory mask = 0777
+   read only = yes
+   create mask = 0555
+   directory mask = 0555
    force user = {self.config.SMB_USERNAME}
-   force group = {self.config.SMB_USERNAME}
-   valid users = {self.config.SMB_USERNAME}
-   write list = {self.config.SMB_USERNAME}
-   force create mode = 0777
-   force directory mode = 0777
 """
             # 설정 추가
             with open('/etc/samba/smb.conf', 'a') as f:
