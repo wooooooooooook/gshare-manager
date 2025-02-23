@@ -240,10 +240,21 @@
                         </div>
                         <div class="bg-gray-50 rounded-lg border border-gray-200 p-2">
                             <div class="grid grid-cols-2 gap-2">
-                                {% for folder, mtime in state['monitored_folders'].items() %}
+                                {% for folder, info in state['monitored_folders'].items() %}
                                 <div class="flex justify-between items-center bg-white rounded p-2 border border-gray-100">
-                                    <span class="text-sm text-gray-700">{{folder}}</span>
-                                    <span class="text-xs text-gray-500">{{get_time_ago(mtime)}}</span>
+                                    <div class="flex flex-col">
+                                        <span class="text-sm text-gray-700">{{folder}}</span>
+                                        <span class="text-xs text-gray-500">{{get_time_ago(info['mtime'])}}</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xs {% if info['is_mounted'] %}text-green-600{% else %}text-red-600{% endif %}">
+                                            {% if info['is_mounted'] %}마운트됨{% else %}마운트안됨{% endif %}
+                                        </span>
+                                        <button onclick="toggleMount('{{folder}}')" 
+                                            class="text-xs px-2 py-1 {% if info['is_mounted'] %}bg-red-50 hover:bg-red-100 text-red-800 border-red-200{% else %}bg-green-50 hover:bg-green-100 text-green-800 border-green-200{% endif %} rounded border transition-colors duration-200">
+                                            {% if info['is_mounted'] %}마운트해제{% else %}마운트{% endif %}
+                                        </button>
+                                    </div>
                                 </div>
                                 {% endfor %}
                             </div>

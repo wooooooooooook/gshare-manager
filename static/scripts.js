@@ -106,11 +106,22 @@ window.onload = function () {
                 const monitoredFoldersContainer = document.querySelector('.grid.grid-cols-2.gap-2:last-child');
                 if (monitoredFoldersContainer) {
                     let foldersHtml = '';
-                    for (const [folder, mtime] of Object.entries(data.monitored_folders)) {
+                    for (const [folder, info] of Object.entries(data.monitored_folders)) {
                         foldersHtml += `
                             <div class="flex justify-between items-center bg-white rounded p-2 border border-gray-100">
-                                <span class="text-sm text-gray-700">${folder}</span>
-                                <span class="text-xs text-gray-500">${get_time_ago(mtime)}</span>
+                                <div class="flex flex-col">
+                                    <span class="text-sm text-gray-700">${folder}</span>
+                                    <span class="text-xs text-gray-500">${get_time_ago(info.mtime)}</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs ${info.is_mounted ? 'text-green-600' : 'text-red-600'}">
+                                        ${info.is_mounted ? '마운트됨' : '마운트안됨'}
+                                    </span>
+                                    <button onclick="toggleMount('${folder}')" 
+                                        class="text-xs px-2 py-1 ${info.is_mounted ? 'bg-red-50 hover:bg-red-100 text-red-800 border-red-200' : 'bg-green-50 hover:bg-green-100 text-green-800 border-green-200'} rounded border transition-colors duration-200">
+                                        ${info.is_mounted ? '마운트해제' : '마운트'}
+                                    </button>
+                                </div>
                             </div>
                         `;
                     }
@@ -342,4 +353,49 @@ function shutdownVM() {
                 }, 3000);
             });
     }
+}
+
+function toggleMount(folder) {
+    fetch(`/toggle_mount/${encodeURIComponent(folder)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // 상태 업데이트를 위해 즉시 새로고침
+                fetch('/update_state')
+                    .then(response => response.json())
+                    .then(data => {
+                        // 감시 중인 폴더 목록 업데이트
+                        const monitoredFoldersContainer = document.querySelector('.grid.grid-cols-2.gap-2:last-child');
+                        if (monitoredFoldersContainer) {
+                            let foldersHtml = '';
+                            for (const [folder, info] of Object.entries(data.monitored_folders)) {
+                                foldersHtml += `
+                                    <div class="flex justify-between items-center bg-white rounded p-2 border border-gray-100">
+                                        <div class="flex flex-col">
+                                            <span class="text-sm text-gray-700">${folder}</span>
+                                            <span class="text-xs text-gray-500">${get_time_ago(info.mtime)}</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs ${info.is_mounted ? 'text-green-600' : 'text-red-600'}">
+                                                ${info.is_mounted ? '마운트됨' : '마운트안됨'}
+                                            </span>
+                                            <button onclick="toggleMount('${folder}')" 
+                                                class="text-xs px-2 py-1 ${info.is_mounted ? 'bg-red-50 hover:bg-red-100 text-red-800 border-red-200' : 'bg-green-50 hover:bg-green-100 text-green-800 border-green-200'} rounded border transition-colors duration-200">
+                                                ${info.is_mounted ? '마운트해제' : '마운트'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                            monitoredFoldersContainer.innerHTML = foldersHtml;
+                        }
+                    });
+            } else {
+                alert('오류: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('마운트 상태 변경 중 오류가 발생했습니다.');
+        });
 }

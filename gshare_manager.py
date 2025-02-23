@@ -323,20 +323,20 @@ class FolderMonitor:
         return total
 
     def get_monitored_folders(self) -> dict:
-        """감시 중인 모든 폴더와 수정 시간을 반환 (최근 수정된 순으로 정렬)"""
-        # 폴더와 수정 시간을 튜플 리스트로 생성
+        """감시 중인 모든 폴더와 수정 시간, 마운트 상태를 반환 (최근 수정된 순으로 정렬)"""
         folder_times = []
         for path in self.previous_mtimes.keys():
             mtime = self._get_folder_mtime(path)
             folder_times.append((path, mtime))
         
-        # 수정 시간 기준으로 내림차순 정렬
         folder_times.sort(key=lambda x: x[1], reverse=True)
         
-        # 정렬된 순서로 딕셔너리 생성
         monitored_folders = {}
         for path, mtime in folder_times:
-            monitored_folders[path] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+            monitored_folders[path] = {
+                'mtime': datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                'is_mounted': path in self.active_shares
+            }
         
         return monitored_folders
 
@@ -786,6 +786,27 @@ def shutdown_vm():
         return jsonify({"status": "success", "message": "VM 종료가 요청되었습니다."})
     except Exception as e:
         return jsonify({"status": "error", "message": f"VM 종료 요청 실패: {str(e)}"}), 500
+
+@app.route('/toggle_mount/<path:folder>')
+def toggle_mount(folder):
+    try:
+        if current_state is None:
+            return jsonify({"status": "error", "message": "State not initialized."}), 404
+
+        if folder in gshare_manager.folder_monitor.active_shares:
+            # 마운트 해제
+            if gshare_manager.folder_monitor._deactivate_smb_share(folder):
+                return jsonify({"status": "success", "message": f"{folder} 마운트가 해제되었습니다."})
+            else:
+                return jsonify({"status": "error", "message": f"{folder} 마운트 해제 실패"}), 500
+        else:
+            # 마운트
+            if gshare_manager.folder_monitor._activate_smb_share(folder):
+                return jsonify({"status": "success", "message": f"{folder} 마운트가 활성화되었습니다."})
+            else:
+                return jsonify({"status": "error", "message": f"{folder} 마운트 활성화 실패"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"마운트 상태 변경 실패: {str(e)}"}), 500
 
 def run_flask_app():
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
