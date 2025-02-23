@@ -495,13 +495,37 @@ class FolderMonitor:
     def _set_smb_user_ownership(self) -> None:
         """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
         try:
+            # 먼저 Samba 서비스 중지
+            subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=True)
+            subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=True)
+            
+            # 사용자의 모든 프로세스 종료
+            try:
+                subprocess.run(['sudo', 'pkill', '-u', self.config.SMB_USERNAME], check=False)
+                time.sleep(1)  # 프로세스가 완전히 종료되기를 기다림
+            except Exception as e:
+                logging.warning(f"사용자 프로세스 종료 중 오류 (무시됨): {e}")
+
             # usermod 명령으로 SMB 사용자의 UID 변경
             subprocess.run(['sudo', 'usermod', '-u', str(self.nfs_uid), self.config.SMB_USERNAME], check=True)
+            
             # groupmod 명령으로 SMB 사용자의 기본 그룹 GID 변경
-            subprocess.run(['sudo', 'groupmod', '-g', str(self.nfs_gid), self.config.SMB_USERNAME], check=True)
+            group_name = self.config.SMB_USERNAME  # 일반적으로 사용자명과 동일한 그룹명 사용
+            subprocess.run(['sudo', 'groupmod', '-g', str(self.nfs_gid), group_name], check=True)
+            
+            # 소유권 변경이 완료된 후 Samba 서비스 재시작
+            subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
+            subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
+            
             logging.info(f"SMB 사용자({self.config.SMB_USERNAME})의 UID/GID를 {self.nfs_uid}/{self.nfs_gid}로 설정했습니다.")
         except Exception as e:
             logging.error(f"SMB 사용자의 UID/GID 설정 실패: {e}")
+            # 오류 발생 시 Samba 서비스 재시작 시도
+            try:
+                subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
+                subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
+            except Exception as restart_error:
+                logging.error(f"Samba 서비스 재시작 실패: {restart_error}")
 
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
