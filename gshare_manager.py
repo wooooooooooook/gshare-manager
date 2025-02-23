@@ -363,17 +363,13 @@ class FolderMonitor:
             if subfolder in self.active_shares:
                 return True
 
-            # 기존 gshare 공유가 있는지 확인
-            share_exists = False
-            with open('/etc/samba/smb.conf', 'r') as f:
-                share_exists = f'[{self.config.SMB_SHARE_NAME}]' in f.read()
-
-            # 공유 설정 생성
-            share_config = ""
-            if not share_exists:
-                # gshare 공유가 없으면 새로 생성
-                share_config = f"""
-[{self.config.SMB_SHARE_NAME}]
+            source_path = os.path.join(self.config.MOUNT_PATH, subfolder)
+            # 공유 이름을 gshare로 고정하고, 경로를 gshare 아래에 위치하도록 설정
+            share_name = self.config.SMB_SHARE_NAME
+            
+            # 공유 설정 생성 (읽기 전용으로 설정)
+            share_config = f"""
+[{share_name}]
    path = {self.config.MOUNT_PATH}
    comment = {self.config.SMB_COMMENT}
    browseable = yes
@@ -386,9 +382,9 @@ class FolderMonitor:
    hide dot files = yes
    delete veto files = no
 """
-                # 설정 추가
-                with open('/etc/samba/smb.conf', 'a') as f:
-                    f.write(share_config)
+            # 설정 추가
+            with open('/etc/samba/smb.conf', 'a') as f:
+                f.write(share_config)
             
             # Samba 서비스 재시작
             subprocess.run(['sudo', 'systemctl', 'restart', 'smbd'], check=True)
