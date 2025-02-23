@@ -667,9 +667,10 @@ class FolderMonitor:
                     logging.debug("그룹 GID 변경 완료")
             
             # Samba 사용자 비밀번호 설정
-            logging.info(f"Samba 사용자 비밀번호 설정 시도...")
+            logging.debug(f"Samba 사용자 비밀번호 설정 시도...")
+            password_input = f"{self.config.SMB_PASSWORD}\n{self.config.SMB_PASSWORD}\n"
             smbpasswd_result = subprocess.run(['sudo', 'smbpasswd', '-a', self.config.SMB_USERNAME],
-                                          input=f"{self.config.SMB_PASSWORD}\n{self.config.SMB_PASSWORD}\n".encode(),
+                                          input=password_input.encode('utf-8'),
                                           capture_output=True, text=True)
             if smbpasswd_result.returncode != 0:
                 raise Exception(f"Samba 비밀번호 설정 실패: {smbpasswd_result.stderr}")
