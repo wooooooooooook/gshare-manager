@@ -277,7 +277,6 @@ class FolderMonitor:
         for folder in new_folders:
             mtime = self._get_folder_mtime(folder)
             self.previous_mtimes[folder] = mtime
-            logging.info(f"새로운 폴더 감지됨: {folder}")
         
         # 삭제된 폴더 처리
         deleted_folders = previous_subfolders - current_subfolders
@@ -286,7 +285,6 @@ class FolderMonitor:
             # SMB 공유도 비활성화
             if folder in self.active_shares:
                 self._deactivate_smb_share(folder)
-            logging.info(f"폴더가 삭제됨: {folder}")
         
         # 기존 폴더 업데이트 (삭제되지 않은 폴더만)
         for folder in current_subfolders & previous_subfolders:
@@ -496,34 +494,63 @@ class FolderMonitor:
         """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
         try:
             # 먼저 Samba 서비스 중지
+            logging.info("Samba 서비스 중지 시도...")
             subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=True)
             subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=True)
+            logging.info("Samba 서비스 중지 완료")
             
-            # 사용자의 모든 프로세스 종료
-            try:
-                subprocess.run(['sudo', 'pkill', '-u', self.config.SMB_USERNAME], check=False)
-                time.sleep(1)  # 프로세스가 완전히 종료되기를 기다림
-            except Exception as e:
-                logging.warning(f"사용자 프로세스 종료 중 오류 (무시됨): {e}")
+            # 사용자의 모든 프로세스 확인
+            logging.info(f"사용자 '{self.config.SMB_USERNAME}'의 프로세스 확인...")
+            ps_result = subprocess.run(['ps', '-u', self.config.SMB_USERNAME], capture_output=True, text=True)
+            if ps_result.stdout.strip():
+                logging.info(f"실행 중인 프로세스 목록:\n{ps_result.stdout}")
+                
+                # 프로세스 강제 종료 시도
+                logging.info("프로세스 종료 시도 (SIGTERM)...")
+                subprocess.run(['sudo', 'pkill', '-TERM', '-u', self.config.SMB_USERNAME], check=False)
+                time.sleep(2)  # SIGTERM 신호가 처리될 시간 부여
+                
+                # 여전히 실행 중인 프로세스가 있다면 SIGKILL로 강제 종료
+                ps_check = subprocess.run(['ps', '-u', self.config.SMB_USERNAME], capture_output=True, text=True)
+                if ps_check.stdout.strip():
+                    logging.info("일부 프로세스가 여전히 실행 중. SIGKILL 사용...")
+                    subprocess.run(['sudo', 'pkill', '-KILL', '-u', self.config.SMB_USERNAME], check=False)
+                    time.sleep(1)
+            else:
+                logging.info("실행 중인 프로세스가 없습니다.")
 
             # usermod 명령으로 SMB 사용자의 UID 변경
-            subprocess.run(['sudo', 'usermod', '-u', str(self.nfs_uid), self.config.SMB_USERNAME], check=True)
+            logging.info(f"사용자 UID 변경 시도 ({self.config.SMB_USERNAME} -> {self.nfs_uid})...")
+            usermod_result = subprocess.run(['sudo', 'usermod', '-u', str(self.nfs_uid), self.config.SMB_USERNAME], 
+                                         capture_output=True, text=True)
+            if usermod_result.returncode != 0:
+                raise Exception(f"usermod 실패: {usermod_result.stderr}")
+            logging.info("사용자 UID 변경 완료")
             
             # groupmod 명령으로 SMB 사용자의 기본 그룹 GID 변경
             group_name = self.config.SMB_USERNAME  # 일반적으로 사용자명과 동일한 그룹명 사용
-            subprocess.run(['sudo', 'groupmod', '-g', str(self.nfs_gid), group_name], check=True)
+            logging.info(f"그룹 GID 변경 시도 ({group_name} -> {self.nfs_gid})...")
+            groupmod_result = subprocess.run(['sudo', 'groupmod', '-g', str(self.nfs_gid), group_name],
+                                          capture_output=True, text=True)
+            if groupmod_result.returncode != 0:
+                raise Exception(f"groupmod 실패: {groupmod_result.stderr}")
+            logging.info("그룹 GID 변경 완료")
             
             # 소유권 변경이 완료된 후 Samba 서비스 재시작
+            logging.info("Samba 서비스 재시작...")
             subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
             subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
+            logging.info("Samba 서비스 재시작 완료")
             
             logging.info(f"SMB 사용자({self.config.SMB_USERNAME})의 UID/GID를 {self.nfs_uid}/{self.nfs_gid}로 설정했습니다.")
         except Exception as e:
-            logging.error(f"SMB 사용자의 UID/GID 설정 실패: {e}")
+            logging.error(f"SMB 사용자의 UID/GID 설정 실패: {str(e)}")
             # 오류 발생 시 Samba 서비스 재시작 시도
             try:
+                logging.info("오류 발생 후 Samba 서비스 재시작 시도...")
                 subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
                 subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
+                logging.info("Samba 서비스 재시작 완료")
             except Exception as restart_error:
                 logging.error(f"Samba 서비스 재시작 실패: {restart_error}")
 
