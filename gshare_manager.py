@@ -246,11 +246,37 @@ class FolderMonitor:
             return self.previous_mtimes.get(path, 0)
 
     def _update_subfolder_mtimes(self) -> None:
-        """모든 서브폴더의 수정 시간을 업데이트"""
-        subfolders = self._get_subfolders()
-        for subfolder in subfolders:
-            if subfolder not in self.previous_mtimes:
-                self.previous_mtimes[subfolder] = self._get_folder_mtime(subfolder)
+        """모든 서브폴더의 수정 시간을 업데이트하고 삭제된 폴더 제거"""
+        current_subfolders = set(self._get_subfolders())
+        previous_subfolders = set(self.previous_mtimes.keys())
+        
+        # 새로 생성된 폴더 처리
+        new_folders = current_subfolders - previous_subfolders
+        for folder in new_folders:
+            mtime = self._get_folder_mtime(folder)
+            self.previous_mtimes[folder] = mtime
+            logging.info(f"새로운 폴더 감지됨: {folder}")
+        
+        # 삭제된 폴더 처리
+        deleted_folders = previous_subfolders - current_subfolders
+        for folder in deleted_folders:
+            del self.previous_mtimes[folder]
+            # SMB 공유도 비활성화
+            if folder in self.active_shares:
+                self._deactivate_smb_share(folder)
+            logging.info(f"폴더가 삭제됨: {folder}")
+        
+        # 기존 폴더 업데이트 (삭제되지 않은 폴더만)
+        for folder in current_subfolders & previous_subfolders:
+            try:
+                full_path = os.path.join(self.config.MOUNT_PATH, folder)
+                if os.path.exists(full_path):
+                    if not os.access(full_path, os.R_OK):
+                        logging.warning(f"폴더 접근 권한 없음: {folder}")
+                        continue
+            except Exception as e:
+                logging.error(f"폴더 상태 확인 중 오류 발생 ({folder}): {e}")
+                continue
 
     def check_modifications(self) -> tuple[list[str], bool]:
         """수정 시간이 변경된 서브폴더 목록과 VM 시작 필요 여부를 반환"""
@@ -294,11 +320,21 @@ class FolderMonitor:
         return total
 
     def get_monitored_folders(self) -> dict:
-        """감시 중인 모든 폴더와 수정 시간을 반환"""
-        monitored_folders = {}
+        """감시 중인 모든 폴더와 수정 시간을 반환 (최근 수정된 순으로 정렬)"""
+        # 폴더와 수정 시간을 튜플 리스트로 생성
+        folder_times = []
         for path in self.previous_mtimes.keys():
             mtime = self._get_folder_mtime(path)
+            folder_times.append((path, mtime))
+        
+        # 수정 시간 기준으로 내림차순 정렬
+        folder_times.sort(key=lambda x: x[1], reverse=True)
+        
+        # 정렬된 순서로 딕셔너리 생성
+        monitored_folders = {}
+        for path, mtime in folder_times:
             monitored_folders[path] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+        
         return monitored_folders
 
     def _activate_smb_share(self, subfolder: str) -> bool:
@@ -311,6 +347,28 @@ class FolderMonitor:
             # 폴더 경로의 슬래시를 언더스코어로 변환하여 공유 이름 생성
             share_name = f"{self.config.SMB_SHARE_NAME}_{subfolder.replace(os.sep, '_')}"
             
+            # 폴더 권한 설정
+            try:
+                # 폴더와 하위 파일들의 권한을 설정
+                subprocess.run(['sudo', 'chmod', '-R', '0777', source_path], check=True)
+                # 소유자 변경
+                subprocess.run(['sudo', 'chown', '-R', f"{self.config.SMB_USERNAME}:", source_path], check=True)
+                logging.info(f"폴더 권한 설정 완료: {source_path}")
+            except Exception as e:
+                logging.error(f"폴더 권한 설정 실패 ({source_path}): {e}")
+                return False
+
+            # SELinux 설정 (SELinux가 활성화된 경우)
+            try:
+                subprocess.run(['which', 'sestatus'], check=True, capture_output=True)
+                # Samba 공유를 위한 SELinux 컨텍스트 설정
+                subprocess.run(['sudo', 'chcon', '-R', '-t', 'samba_share_t', source_path], check=True)
+                logging.info(f"SELinux 컨텍스트 설정 완료: {source_path}")
+            except subprocess.CalledProcessError:
+                logging.debug("SELinux가 설치되어 있지 않음")
+            except Exception as e:
+                logging.error(f"SELinux 설정 실패 ({source_path}): {e}")
+            
             # 공유 설정 생성
             share_config = f"""
 [{share_name}]
@@ -322,6 +380,11 @@ class FolderMonitor:
    create mask = 0777
    directory mask = 0777
    force user = {self.config.SMB_USERNAME}
+   force group = {self.config.SMB_USERNAME}
+   valid users = {self.config.SMB_USERNAME}
+   write list = {self.config.SMB_USERNAME}
+   force create mode = 0777
+   force directory mode = 0777
 """
             # 설정 추가
             with open('/etc/samba/smb.conf', 'a') as f:
