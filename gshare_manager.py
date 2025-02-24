@@ -717,9 +717,9 @@ class GShareManager:
         self.proxmox_api = proxmox_api
         self.low_cpu_count = 0
         self.last_action = "프로그램 시작"
-        self.last_shutdown_time = "-"
         self.folder_monitor = FolderMonitor(config, proxmox_api)
         self.proxmox_api.set_folder_monitor(self.folder_monitor)  # FolderMonitor 인스턴스 설정
+        self.last_shutdown_time = datetime.fromtimestamp(self.folder_monitor.last_shutdown_time).strftime('%Y-%m-%d %H:%M:%S')
         self._update_state()
 
     def _format_uptime(self, seconds: float) -> str:
@@ -764,6 +764,7 @@ class GShareManager:
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
             uptime = self.proxmox_api.get_vm_uptime()
             uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
+            self.last_shutdown_time = datetime.fromtimestamp(self.folder_monitor.last_shutdown_time).strftime('%Y-%m-%d %H:%M:%S')
 
             current_state = State(
                 last_check_time=current_time,

@@ -10,32 +10,19 @@
 </head>
 
 <body class="bg-gray-100 p-4">
-    <!-- 네비게이션 바 -->
-    <nav class="bg-white shadow-sm mb-4 -mx-4">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex">
-                    <div class="flex-shrink-0 flex items-center">
-                        <a href="/" class="text-xl font-bold text-gray-800">GShare Manager</a>
-                    </div>
-                    <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
-                        <a href="/" class="border-indigo-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">대시보드</a>
-                        <a href="/settings" class="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium">설정</a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </nav>
-
     <div class="max-w-7xl mx-auto">
+        <div class="flex items-center justify-between mb-4">
+            <h1 class="text-xl font-bold text-gray-800">GShare Manager</h1>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <!-- 왼쪽 컬럼 -->
             <div class="space-y-4">
                 <!-- 상태 요약 섹션 -->
                 <div class="grid grid-cols-2 gap-2">
                     <div class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 toggle-text relative overflow-hidden">
-                        <div class="absolute inset-0 bg-gray-100">
-                            <div class="last-check-progress h-full bg-emerald-100 transition-all duration-1000" style="width: 0%"></div>
+                        <div class="absolute inset-0 bg-gray-50">
+                            <div class="last-check-progress h-full bg-blue-100 transition-all duration-1000" style="width: 0%"></div>
                         </div>
                         <div class="flex items-center gap-1 relative">
                             <svg class="w-4 h-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none"
@@ -63,9 +50,9 @@
                             <span class="text-right">{{state['last_action']}}</span>
                         </div>
                     </div>
-                    <div class="col-span-2 grid grid-cols-4 gap-2">
+                    <div class="col-span-2 grid grid-cols-5 gap-2">
                         <button onclick="restartService()" 
-                            class="bg-yellow-50 hover:bg-yellow-100 text-yellow-800 rounded-lg p-2 border border-yellow-200 transition-colors duration-200">
+                            class="bg-gray-50 hover:bg-yellow-100 text-gray-700 hover:text-yellow-800 rounded-lg p-2 border border-gray-200 hover:border-yellow-200 transition-colors duration-200">
                             <div class="flex items-center justify-center gap-1">
                                 <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
@@ -74,7 +61,7 @@
                             </div>
                         </button>
                         <button onclick="retryMount()" 
-                            class="bg-yellow-50 hover:bg-yellow-100 text-yellow-800 rounded-lg p-2 border border-yellow-200 transition-colors duration-200">
+                            class="bg-gray-50 hover:bg-yellow-100 text-gray-700 hover:text-yellow-800 rounded-lg p-2 border border-gray-200 hover:border-yellow-200 transition-colors duration-200">
                             <div class="flex items-center justify-center gap-1">
                                 <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
@@ -83,7 +70,7 @@
                             </div>
                         </button>
                         <button onclick="startVM()" 
-                            class="bg-green-50 hover:bg-green-100 text-green-800 rounded-lg p-2 border border-green-200 transition-colors duration-200">
+                            class="bg-gray-50 hover:bg-green-100 text-gray-700 hover:text-green-800 rounded-lg p-2 border border-gray-200 hover:border-green-200 transition-colors duration-200">
                             <div class="flex items-center justify-center gap-1">
                                 <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
@@ -92,7 +79,7 @@
                             </div>
                         </button>
                         <button onclick="shutdownVM()" 
-                            class="bg-red-50 hover:bg-red-100 text-red-800 rounded-lg p-2 border border-red-200 transition-colors duration-200">
+                            class="bg-gray-50 hover:bg-red-100 text-gray-700 hover:text-red-800 rounded-lg p-2 border border-gray-200 hover:border-red-200 transition-colors duration-200">
                             <div class="flex items-center justify-center gap-1">
                                 <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 117.072-7.072" />
@@ -100,6 +87,16 @@
                                 <span class="text-sm font-medium">VM 종료</span>
                             </div>
                         </button>
+                        <a href="/settings"
+                            class="bg-gray-50 hover:bg-blue-100 text-gray-700 hover:text-blue-800 rounded-lg p-2 border border-gray-200 hover:border-blue-200 transition-colors duration-200">
+                            <div class="flex items-center justify-center gap-1">
+                                <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                <span class="text-sm font-medium">설정</span>
+                            </div>
+                        </a>
                         <!-- 상태 메시지 영역 -->
                         <div id="restartStatus" class="col-span-3 text-sm text-center hidden">
                             <span class="inline-flex items-center">
