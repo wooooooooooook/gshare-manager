@@ -37,7 +37,6 @@ class State:
     uptime: str
     last_shutdown_time: str
     monitored_folders: dict
-    last_vm_start_time: str
     smb_running: bool
     check_interval: int
     
@@ -113,10 +112,7 @@ class ProxmoxAPI:
             )
             response.raise_for_status()
             logging.debug(f"VM 시작 응답 받음")
-            
-            if self.folder_monitor:
-                self.folder_monitor.update_vm_start_time()
-                
+                            
             return True
         except Exception as e:
             return False
@@ -127,7 +123,7 @@ class FolderMonitor:
         self.proxmox_api = proxmox_api
         self.previous_mtimes = {}  # 각 서브폴더별 이전 수정 시간을 저장
         self.active_links = set()  # 현재 활성화된 심볼릭 링크 목록
-        self.last_vm_start_time = self._load_last_vm_start_time()  # VM 마지막 시작 시간
+        self.last_shutdown_time = self._load_last_shutdown_time()  # VM 마지막 종료 시간
         
         # 공유용 링크 디렉토리 생성
         self.links_dir = "/mnt/gshare_links"
@@ -163,35 +159,35 @@ class FolderMonitor:
         # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성
         self._create_links_for_recently_modified()
 
-    def _load_last_vm_start_time(self) -> float:
-        """VM 마지막 시작 시간을 로드"""
+    def _load_last_shutdown_time(self) -> float:
+        """VM 마지막 종료 시간을 로드"""
         try:
-            if os.path.exists('last_vm_start.txt'):
-                with open('last_vm_start.txt', 'r') as f:
+            if os.path.exists('last_shutdown.txt'):
+                with open('last_shutdown.txt', 'r') as f:
                     return float(f.read().strip())
             else:
                 # 파일이 없는 경우 현재 시간을 저장하고 반환
                 current_time = time.time()
-                with open('last_vm_start.txt', 'w') as f:
+                with open('last_shutdown.txt', 'w') as f:
                     f.write(str(current_time))
-                logging.info(f"VM 시작 시간 파일이 없어 현재 시간으로 생성: {datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')}")
+                logging.info(f"VM 종료 시간 파일이 없어 현재 시간으로 생성: {datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')}")
                 return current_time
         except Exception as e:
             # 오류 발생 시 현재 시간 사용
             current_time = time.time()
-            logging.error(f"VM 마지막 시작 시간 로드 실패: {e}, 현재 시간을 사용합니다.")
+            logging.error(f"VM 마지막 종료 시간 로드 실패: {e}, 현재 시간을 사용합니다.")
             return current_time
 
-    def _save_last_vm_start_time(self) -> None:
-        """현재 시간을 VM 마지막 시작 시간으로 저장"""
+    def _save_last_shutdown_time(self) -> None:
+        """현재 시간을 VM 마지막 종료 시간으로 저장"""
         try:
             current_time = time.time()
-            with open('last_vm_start.txt', 'w') as f:
+            with open('last_shutdown.txt', 'w') as f:
                 f.write(str(current_time))
-            self.last_vm_start_time = current_time
-            logging.info(f"VM 시작 시간 저장됨: {datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')}")
+            self.last_shutdown_time = current_time
+            logging.info(f"VM 종료 시간 저장됨: {datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')}")
         except Exception as e:
-            logging.error(f"VM 시작 시간 저장 실패: {e}")
+            logging.error(f"VM 종료 시간 저장 실패: {e}")
 
     def _ensure_smb_installed(self):
         """Samba가 설치되어 있는지 확인하고 설치"""
@@ -352,15 +348,11 @@ class FolderMonitor:
                 self._create_symlink(path)
                 
                 # VM 마지막 시작 시간보다 수정 시간이 더 최근인 경우
-                if current_mtime > self.last_vm_start_time:
+                if current_mtime > self.last_shutdown_time:
                     should_start_vm = True
                     logging.info(f"VM 시작 조건 충족 - 수정 시간: {last_modified}")
         
         return changed_folders, should_start_vm
-
-    def update_vm_start_time(self) -> None:
-        """VM이 시작될 때 호출하여 시작 시간을 업데이트"""
-        self._save_last_vm_start_time()
 
     def get_monitored_folders(self) -> dict:
         """감시 중인 모든 폴더와 수정 시간, 링크 상태를 반환"""
@@ -535,13 +527,13 @@ class FolderMonitor:
         try:
             recently_modified = []
             for path, mtime in self.previous_mtimes.items():
-                if mtime > self.last_vm_start_time:
+                if mtime > self.last_shutdown_time:
                     recently_modified.append(path)
                     last_modified = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
                     logging.info(f"최근 수정된 폴더 감지 ({path}): {last_modified}")
             
             if recently_modified:
-                logging.info(f"마지막 VM 시작({datetime.fromtimestamp(self.last_vm_start_time).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(recently_modified)}개의 링크를 생성합니다.")
+                logging.info(f"마지막 VM 종료({datetime.fromtimestamp(self.last_shutdown_time).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(recently_modified)}개의 링크를 생성합니다.")
                 for folder in recently_modified:
                     if self._create_symlink(folder):
                         logging.debug(f"초기 링크 생성 성공: {folder}")
@@ -708,6 +700,9 @@ class GShareManager:
                 uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
                 self.last_shutdown_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
                 
+                # VM 종료 시간 저장
+                self.folder_monitor._save_last_shutdown_time()
+                
                 # VM 종료 시 모든 SMB 공유 비활성화
                 self.folder_monitor._deactivate_smb_share()
                 
@@ -726,10 +721,6 @@ class GShareManager:
             uptime = self.proxmox_api.get_vm_uptime()
             uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
 
-            # VM 마지막 시작 시간을 가져옵니다
-            last_vm_start = datetime.fromtimestamp(self.folder_monitor.last_vm_start_time, 
-                                                 pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
-
             current_state = State(
                 last_check_time=current_time,
                 vm_running=vm_running,
@@ -740,7 +731,6 @@ class GShareManager:
                 uptime=uptime_str,
                 last_shutdown_time=self.last_shutdown_time,
                 monitored_folders=self.folder_monitor.get_monitored_folders(),
-                last_vm_start_time=last_vm_start,
                 smb_running=self.folder_monitor._check_smb_status(),
                 check_interval=self.config.CHECK_INTERVAL
             )
@@ -866,7 +856,6 @@ def get_default_state() -> State:
         uptime="알 수 없음",
         last_shutdown_time="-",
         monitored_folders={},
-        last_vm_start_time="-",
         smb_running=False,
         check_interval=Config().CHECK_INTERVAL
     )

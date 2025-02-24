@@ -111,13 +111,6 @@ window.onload = function () {
                 get_time_ago(lastShutdownTime.innerText) : '정보없음';
         }
 
-        // VM 마지막 시작 시간 업데이트
-        const lastVMStartTime = document.querySelector('.last-vm-start-time .time-string');
-        if (lastVMStartTime) {
-            const readableTime = document.querySelector('.last-vm-start-time .readable-time');
-            readableTime.innerText = get_time_ago(lastVMStartTime.innerText);
-        }
-
         // 모든 폴더의 수정 시간 업데이트
         document.querySelectorAll('.monitored-folders-grid .toggle-text').forEach(el => {
             const timeString = el.querySelector('.time-string');
@@ -179,14 +172,6 @@ window.onload = function () {
                 }
                 if (elements.lastShutdownTimeString) {
                     elements.lastShutdownTimeString.innerText = data.last_shutdown_time;
-                }
-
-                // Last VM Start 시간 업데이트
-                const lastVMStartTimeReadable = document.querySelector('.last-vm-start-time .readable-time');
-                const lastVMStartTimeString = document.querySelector('.last-vm-start-time .time-string');
-                if (lastVMStartTimeReadable && lastVMStartTimeString) {
-                    lastVMStartTimeString.innerText = data.last_vm_start_time;
-                    lastVMStartTimeReadable.innerText = get_time_ago(data.last_vm_start_time);
                 }
 
                 // 감시 중인 폴더 목록 업데이트
