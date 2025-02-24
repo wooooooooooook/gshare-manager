@@ -64,6 +64,10 @@ window.onload = function () {
     const initialVMStatus = document.querySelector('.vm-status').innerText;
     updateVMStatus(initialVMStatus);
 
+    // 초기 SMB 상태에 따라 컨테이너 표시 설정
+    const initialSMBStatus = document.querySelector('.smb-status').innerText;
+    updateSMBStatus(initialSMBStatus);
+
     // .toggle-text 클릭이벤트 추가
     document.querySelectorAll('.toggle-text').forEach(el => {
         el.addEventListener('click', () => {
@@ -75,9 +79,36 @@ window.onload = function () {
 
     // 1초마다 시간 표시 업데이트
     setInterval(function () {
-        if (lastCheckTimeData) {
-            document.querySelector('.last-check-time .readable-time').innerText = get_time_ago(lastCheckTimeData);
+        // 마지막 체크 시간 업데이트
+        const lastCheckTime = document.querySelector('.last-check-time .time-string');
+        if (lastCheckTime) {
+            const readableTime = document.querySelector('.last-check-time .readable-time');
+            readableTime.innerText = get_time_ago(lastCheckTime.innerText);
         }
+
+        // 마지막 종료 시간 업데이트
+        const lastShutdownTime = document.querySelector('.last-shutdown-time .time-string');
+        if (lastShutdownTime) {
+            const readableTime = document.querySelector('.last-shutdown-time .readable-time');
+            readableTime.innerText = lastShutdownTime.innerText !== '-' ? 
+                get_time_ago(lastShutdownTime.innerText) : '정보없음';
+        }
+
+        // VM 마지막 시작 시간 업데이트
+        const lastVMStartTime = document.querySelector('.last-vm-start-time .time-string');
+        if (lastVMStartTime) {
+            const readableTime = document.querySelector('.last-vm-start-time .readable-time');
+            readableTime.innerText = get_time_ago(lastVMStartTime.innerText);
+        }
+
+        // 모든 폴더의 수정 시간 업데이트
+        document.querySelectorAll('.monitored-folders-grid .toggle-text').forEach(el => {
+            const timeString = el.querySelector('.time-string');
+            const readableTime = el.querySelector('.readable-time');
+            if (timeString && readableTime) {
+                readableTime.innerText = get_time_ago(timeString.innerText);
+            }
+        });
     }, 1000);
 
     // 5초마다 상태 업데이트 요청
@@ -85,56 +116,41 @@ window.onload = function () {
         fetch('/update_state')
             .then(response => response.json())
             .then(data => {
-                lastCheckTimeData = data.last_check_time;
-                document.querySelector('.last-check-time .readable-time').innerText = get_time_ago(data.last_check_time);
-                document.querySelector('.last-check-time .time-string').innerText = data.last_check_time;
-                document.querySelector('.last-action').innerText = data.last_action;
-                document.querySelector('.vm-status').innerText = data.vm_status;
-                updateVMStatus(data.vm_status);
-                document.querySelector('.cpu-usage').innerText = data.cpu_usage + '%';
-                document.querySelector('.low-cpu-count').innerText = data.low_cpu_count;
-                document.querySelector('.uptime').innerText = data.uptime;
-
-                // 필수 요소들도 존재 여부 확인
+                // 필수 요소들 존재 여부 확인 및 업데이트
                 const elements = {
+                    lastCheckTimeReadable: document.querySelector('.last-check-time .readable-time'),
                     lastCheckTimeString: document.querySelector('.last-check-time .time-string'),
                     lastAction: document.querySelector('.last-action'),
                     vmStatus: document.querySelector('.vm-status'),
+                    smbStatus: document.querySelector('.smb-status'),
                     cpuUsage: document.querySelector('.cpu-usage'),
                     lowCpuCount: document.querySelector('.low-cpu-count'),
-                    uptime: document.querySelector('.uptime')
+                    uptime: document.querySelector('.uptime'),
+                    lastShutdownTimeReadable: document.querySelector('.last-shutdown-time .readable-time'),
+                    lastShutdownTimeString: document.querySelector('.last-shutdown-time .time-string')
                 };
 
                 // 각 요소가 존재할 때만 업데이트
+                if (elements.lastCheckTimeReadable) elements.lastCheckTimeReadable.innerText = get_time_ago(data.last_check_time);
                 if (elements.lastCheckTimeString) elements.lastCheckTimeString.innerText = data.last_check_time;
                 if (elements.lastAction) elements.lastAction.innerText = data.last_action;
                 if (elements.vmStatus) {
                     elements.vmStatus.innerText = data.vm_status;
                     updateVMStatus(data.vm_status);
                 }
+                if (elements.smbStatus) {
+                    elements.smbStatus.innerText = data.smb_status;
+                    updateSMBStatus(data.smb_status);
+                }
                 if (elements.cpuUsage) elements.cpuUsage.innerText = data.cpu_usage + '%';
                 if (elements.lowCpuCount) elements.lowCpuCount.innerText = data.low_cpu_count;
                 if (elements.uptime) elements.uptime.innerText = data.uptime;
-
-                // 옵셔널한 요소들은 존재 여부 확인 후 업데이트
-                const lastFilesChangeTimeReadable = document.querySelector('.last-files-change-time .readable-time');
-                const lastFilesChangeTimeString = document.querySelector('.last-files-change-time .time-string');
-                const lastShutdownTimeReadable = document.querySelector('.last-shutdown-time .readable-time');
-                const lastShutdownTimeString = document.querySelector('.last-shutdown-time .time-string');
-
-                if (lastFilesChangeTimeReadable) {
-                    lastFilesChangeTimeReadable.innerText = data.last_size_change_time !== '-' ? 
-                        get_time_ago(data.last_size_change_time) : '정보없음';
-                }
-                if (lastFilesChangeTimeString) {
-                    lastFilesChangeTimeString.innerText = data.last_size_change_time;
-                }
-                if (lastShutdownTimeReadable) {
-                    lastShutdownTimeReadable.innerText = data.last_shutdown_time !== '-' ? 
+                if (elements.lastShutdownTimeReadable) {
+                    elements.lastShutdownTimeReadable.innerText = data.last_shutdown_time !== '-' ? 
                         get_time_ago(data.last_shutdown_time) : '정보없음';
                 }
-                if (lastShutdownTimeString) {
-                    lastShutdownTimeString.innerText = data.last_shutdown_time;
+                if (elements.lastShutdownTimeString) {
+                    elements.lastShutdownTimeString.innerText = data.last_shutdown_time;
                 }
 
                 // 감시 중인 폴더 목록 업데이트
@@ -189,6 +205,29 @@ function updateVMStatus(status) {
         // 중지 시 요소들 표시
         vmRunningElements.forEach(el => el.classList.add('hidden'));
         vmStoppedElements.forEach(el => el.classList.remove('hidden'));
+    }
+}
+
+function updateSMBStatus(status) {
+    const smbStatusContainer = document.querySelector('.smb-status-container');
+    const smbStatusSpan = document.querySelector('.smb-status span');
+
+    if (status === 'ON') {
+        // SMB 실행 중
+        smbStatusContainer.classList.remove('bg-red-50', 'border-red-100');
+        smbStatusContainer.classList.add('bg-green-50', 'border-green-100');
+        
+        // 상태 표시 스타일 변경
+        smbStatusSpan.classList.remove('bg-red-100', 'text-red-800');
+        smbStatusSpan.classList.add('bg-green-100', 'text-green-800');
+    } else {
+        // SMB 중지됨
+        smbStatusContainer.classList.remove('bg-green-50', 'border-green-100');
+        smbStatusContainer.classList.add('bg-red-50', 'border-red-100');
+        
+        // 상태 표시 스타일 변경
+        smbStatusSpan.classList.remove('bg-green-100', 'text-green-800');
+        smbStatusSpan.classList.add('bg-red-100', 'text-red-800');
     }
 }
 

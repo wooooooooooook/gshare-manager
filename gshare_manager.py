@@ -7,20 +7,17 @@ import requests
 import subprocess
 from datetime import datetime
 import pytz
-import json
-from config import Config  # 새로운 import 추가
+from config import Config
 from dotenv import load_dotenv, set_key
 import os
 from flask import Flask, jsonify, render_template
 import threading
 import sys
+import atexit
 
-# Flask 로깅 비활성화
 cli = sys.modules['flask.cli']
 cli.show_server_banner = lambda *x: None
-
 app = Flask(__name__)
-# Flask 기본 로거 비활성화
 app.logger.disabled = True
 log = logging.getLogger('werkzeug')
 log.disabled = True
@@ -34,19 +31,18 @@ class State:
     last_check_time: str
     vm_running: bool
     cpu_usage: float
-    last_modified_folder: str  # 가장 최근에 수정된 폴더 이름
-    last_modified_time: str    # 해당 폴더의 수정 시간
     last_action: str
     low_cpu_count: int
     uptime: str
     last_shutdown_time: str
-    monitored_folders: dict    # 감시 중인 폴더들과 수정 시간
-    last_vm_start_time: str    # VM 마지막 시작 시간
+    monitored_folders: dict
+    last_vm_start_time: str
+    smb_running: bool
     
     def to_dict(self):
         data = asdict(self)
-        # vm_running을 웹 표시용 문자열로 변환
         data['vm_status'] = 'ON' if self.vm_running else 'OFF'
+        data['smb_status'] = 'ON' if self.smb_running else 'OFF'
         return data
 
 class ProxmoxAPI:
@@ -55,6 +51,7 @@ class ProxmoxAPI:
         self.session = requests.Session()
         self.session.verify = False
         self._set_token_auth()
+        self.folder_monitor = None
 
     def _set_token_auth(self) -> None:
         # API 토큰을 사용하여 인증 헤더 설정
@@ -63,6 +60,10 @@ class ProxmoxAPI:
         })
         logging.info("Proxmox API 토큰 인증 설정 완료")
         self.session.timeout = (5, 10)  # (connect timeout, read timeout)
+
+    def set_folder_monitor(self, folder_monitor):
+        """FolderMonitor 인스턴스 설정"""
+        self.folder_monitor = folder_monitor
 
     def is_vm_running(self) -> bool:
         try:
@@ -110,6 +111,10 @@ class ProxmoxAPI:
             )
             response.raise_for_status()
             logging.debug(f"VM 시작 응답 받음")
+            
+            if self.folder_monitor:
+                self.folder_monitor.update_vm_start_time()
+                
             return True
         except Exception as e:
             return False
@@ -120,8 +125,6 @@ class FolderMonitor:
         self.proxmox_api = proxmox_api
         self.previous_mtimes = {}  # 각 서브폴더별 이전 수정 시간을 저장
         self.active_links = set()  # 현재 활성화된 심볼릭 링크 목록
-        self.last_modified_folder = "-"
-        self.last_modified_time = "-"
         self.last_vm_start_time = self._load_last_vm_start_time()  # VM 마지막 시작 시간
         
         # 공유용 링크 디렉토리 생성
@@ -143,6 +146,8 @@ class FolderMonitor:
             logging.error(f"기존 심볼릭 링크 제거 중 오류 발생: {e}")
         
         self._update_subfolder_mtimes()
+        
+        # SMB 관련 초기 설정
         self._ensure_smb_installed()
         self._init_smb_config()
         
@@ -150,8 +155,8 @@ class FolderMonitor:
         self.nfs_uid, self.nfs_gid = self._get_nfs_ownership()
         logging.debug(f"NFS 마운트 경로의 UID/GID: {self.nfs_uid}/{self.nfs_gid}")
         
-        # SMB 사용자의 UID/GID 설정
-        self._set_smb_user_ownership()
+        # SMB 사용자의 UID/GID 설정 (서비스는 시작하지 않음)
+        self._set_smb_user_ownership(start_service=False)
         
         # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성
         self._create_links_for_recently_modified()
@@ -340,12 +345,9 @@ class FolderMonitor:
                 logging.info(f"폴더 수정 시간 변화 감지 ({path}): {last_modified}")
                 changed_folders.append(path)
                 self.previous_mtimes[path] = current_mtime
-                self.last_modified_folder = path
-                self.last_modified_time = last_modified
                 
                 # 심볼릭 링크 생성
-                if self._create_symlink(path):
-                    logging.info(f"심볼릭 링크 생성됨: {path}")
+                self._create_symlink(path)
                 
                 # VM 마지막 시작 시간보다 수정 시간이 더 최근인 경우
                 if current_mtime > self.last_vm_start_time:
@@ -357,20 +359,6 @@ class FolderMonitor:
     def update_vm_start_time(self) -> None:
         """VM이 시작될 때 호출하여 시작 시간을 업데이트"""
         self._save_last_vm_start_time()
-
-    @property
-    def total_size(self) -> int:
-        """전체 폴더 크기 반환 (웹 인터페이스 표시용)"""
-        total = 0
-        for path in self.previous_mtimes.keys():
-            try:
-                cmd = f"du -sb {path} 2>/dev/null | cut -f1"
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=self.config.GET_FOLDER_SIZE_TIMEOUT)
-                if result.returncode == 0:
-                    total += int(result.stdout.strip())
-            except Exception as e:
-                logging.error(f"폴더 크기 계산 중 오류 발생 ({path}): {e}")
-        return total
 
     def get_monitored_folders(self) -> dict:
         """감시 중인 모든 폴더와 수정 시간, 링크 상태를 반환"""
@@ -393,33 +381,6 @@ class FolderMonitor:
     def _ensure_links_directory(self):
         """공유용 링크 디렉토리 생성"""
         try:
-            # 사용자와 그룹이 없으면 생성
-            try:
-                # 그룹 존재 여부 확인
-                subprocess.run(['getent', 'group', self.config.SMB_USERNAME], check=True, capture_output=True)
-                # logging.info(f"그룹 '{self.config.SMB_USERNAME}' 이미 존재함")
-            except subprocess.CalledProcessError:
-                # 그룹이 없으면 생성
-                logging.info(f"그룹 '{self.config.SMB_USERNAME}' 생성 시도...")
-                subprocess.run(['sudo', 'groupadd', self.config.SMB_USERNAME], check=True)
-                logging.info(f"그룹 '{self.config.SMB_USERNAME}' 생성 완료")
-
-            try:
-                # 사용자 존재 여부 확인
-                subprocess.run(['id', self.config.SMB_USERNAME], check=True, capture_output=True)
-                # logging.info(f"사용자 '{self.config.SMB_USERNAME}' 이미 존재함")
-            except subprocess.CalledProcessError:
-                # 사용자가 없으면 생성
-                logging.info(f"사용자 '{self.config.SMB_USERNAME}' 생성 시도...")
-                subprocess.run([
-                    'sudo', 'useradd',
-                    '-M',  # 홈 디렉토리 생성하지 않음
-                    '-g', self.config.SMB_USERNAME,  # 기본 그룹 설정
-                    '-s', '/sbin/nologin',  # 로그인 셸 비활성화
-                    self.config.SMB_USERNAME
-                ], check=True)
-                logging.info(f"사용자 '{self.config.SMB_USERNAME}' 생성 완료")
-
             if not os.path.exists(self.links_dir):
                 os.makedirs(self.links_dir)
                 logging.info(f"공유용 링크 디렉토리 생성됨: {self.links_dir}")
@@ -430,6 +391,75 @@ class FolderMonitor:
             logging.info("공유용 링크 디렉토리 권한 설정 완료")
         except Exception as e:
             logging.error(f"공유용 링크 디렉토리 생성/설정 실패: {e}")
+            raise
+
+    def _set_smb_user_ownership(self, start_service: bool = True) -> None:
+        """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
+        try:
+            # 먼저 Samba 서비스 중지
+            logging.debug("Samba 서비스 중지 시도...")
+            subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=True)
+            subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=True)
+            logging.debug("Samba 서비스 중지 완료")
+            
+            # 그룹 존재 여부 확인 및 생성
+            try:
+                subprocess.run(['getent', 'group', self.config.SMB_USERNAME], check=True, capture_output=True)
+            except subprocess.CalledProcessError:
+                logging.info(f"그룹 '{self.config.SMB_USERNAME}' 생성...")
+                subprocess.run(['sudo', 'groupadd', self.config.SMB_USERNAME], check=True)
+
+            # 사용자 존재 여부 확인
+            user_exists = subprocess.run(['id', self.config.SMB_USERNAME], capture_output=True).returncode == 0
+            
+            if not user_exists:
+                # 사용자가 없으면 생성
+                logging.info(f"사용자 '{self.config.SMB_USERNAME}' 생성...")
+                useradd_result = subprocess.run([
+                    'sudo', 'useradd',
+                    '-u', str(self.nfs_uid),
+                    '-g', str(self.nfs_gid),
+                    '-M',  # 홈 디렉토리 생성하지 않음
+                    '-s', '/sbin/nologin',  # 로그인 셸 비활성화
+                    self.config.SMB_USERNAME
+                ], capture_output=True, text=True)
+                
+                if useradd_result.returncode != 0 and "already exists" not in useradd_result.stderr:
+                    raise Exception(f"사용자 생성 실패: {useradd_result.stderr}")
+            else:
+                # 사용자가 있으면 UID/GID 변경
+                # 프로세스 종료
+                subprocess.run(['sudo', 'pkill', '-TERM', '-u', self.config.SMB_USERNAME], check=False)
+                time.sleep(2)
+                subprocess.run(['sudo', 'pkill', '-KILL', '-u', self.config.SMB_USERNAME], check=False)
+                time.sleep(1)
+
+                # UID/GID 변경
+                subprocess.run(['sudo', 'usermod', '-u', str(self.nfs_uid), self.config.SMB_USERNAME], check=True)
+                subprocess.run(['sudo', 'groupmod', '-g', str(self.nfs_gid), self.config.SMB_USERNAME], check=True)
+            
+            # Samba 사용자 비밀번호 설정
+            password_bytes = f"{self.config.SMB_PASSWORD}\n{self.config.SMB_PASSWORD}\n".encode('utf-8')
+            subprocess.run(['sudo', 'smbpasswd', '-a', self.config.SMB_USERNAME],
+                         input=password_bytes, check=True)
+            
+            # Samba 사용자 활성화
+            subprocess.run(['sudo', 'smbpasswd', '-e', self.config.SMB_USERNAME], check=True)
+            
+            # 서비스 시작이 요청된 경우
+            if start_service:
+                subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
+                subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
+            
+            logging.info(f"SMB 사용자({self.config.SMB_USERNAME})의 UID/GID를 {self.nfs_uid}/{self.nfs_gid}로 설정했습니다.")
+        except Exception as e:
+            logging.error(f"SMB 사용자의 UID/GID 설정 실패: {str(e)}")
+            if start_service:
+                try:
+                    subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
+                    subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
+                except Exception as restart_error:
+                    logging.error(f"Samba 서비스 재시작 실패: {restart_error}")
             raise
 
     def _create_symlink(self, subfolder: str) -> bool:
@@ -479,7 +509,7 @@ class FolderMonitor:
                 logging.info(f"마지막 VM 시작({datetime.fromtimestamp(self.last_vm_start_time).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(recently_modified)}개의 링크를 생성합니다.")
                 for folder in recently_modified:
                     if self._create_symlink(folder):
-                        logging.info(f"초기 링크 생성 성공: {folder}")
+                        logging.debug(f"초기 링크 생성 성공: {folder}")
                     else:
                         logging.error(f"초기 링크 생성 실패: {folder}")
                 
@@ -491,7 +521,6 @@ class FolderMonitor:
                     logging.info("최근 수정된 폴더가 있어 VM을 시작합니다.")
                     if self.proxmox_api.start_vm():
                         logging.info("VM 시작 성공")
-                        self.update_vm_start_time()
                     else:
                         logging.error("VM 시작 실패")
         except Exception as e:
@@ -500,6 +529,9 @@ class FolderMonitor:
     def _activate_smb_share(self) -> bool:
         """links_dir의 SMB 공유를 활성화"""
         try:
+            # 먼저 SMB 사용자의 UID/GID 설정을 업데이트
+            self._set_smb_user_ownership(start_service=True)
+            
             share_name = self.config.SMB_SHARE_NAME
             
             # 공유 설정 생성
@@ -547,19 +579,19 @@ class FolderMonitor:
                 
                 if smbd_status == 'active' or nmbd_status == 'active':
                     # 서비스가 실행 중이면 재시작
-                    logging.info("Samba 서비스가 실행 중입니다. 재시작합니다.")
+                    logging.debug("Samba 서비스가 실행 중입니다. 재시작합니다.")
                     subprocess.run(['sudo', 'systemctl', 'restart', 'smbd'], check=True)
                     subprocess.run(['sudo', 'systemctl', 'restart', 'nmbd'], check=True)
                 else:
                     # 서비스가 중지되어 있으면 시작
-                    logging.info("Samba 서비스를 시작합니다.")
+                    logging.debug("Samba 서비스를 시작합니다.")
                     subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
                     subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
             except subprocess.CalledProcessError as e:
                 logging.error(f"Samba 서비스 제어 중 오류 발생: {e}")
                 raise
             
-            logging.info(f"SMB 공유 활성화 성공: {self.links_dir}")
+            logging.info(f"SMB 공유 활성화 성공: {self.config.SMB_COMMENT}")
             return True
         except Exception as e:
             logging.error(f"SMB 공유 활성화 실패: {e}")
@@ -581,124 +613,11 @@ class FolderMonitor:
                 if len(parts) >= 4:
                     uid = int(parts[2])
                     gid = int(parts[3])
-                    logging.info(f"NFS 마운트 경로의 UID/GID: {uid}/{gid}")
                     return uid, gid
             raise Exception("마운트 경로에서 파일/디렉토리를 찾을 수 없습니다.")
         except Exception as e:
             logging.error(f"NFS 마운트 경로의 소유자 정보 확인 실패: {e}")
             return 0, 0
-
-    def _set_smb_user_ownership(self) -> None:
-        """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
-        try:
-            # 먼저 Samba 서비스 중지
-            logging.debug("Samba 서비스 중지 시도...")
-            subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=True)
-            subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=True)
-            logging.debug("Samba 서비스 중지 완료")
-            
-            # 사용자 존재 여부 확인
-            # logging.info(f"사용자 '{self.config.SMB_USERNAME}' 존재 여부 확인...")
-            user_exists = subprocess.run(['id', self.config.SMB_USERNAME], capture_output=True).returncode == 0
-            
-            if not user_exists:
-                # 사용자가 없으면 생성
-                logging.info(f"사용자 '{self.config.SMB_USERNAME}' 생성 시도...")
-                useradd_result = subprocess.run([
-                    'sudo', 'useradd',
-                    '-u', str(self.nfs_uid),
-                    '-g', str(self.nfs_gid),
-                    '-M',  # 홈 디렉토리 생성하지 않음
-                    '-s', '/sbin/nologin',  # 로그인 셸 비활성화
-                    self.config.SMB_USERNAME
-                ], capture_output=True, text=True)
-                
-                if useradd_result.returncode != 0:
-                    # UID가 이미 존재하는 경우는 무시
-                    if "already exists" not in useradd_result.stderr:
-                        raise Exception(f"사용자 생성 실패: {useradd_result.stderr}")
-                    logging.debug(f"UID {self.nfs_uid}가 이미 존재합니다.")
-                else:
-                    logging.debug("사용자 생성 완료")
-            else:
-                # 사용자가 있으면 UID/GID 변경
-                logging.info(f"사용자 '{self.config.SMB_USERNAME}'의 프로세스 확인...")
-                ps_result = subprocess.run(['ps', '-u', self.config.SMB_USERNAME], capture_output=True, text=True)
-                # 출력 라인을 분리하고 헤더 라인(PID TTY TIME CMD)을 제외한 실제 프로세스 확인
-                process_lines = [line for line in ps_result.stdout.strip().split('\n') if not line.startswith('PID')]
-                if process_lines:
-                    logging.info(f"실행 중인 프로세스 목록:\n{ps_result.stdout}")
-                    
-                    # 프로세스 강제 종료 시도
-                    logging.info("프로세스 종료 시도 (SIGTERM)...")
-                    subprocess.run(['sudo', 'pkill', '-TERM', '-u', self.config.SMB_USERNAME], check=False)
-                    time.sleep(2)  # SIGTERM 신호가 처리될 시간 부여
-                    
-                    # 여전히 실행 중인 프로세스가 있다면 SIGKILL로 강제 종료
-                    ps_check = subprocess.run(['ps', '-u', self.config.SMB_USERNAME], capture_output=True, text=True)
-                    check_lines = [line for line in ps_check.stdout.strip().split('\n') if not line.startswith('PID')]
-                    if check_lines:
-                        logging.info("일부 프로세스가 여전히 실행 중. SIGKILL 사용...")
-                        subprocess.run(['sudo', 'pkill', '-KILL', '-u', self.config.SMB_USERNAME], check=False)
-                        time.sleep(1)
-                else:
-                    logging.info("실행 중인 프로세스가 없습니다.")
-
-                # usermod 명령으로 SMB 사용자의 UID 변경
-                logging.debug(f"사용자 UID 변경 시도 ({self.config.SMB_USERNAME} -> {self.nfs_uid})...")
-                usermod_result = subprocess.run(['sudo', 'usermod', '-u', str(self.nfs_uid), self.config.SMB_USERNAME], 
-                                             capture_output=True, text=True)
-                if usermod_result.returncode != 0:
-                    # UID가 이미 존재하는 경우는 무시
-                    if "already exists" not in usermod_result.stderr:
-                        raise Exception(f"usermod 실패: {usermod_result.stderr}")
-                    logging.debug(f"UID {self.nfs_uid}가 이미 존재합니다.")
-                else:
-                    logging.debug("사용자 UID 변경 완료")
-                
-                # groupmod 명령으로 SMB 사용자의 기본 그룹 GID 변경
-                group_name = self.config.SMB_USERNAME  # 일반적으로 사용자명과 동일한 그룹명 사용
-                logging.debug(f"그룹 GID 변경 시도 ({group_name} -> {self.nfs_gid})...")
-                groupmod_result = subprocess.run(['sudo', 'groupmod', '-g', str(self.nfs_gid), group_name],
-                                              capture_output=True, text=True)
-                if groupmod_result.returncode != 0:
-                    # GID가 이미 존재하는 경우는 무시
-                    if "already exists" not in groupmod_result.stderr:
-                        raise Exception(f"groupmod 실패: {groupmod_result.stderr}")
-                    logging.debug(f"GID {self.nfs_gid}가 이미 존재합니다.")
-                else:
-                    logging.debug("그룹 GID 변경 완료")
-            
-            # Samba 사용자 비밀번호 설정
-            logging.debug(f"Samba 사용자 비밀번호 설정 시도...")
-            password_input = f"{self.config.SMB_PASSWORD}\n{self.config.SMB_PASSWORD}\n"
-            smbpasswd_result = subprocess.run(['sudo', 'smbpasswd', '-a', self.config.SMB_USERNAME],
-                                          input=password_input.encode('utf-8'),
-                                          capture_output=True, text=True)
-            if smbpasswd_result.returncode != 0:
-                raise Exception(f"Samba 비밀번호 설정 실패: {smbpasswd_result.stderr}")
-            
-            # Samba 사용자 활성화
-            subprocess.run(['sudo', 'smbpasswd', '-e', self.config.SMB_USERNAME], check=True)
-            logging.info("Samba 사용자 비밀번호 설정 완료")
-            
-            # 소유권 변경이 완료된 후 Samba 서비스 재시작
-            logging.info("Samba 서비스 재시작...")
-            subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
-            subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
-            logging.info("Samba 서비스 재시작 완료")
-            
-            logging.info(f"SMB 사용자({self.config.SMB_USERNAME})의 UID/GID를 {self.nfs_uid}/{self.nfs_gid}로 설정했습니다.")
-        except Exception as e:
-            logging.error(f"SMB 사용자의 UID/GID 설정 실패: {str(e)}")
-            # 오류 발생 시 Samba 서비스 재시작 시도
-            try:
-                logging.info("오류 발생 후 Samba 서비스 재시작 시도...")
-                subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
-                subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
-                logging.info("Samba 서비스 재시작 완료")
-            except Exception as restart_error:
-                logging.error(f"Samba 서비스 재시작 실패: {restart_error}")
 
     def _deactivate_smb_share(self) -> bool:
         """모든 SMB 공유와 심볼릭 링크를 비활성화"""
@@ -736,6 +655,33 @@ class FolderMonitor:
             logging.error(f"SMB 공유 비활성화 실패: {e}")
         return False
 
+    def cleanup_resources(self):
+        try:
+            # Samba 서비스 중지
+            subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=True, timeout=30)
+            subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=True, timeout=30)
+            
+            # 심볼릭 링크 제거
+            if os.path.exists(self.links_dir):
+                for filename in os.listdir(self.links_dir):
+                    file_path = os.path.join(self.links_dir, filename)
+                    if os.path.islink(file_path):
+                        os.remove(file_path)
+                    
+            logging.info("리소스 정리 완료")
+        except Exception as e:
+            logging.error(f"리소스 정리 중 오류 발생: {e}")
+
+    def _check_smb_status(self) -> bool:
+        """SMB 서비스의 실행 상태를 확인"""
+        try:
+            smbd_status = subprocess.run(['systemctl', 'is-active', 'smbd'], capture_output=True, text=True).stdout.strip()
+            nmbd_status = subprocess.run(['systemctl', 'is-active', 'nmbd'], capture_output=True, text=True).stdout.strip()
+            return smbd_status == 'active' and nmbd_status == 'active'
+        except Exception as e:
+            logging.error(f"SMB 서비스 상태 확인 실패: {e}")
+            return False
+
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
         self.config = config
@@ -744,6 +690,7 @@ class GShareManager:
         self.last_action = "프로그램 시작"
         self.last_shutdown_time = "-"
         self.folder_monitor = FolderMonitor(config, proxmox_api)
+        self.proxmox_api.set_folder_monitor(self.folder_monitor)  # FolderMonitor 인스턴스 설정
         self._update_state()
 
     def _format_uptime(self, seconds: float) -> str:
@@ -794,14 +741,13 @@ class GShareManager:
                 last_check_time=current_time,
                 vm_running=vm_running,
                 cpu_usage=round(cpu_usage, 2),
-                last_modified_folder=self.folder_monitor.last_modified_folder,
-                last_modified_time=self.folder_monitor.last_modified_time,
                 last_action=self.last_action,
                 low_cpu_count=self.low_cpu_count,
                 uptime=uptime_str,
                 last_shutdown_time=self.last_shutdown_time,
                 monitored_folders=self.folder_monitor.get_monitored_folders(),
-                last_vm_start_time=last_vm_start
+                last_vm_start_time=last_vm_start,
+                smb_running=self.folder_monitor._check_smb_status()
             )
             logging.debug(f"상태 업데이트: {current_state.to_dict()}")
         except Exception as e:
@@ -818,9 +764,6 @@ class GShareManager:
                 # VM 상태 확인
                 current_vm_status = self.proxmox_api.is_vm_running()
                 
-                # VM 상태가 변경되었고, 현재 실행 상태인 경우
-                if last_vm_status is not None and last_vm_status != current_vm_status and current_vm_status:
-                    self.folder_monitor.update_vm_start_time()
                 
                 # VM 상태가 변경되었고, 현재 종료 상태인 경우
                 if last_vm_status is not None and last_vm_status != current_vm_status and not current_vm_status:
@@ -842,7 +785,6 @@ class GShareManager:
                             self.last_action = "VM 시작"
                             if self.proxmox_api.start_vm():
                                 logging.info("VM 시작 성공")
-                                self.folder_monitor.update_vm_start_time()
                             else:
                                 logging.error("VM 시작 실패")
                 except Exception as e:
@@ -880,30 +822,33 @@ def setup_logging():
     load_dotenv()
     log_level = os.getenv('LOG_LEVEL', 'INFO')
     
-    # 타임존 설정을 위한 Formatter 생성
     formatter = logging.Formatter(
         fmt='%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     formatter.converter = lambda *args: datetime.now(tz=pytz.timezone(Config().TIMEZONE)).timetuple()
 
-    # 핸들러 설정
-    file_handler = RotatingFileHandler('gshare_manager.log', maxBytes=5*1024*1024, backupCount=1)  # 5MB 크기
+    # 로그 로테이션 설정
+    file_handler = RotatingFileHandler(
+        'gshare_manager.log',
+        maxBytes=5*1024*1024,  # 5MB
+        backupCount=1,
+        encoding='utf-8'
+    )
     file_handler.setFormatter(formatter)
-    stream_handler = logging.StreamHandler()
+    
+    stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
     
-    # 로거 설정
     logger = logging.getLogger()
     logger.setLevel(getattr(logging, log_level))
-    
-    # 기존 핸들러가 있다면 레벨만 변경
-    if logger.handlers:
-        logger.setLevel(getattr(logging, log_level))
-    else:
-        # 새로운 핸들러 추가
-        logger.addHandler(file_handler)
-        logger.addHandler(stream_handler)
+
+    # 기존 핸들러 제거
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+        
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
     
     return logger
 
@@ -912,38 +857,6 @@ def update_log_level():
     load_dotenv()
     log_level = os.getenv('LOG_LEVEL', 'INFO')
     logging.getLogger().setLevel(getattr(logging, log_level))
-
-def format_size(size_in_bytes: int) -> str:
-    """바이트 단위의 크기를 사람이 읽기 쉬운 형식으로 변환"""
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if size_in_bytes < 1024.0:
-            return f"{size_in_bytes:.2f} {unit}"
-        size_in_bytes /= 1024.0
-    return f"{size_in_bytes:.2f} PB"
-
-def get_time_ago(timestamp_str):
-    try:
-        seoul_tz = pytz.timezone('Asia/Seoul')
-        last_check = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
-        last_check = seoul_tz.localize(last_check)
-        now = datetime.now(seoul_tz)
-        
-        diff = now - last_check
-        seconds = diff.total_seconds()
-        
-        time_ago = ""
-        if seconds < 150:
-            time_ago = f"{int(seconds)}초 전"
-        elif seconds < 3600:  # 1시간
-            time_ago = f"{int(seconds / 60)}분 전"
-        elif seconds < 86400:  # 1일
-            time_ago = f"{int(seconds / 3600)}시간 전"
-        else:
-            time_ago = f"{int(seconds / 86400)}일 전"
-            
-        return time_ago
-    except:
-        return timestamp_str
 
 @app.route('/')
 def show_log():
@@ -959,8 +872,7 @@ def show_log():
 
     return render_template('index.html', 
                          state=current_state.to_dict(), 
-                         log_content=log_content, 
-                         get_time_ago=get_time_ago)
+                         log_content=log_content)
 
 @app.route('/update_state')
 def update_state():
@@ -1072,7 +984,6 @@ def start_vm():
             return jsonify({"status": "error", "message": "VM이 이미 실행 중입니다."}), 400
 
         if gshare_manager.proxmox_api.start_vm():
-            gshare_manager.folder_monitor.update_vm_start_time()
             return jsonify({"status": "success", "message": "VM 시작이 요청되었습니다."})
         else:
             return jsonify({"status": "error", "message": "VM 시작 실패"}), 500
@@ -1126,7 +1037,7 @@ if __name__ == '__main__':
         logging.info("───────────────────────────────────────────────")
         proxmox_api = ProxmoxAPI(config)
         gshare_manager = GShareManager(config, proxmox_api)
-        logging.info(f"VM 상태 - {gshare_manager.proxmox_api.is_vm_running()}")
+        logging.info(f"VM is_running - {gshare_manager.proxmox_api.is_vm_running()}")
         logging.info("GShare 관리 시작")
         
         flask_thread = threading.Thread(target=run_flask_app)
@@ -1140,3 +1051,6 @@ if __name__ == '__main__':
     except Exception as e:
         logging.error(f"예상치 못한 오류 발생: {e}")
         logging.info("───────────────────────────────────────────────")
+
+# 프로그램 종료 시 호출
+atexit.register(gshare_manager.folder_monitor.cleanup_resources)
