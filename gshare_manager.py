@@ -160,29 +160,29 @@ class FolderMonitor:
         self._create_links_for_recently_modified()
 
     def _load_last_shutdown_time(self) -> float:
-        """VM 마지막 종료 시간을 로드 (타임존 고려)"""
+        """VM 마지막 종료 시간을 로드 (UTC 기준)"""
         try:
             if os.path.exists('last_shutdown.txt'):
                 with open('last_shutdown.txt', 'r') as f:
                     return float(f.read().strip())
             else:
-                # 파일이 없는 경우 현재 시간을 저장하고 반환
-                current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).timestamp()
+                # 파일이 없는 경우 현재 UTC 시간을 저장하고 반환
+                current_time = datetime.now(pytz.UTC).timestamp()
                 with open('last_shutdown.txt', 'w') as f:
                     f.write(str(current_time))
                 logging.info(f"VM 종료 시간 파일이 없어 현재 시간으로 생성: {datetime.fromtimestamp(current_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}")
                 return current_time
         except Exception as e:
-            # 오류 발생 시 현재 시간 사용
-            current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).timestamp()
+            # 오류 발생 시 현재 UTC 시간 사용
+            current_time = datetime.now(pytz.UTC).timestamp()
             logging.error(f"VM 마지막 종료 시간 로드 실패: {e}, 현재 시간을 사용합니다.")
             return current_time
 
     def _save_last_shutdown_time(self) -> None:
-        """현재 시간을 VM 마지막 종료 시간으로 저장 (타임존 고려)"""
+        """현재 시간을 VM 마지막 종료 시간으로 저장 (UTC 기준)"""
         try:
-            # 현재 시간을 타임존 기준으로 가져옴
-            current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).timestamp()
+            # UTC 기준 현재 시간
+            current_time = datetime.now(pytz.UTC).timestamp()
             with open('last_shutdown.txt', 'w') as f:
                 f.write(str(current_time))
             self.last_shutdown_time = current_time
@@ -289,13 +289,10 @@ class FolderMonitor:
             return []
 
     def _get_folder_mtime(self, path: str) -> float:
-        """지정된 경로의 폴더 수정 시간을 반환 (UTC -> KST 변환)"""
+        """지정된 경로의 폴더 수정 시간을 반환 (UTC 기준)"""
         try:
             full_path = os.path.join(self.config.MOUNT_PATH, path)
-            utc_time = os.path.getmtime(full_path)
-            # UTC -> KST 변환 (9시간 추가)
-            kst_time = utc_time + (9 * 3600)  # 9시간을 초 단위로 추가
-            return kst_time
+            return os.path.getmtime(full_path)
         except Exception as e:
             logging.error(f"폴더 수정 시간 확인 중 오류 발생 ({path}): {e}")
             return self.previous_mtimes.get(path, 0)
@@ -340,7 +337,7 @@ class FolderMonitor:
         for path, prev_mtime in self.previous_mtimes.items():
             current_mtime = self._get_folder_mtime(path)
             if current_mtime != prev_mtime:
-                last_modified = datetime.fromtimestamp(current_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                last_modified = datetime.fromtimestamp(current_mtime, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
                 logging.info(f"폴더 수정 시간 변화 감지 ({path}): {last_modified}")
                 changed_folders.append(path)
                 self.previous_mtimes[path] = current_mtime
@@ -367,7 +364,7 @@ class FolderMonitor:
         monitored_folders = {}
         for path, mtime in folder_times:
             monitored_folders[path] = {
-                'mtime': datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                'mtime': datetime.fromtimestamp(mtime, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S'),
                 'is_mounted': path in self.active_links
             }
         
@@ -530,11 +527,11 @@ class FolderMonitor:
             for path, mtime in self.previous_mtimes.items():
                 if mtime > self.last_shutdown_time:
                     recently_modified.append(path)
-                    last_modified = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+                    last_modified = datetime.fromtimestamp(mtime, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
                     logging.info(f"최근 수정된 폴더 감지 ({path}): {last_modified}")
             
             if recently_modified:
-                logging.info(f"마지막 VM 종료({datetime.fromtimestamp(self.last_shutdown_time).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(recently_modified)}개의 링크를 생성합니다.")
+                logging.info(f"마지막 VM 종료({datetime.fromtimestamp(self.last_shutdown_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(recently_modified)}개의 링크를 생성합니다.")
                 for folder in recently_modified:
                     if self._create_symlink(folder):
                         logging.debug(f"초기 링크 생성 성공: {folder}")
