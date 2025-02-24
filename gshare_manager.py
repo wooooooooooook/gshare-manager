@@ -160,32 +160,33 @@ class FolderMonitor:
         self._create_links_for_recently_modified()
 
     def _load_last_shutdown_time(self) -> float:
-        """VM 마지막 종료 시간을 로드"""
+        """VM 마지막 종료 시간을 로드 (타임존 고려)"""
         try:
             if os.path.exists('last_shutdown.txt'):
                 with open('last_shutdown.txt', 'r') as f:
                     return float(f.read().strip())
             else:
                 # 파일이 없는 경우 현재 시간을 저장하고 반환
-                current_time = time.time()
+                current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).timestamp()
                 with open('last_shutdown.txt', 'w') as f:
                     f.write(str(current_time))
-                logging.info(f"VM 종료 시간 파일이 없어 현재 시간으로 생성: {datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')}")
+                logging.info(f"VM 종료 시간 파일이 없어 현재 시간으로 생성: {datetime.fromtimestamp(current_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}")
                 return current_time
         except Exception as e:
             # 오류 발생 시 현재 시간 사용
-            current_time = time.time()
+            current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).timestamp()
             logging.error(f"VM 마지막 종료 시간 로드 실패: {e}, 현재 시간을 사용합니다.")
             return current_time
 
     def _save_last_shutdown_time(self) -> None:
-        """현재 시간을 VM 마지막 종료 시간으로 저장"""
+        """현재 시간을 VM 마지막 종료 시간으로 저장 (타임존 고려)"""
         try:
-            current_time = time.time()
+            # 현재 시간을 타임존 기준으로 가져옴
+            current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).timestamp()
             with open('last_shutdown.txt', 'w') as f:
                 f.write(str(current_time))
             self.last_shutdown_time = current_time
-            logging.info(f"VM 종료 시간 저장됨: {datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')}")
+            logging.info(f"VM 종료 시간 저장됨: {datetime.fromtimestamp(current_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}")
         except Exception as e:
             logging.error(f"VM 종료 시간 저장 실패: {e}")
 
@@ -764,7 +765,11 @@ class GShareManager:
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
             uptime = self.proxmox_api.get_vm_uptime()
             uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
-            self.last_shutdown_time = datetime.fromtimestamp(self.folder_monitor.last_shutdown_time).strftime('%Y-%m-%d %H:%M:%S')
+            # 타임존을 고려하여 timestamp를 문자열로 변환
+            self.last_shutdown_time = datetime.fromtimestamp(
+                self.folder_monitor.last_shutdown_time,
+                pytz.timezone(self.config.TIMEZONE)
+            ).strftime('%Y-%m-%d %H:%M:%S')
 
             current_state = State(
                 last_check_time=current_time,
