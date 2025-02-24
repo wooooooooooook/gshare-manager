@@ -1018,12 +1018,16 @@ def toggle_mount(folder):
         if folder in gshare_manager.folder_monitor.active_links:
             # 마운트 해제
             if gshare_manager.folder_monitor._remove_symlink(folder):
+                # 상태 즉시 업데이트
+                gshare_manager._update_state()
                 return jsonify({"status": "success", "message": f"{folder} 마운트가 해제되었습니다."})
             else:
                 return jsonify({"status": "error", "message": f"{folder} 마운트 해제 실패"}), 500
         else:
             # 마운트
             if gshare_manager.folder_monitor._create_symlink(folder) and gshare_manager.folder_monitor._activate_smb_share():
+                # 상태 즉시 업데이트
+                gshare_manager._update_state()
                 return jsonify({"status": "success", "message": f"{folder} 마운트가 활성화되었습니다."})
             else:
                 return jsonify({"status": "error", "message": f"{folder} 마운트 활성화 실패"}), 500

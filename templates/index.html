@@ -114,7 +114,7 @@
                     </div>
                     <div class="grid grid-cols-2 gap-2">
                         <div
-                            class="flex justify-between bg-red-50 rounded-lg p-2 border border-red-100 vm-status-container">
+                            class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 vm-status-container">
                             <div class="flex items-center gap-1">
                                 <svg class="w-4 h-4 text-gray-700" xmlns="http://www.w3.org/2000/svg" fill="none"
                                     viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
@@ -124,13 +124,13 @@
                                 <span class="text-xs text-gray-500">VM status</span>
                             </div>
                             <div class="flex items-center font-medium text-sm vm-status">
-                                <span class="text-right px-2 py-0.5 rounded-full {% if state['vm_status'] == 'ON' %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+                                <span class="text-right px-2 py-0.5 rounded-full {% if state['vm_status'] == 'ON' %}bg-emerald-50 text-emerald-700{% else %}bg-slate-50 text-slate-700{% endif %}">
                                     {{state['vm_status']}}
                                 </span>
                             </div>
                         </div>
                         <div
-                            class="flex justify-between bg-red-50 rounded-lg p-2 border border-red-100 smb-status-container">
+                            class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 smb-status-container">
                             <div class="flex items-center gap-1">
                                 <svg class="w-4 h-4 text-gray-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
@@ -138,7 +138,7 @@
                                 <span class="text-xs text-gray-500">SMB status</span>
                             </div>
                             <div class="flex items-center font-medium text-sm smb-status">
-                                <span class="text-right px-2 py-0.5 rounded-full {% if state['smb_status'] == 'ON' %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+                                <span class="text-right px-2 py-0.5 rounded-full {% if state['smb_status'] == 'ON' %}bg-emerald-50 text-emerald-700{% else %}bg-slate-50 text-slate-700{% endif %}">
                                     {{state['smb_status']}}
                                 </span>
                             </div>

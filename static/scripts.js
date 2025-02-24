@@ -158,6 +158,11 @@ window.onload = function () {
                 if (monitoredFoldersContainer) {
                     const sortedFolders = Object.entries(data.monitored_folders)
                         .sort((a, b) => {
+                            // 먼저 마운트 상태로 정렬
+                            if (a[1].is_mounted !== b[1].is_mounted) {
+                                return b[1].is_mounted ? 1 : -1; // 마운트된 것이 위로
+                            }
+                            // 마운트 상태가 같다면 수정 시간으로 정렬
                             const timeA = new Date(a[1].mtime);
                             const timeB = new Date(b[1].mtime);
                             return timeB - timeA; // 최신순 정렬
@@ -184,11 +189,11 @@ function updateVMStatus(status) {
     if (status === 'ON') {
         // VM 실행 중
         vmStatusContainer.classList.remove('bg-red-50', 'border-red-100');
-        vmStatusContainer.classList.add('bg-green-50', 'border-green-100');
+        vmStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
         
         // 상태 표시 스타일 변경
-        vmStatusSpan.classList.remove('bg-red-100', 'text-red-800');
-        vmStatusSpan.classList.add('bg-green-100', 'text-green-800');
+        vmStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
+        vmStatusSpan.classList.add('bg-emerald-50', 'text-emerald-700');
 
         // 실행 중 요소들 표시
         vmRunningElements.forEach(el => el.classList.remove('hidden'));
@@ -196,11 +201,11 @@ function updateVMStatus(status) {
     } else {
         // VM 중지됨
         vmStatusContainer.classList.remove('bg-green-50', 'border-green-100');
-        vmStatusContainer.classList.add('bg-red-50', 'border-red-100');
+        vmStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
         
         // 상태 표시 스타일 변경
-        vmStatusSpan.classList.remove('bg-green-100', 'text-green-800');
-        vmStatusSpan.classList.add('bg-red-100', 'text-red-800');
+        vmStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
+        vmStatusSpan.classList.add('bg-slate-50', 'text-slate-700');
 
         // 중지 시 요소들 표시
         vmRunningElements.forEach(el => el.classList.add('hidden'));
@@ -215,19 +220,19 @@ function updateSMBStatus(status) {
     if (status === 'ON') {
         // SMB 실행 중
         smbStatusContainer.classList.remove('bg-red-50', 'border-red-100');
-        smbStatusContainer.classList.add('bg-green-50', 'border-green-100');
+        smbStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
         
         // 상태 표시 스타일 변경
-        smbStatusSpan.classList.remove('bg-red-100', 'text-red-800');
-        smbStatusSpan.classList.add('bg-green-100', 'text-green-800');
+        smbStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
+        smbStatusSpan.classList.add('bg-emerald-50', 'text-emerald-700');
     } else {
         // SMB 중지됨
         smbStatusContainer.classList.remove('bg-green-50', 'border-green-100');
-        smbStatusContainer.classList.add('bg-red-50', 'border-red-100');
+        smbStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
         
         // 상태 표시 스타일 변경
-        smbStatusSpan.classList.remove('bg-green-100', 'text-green-800');
-        smbStatusSpan.classList.add('bg-red-100', 'text-red-800');
+        smbStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
+        smbStatusSpan.classList.add('bg-slate-50', 'text-slate-700');
     }
 }
 
@@ -456,13 +461,35 @@ function toggleMount(folder) {
                 fetch('/update_state')
                     .then(response => response.json())
                     .then(data => {
+                        // VM과 SMB 상태 업데이트
+                        if (data.vm_status) {
+                            const vmStatus = document.querySelector('.vm-status');
+                            if (vmStatus) {
+                                vmStatus.innerText = data.vm_status;
+                                updateVMStatus(data.vm_status);
+                            }
+                        }
+                        if (data.smb_status) {
+                            const smbStatus = document.querySelector('.smb-status');
+                            if (smbStatus) {
+                                smbStatus.innerText = data.smb_status;
+                                updateSMBStatus(data.smb_status);
+                            }
+                        }
+
+                        // 폴더 목록 업데이트
                         const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
                         if (monitoredFoldersContainer) {
                             const sortedFolders = Object.entries(data.monitored_folders)
                                 .sort((a, b) => {
+                                    // 먼저 마운트 상태로 정렬
+                                    if (a[1].is_mounted !== b[1].is_mounted) {
+                                        return b[1].is_mounted ? 1 : -1; // 마운트된 것이 위로
+                                    }
+                                    // 마운트 상태가 같다면 수정 시간으로 정렬
                                     const timeA = new Date(a[1].mtime);
                                     const timeB = new Date(b[1].mtime);
-                                    return timeB - timeA;
+                                    return timeB - timeA; // 최신순 정렬
                                 });
                             monitoredFoldersContainer.innerHTML = generateFolderListHtml(sortedFolders);
                         }
