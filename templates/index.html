@@ -122,8 +122,10 @@
                                 </svg>
                                 <span class="text-xs text-gray-500">VM status</span>
                             </div>
-                            <div class="flex items-center font-medium text-sm text-red-800 vm-status">
-                                <span class="text-right">{{state['vm_status']}}</span>
+                            <div class="flex items-center font-medium text-sm vm-status">
+                                <span class="text-right px-2 py-0.5 rounded-full {% if state['vm_status'] == 'ON' %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+                                    {{state['vm_status']}}
+                                </span>
                             </div>
                         </div>
                         <div

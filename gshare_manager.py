@@ -32,7 +32,7 @@ gshare_manager = None
 @dataclass
 class State:
     last_check_time: str
-    vm_status: str  # 🔴 (정지), 🟢 (실행 중)
+    vm_running: bool
     cpu_usage: float
     last_modified_folder: str  # 가장 최근에 수정된 폴더 이름
     last_modified_time: str    # 해당 폴더의 수정 시간
@@ -44,7 +44,10 @@ class State:
     last_vm_start_time: str    # VM 마지막 시작 시간
     
     def to_dict(self):
-        return asdict(self)
+        data = asdict(self)
+        # vm_running을 웹 표시용 문자열로 변환
+        data['vm_status'] = 'ON' if self.vm_running else 'OFF'
+        return data
 
 class ProxmoxAPI:
     def __init__(self, config: Config):
@@ -778,7 +781,7 @@ class GShareManager:
         try:
             global current_state
             current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
-            vm_status = "🟢" if self.proxmox_api.is_vm_running() else "🔴"
+            vm_running = self.proxmox_api.is_vm_running()
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
             uptime = self.proxmox_api.get_vm_uptime()
             uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
@@ -789,7 +792,7 @@ class GShareManager:
 
             current_state = State(
                 last_check_time=current_time,
-                vm_status=vm_status,
+                vm_running=vm_running,
                 cpu_usage=round(cpu_usage, 2),
                 last_modified_folder=self.folder_monitor.last_modified_folder,
                 last_modified_time=self.folder_monitor.last_modified_time,
@@ -1065,11 +1068,10 @@ def start_vm():
         if current_state is None:
             return jsonify({"status": "error", "message": "State not initialized."}), 404
 
-        if current_state.vm_status == '🟢':
+        if current_state.vm_running:
             return jsonify({"status": "error", "message": "VM이 이미 실행 중입니다."}), 400
 
         if gshare_manager.proxmox_api.start_vm():
-            # VM 시작 시간 저장
             gshare_manager.folder_monitor.update_vm_start_time()
             return jsonify({"status": "success", "message": "VM 시작이 요청되었습니다."})
         else:
@@ -1083,7 +1085,7 @@ def shutdown_vm():
         if current_state is None:
             return jsonify({"status": "error", "message": "State not initialized."}), 404
 
-        if current_state.vm_status == '🔴':
+        if not current_state.vm_running:
             return jsonify({"status": "error", "message": "VM이 이미 종료되어 있습니다."}), 400
         
         response = requests.post(config.SHUTDOWN_WEBHOOK_URL, timeout=5)

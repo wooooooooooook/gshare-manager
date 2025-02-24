@@ -163,13 +163,16 @@ function updateVMStatus(status) {
     const vmStatusContainer = document.querySelector('.vm-status-container');
     const vmRunningElements = document.querySelectorAll('.vm-running-element');
     const vmStoppedElements = document.querySelectorAll('.vm-stopped-element');
+    const vmStatusSpan = document.querySelector('.vm-status span');
 
-    if (status === '🟢') {
+    if (status === 'ON') {
         // VM 실행 중
         vmStatusContainer.classList.remove('bg-red-50', 'border-red-100');
         vmStatusContainer.classList.add('bg-green-50', 'border-green-100');
-        document.querySelector('.vm-status').classList.remove('text-red-800');
-        document.querySelector('.vm-status').classList.add('text-green-800');
+        
+        // 상태 표시 스타일 변경
+        vmStatusSpan.classList.remove('bg-red-100', 'text-red-800');
+        vmStatusSpan.classList.add('bg-green-100', 'text-green-800');
 
         // 실행 중 요소들 표시
         vmRunningElements.forEach(el => el.classList.remove('hidden'));
@@ -178,8 +181,10 @@ function updateVMStatus(status) {
         // VM 중지됨
         vmStatusContainer.classList.remove('bg-green-50', 'border-green-100');
         vmStatusContainer.classList.add('bg-red-50', 'border-red-100');
-        document.querySelector('.vm-status').classList.remove('text-green-800');
-        document.querySelector('.vm-status').classList.add('text-red-800');
+        
+        // 상태 표시 스타일 변경
+        vmStatusSpan.classList.remove('bg-green-100', 'text-green-800');
+        vmStatusSpan.classList.add('bg-red-100', 'text-red-800');
 
         // 중지 시 요소들 표시
         vmRunningElements.forEach(el => el.classList.add('hidden'));
