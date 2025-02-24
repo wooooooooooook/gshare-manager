@@ -396,6 +396,26 @@ class FolderMonitor:
     def _set_smb_user_ownership(self, start_service: bool = True) -> None:
         """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
         try:
+            # 현재 SMB 사용자의 UID/GID 확인
+            try:
+                user_info = subprocess.run(['id', self.config.SMB_USERNAME], capture_output=True, text=True)
+                if user_info.returncode == 0:
+                    # 출력 형식: uid=1000(user) gid=1000(user) groups=1000(user)
+                    info_parts = user_info.stdout.strip().split()
+                    current_uid = int(info_parts[0].split('=')[1].split('(')[0])
+                    current_gid = int(info_parts[1].split('=')[1].split('(')[0])
+                    
+                    # UID/GID가 이미 일치하는 경우
+                    if current_uid == self.nfs_uid and current_gid == self.nfs_gid:
+                        logging.info(f"SMB 사용자와 NFS의 UID/GID 일치 확인. (UID: {current_uid}, GID: {current_gid})")
+                        # 서비스 시작이 요청된 경우에만 서비스 시작
+                        if start_service:
+                            subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
+                            subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
+                        return
+            except subprocess.CalledProcessError:
+                pass  # 사용자가 없는 경우 계속 진행
+            
             # 먼저 Samba 서비스 중지
             logging.debug("Samba 서비스 중지 시도...")
             subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=True)
@@ -419,7 +439,7 @@ class FolderMonitor:
                         if e.returncode == 4:  # GID already exists
                             # 다른 GID로 시도
                             subprocess.run(['sudo', 'groupadd', self.config.SMB_USERNAME], check=True)
-                            logging.warning(f"GID {self.nfs_gid}가 사용 중이어서 시스템이 할당한 GID로 그룹을 생성했습니다.")
+                            logging.warning(f"GID {self.nfs_gid}가 사용 중이어서 시스템이 할당한 GID로 그룹을 생성했습니다. 공유 폴더에 권한이 없을 수 있습니다.")
             except subprocess.CalledProcessError as e:
                 logging.error(f"그룹 정보 확인 실패: {e}")
                 raise
@@ -449,7 +469,7 @@ class FolderMonitor:
                             '-s', '/sbin/nologin',
                             self.config.SMB_USERNAME
                         ], check=True)
-                        logging.warning(f"UID {self.nfs_uid}가 사용 중이어서 시스템이 할당한 UID로 사용자를 생성했습니다.")
+                        logging.warning(f"UID {self.nfs_uid}가 사용 중이어서 시스템이 할당한 UID로 사용자를 생성했습니다. 공유 폴더에 권한이 없을 수 있습니다.")
             
             # Samba 사용자 비밀번호 설정
             password_bytes = f"{self.config.SMB_PASSWORD}\n{self.config.SMB_PASSWORD}\n".encode('utf-8')
@@ -542,49 +562,7 @@ class FolderMonitor:
     def _activate_smb_share(self) -> bool:
         """links_dir의 SMB 공유를 활성화"""
         try:
-            # 먼저 SMB 사용자의 UID/GID 설정을 업데이트
-            self._set_smb_user_ownership(start_service=True)
-            
-            share_name = self.config.SMB_SHARE_NAME
-            
-            # 공유 설정 생성
-            share_config = f"""
-[{share_name}]
-   path = {self.links_dir}
-   comment = {self.config.SMB_COMMENT}
-   browseable = yes
-   guest ok = {'yes' if self.config.SMB_GUEST_OK else 'no'}
-   read only = yes
-   create mask = 0644
-   directory mask = 0755
-   force user = {self.config.SMB_USERNAME}
-   force group = {self.config.SMB_USERNAME}
-   veto files = /@*
-   hide dot files = yes
-   delete veto files = no
-   follow symlinks = yes
-   wide links = yes
-   unix extensions = no
-"""
-            # 설정 파일 읽기
-            with open('/etc/samba/smb.conf', 'r') as f:
-                lines = f.readlines()
-
-            # [global] 섹션만 유지
-            new_lines = []
-            for line in lines:
-                if line.strip().startswith('[') and not line.strip() == '[global]':
-                    break
-                new_lines.append(line)
-            
-            # 새로운 공유 설정 추가
-            new_lines.append(share_config)
-            
-            # 설정 파일 저장
-            with open('/etc/samba/smb.conf', 'w') as f:
-                f.writelines(new_lines)
-            
-            # Samba 서비스 상태 확인 및 시작/재시작
+            # Samba 서비스 시작
             try:
                 # smbd 상태 확인
                 smbd_status = subprocess.run(['systemctl', 'is-active', 'smbd'], capture_output=True, text=True).stdout.strip()
