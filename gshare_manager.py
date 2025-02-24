@@ -810,7 +810,8 @@ def setup_logging():
         fmt='%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    formatter.converter = lambda *args: datetime.now(tz=pytz.timezone(Config().TIMEZONE)).timetuple()
+    # 기본 시간대를 'Asia/Seoul'로 설정
+    formatter.converter = lambda *args: datetime.now(tz=pytz.timezone('Asia/Seoul')).timetuple()
 
     # 로그 로테이션 설정
     file_handler = RotatingFileHandler(
@@ -844,7 +845,8 @@ def update_log_level():
 
 def get_default_state() -> State:
     """State가 초기화되지 않았을 때 사용할 기본값을 반환"""
-    current_time = datetime.now(pytz.timezone(Config().TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
+    # 기본 시간대를 'Asia/Seoul'로 설정
+    current_time = datetime.now(tz=pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S')
     return State(
         last_check_time=current_time,
         vm_running=False,
@@ -856,7 +858,7 @@ def get_default_state() -> State:
         last_shutdown_time="-",
         monitored_folders={},
         smb_running=False,
-        check_interval=Config().CHECK_INTERVAL
+        check_interval=60  # 기본값 60초
     )
 
 @app.route('/')
@@ -899,11 +901,16 @@ def restart_service():
 @app.route('/retry_mount')
 def retry_mount():
     try:
-        subprocess.run(['sudo', 'mount', config.MOUNT_PATH], check=True)
-        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager.service'], check=True)
-        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager_log_server.service'], check=True)
-        return jsonify({"status": "success", "message": "마운트 재시도 및 서비스를 재시작했습니다."})
-    except subprocess.CalledProcessError as e:
+        # 설정을 다시 로드
+        try:
+            config = Config.load_config()
+            subprocess.run(['sudo', 'mount', config.MOUNT_PATH], check=True)
+            subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager.service'], check=True)
+            subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager_log_server.service'], check=True)
+            return jsonify({"status": "success", "message": "마운트 재시도 및 서비스를 재시작했습니다."})
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"설정 로드 또는 마운트 재시도 실패: {str(e)}"}), 500
+    except Exception as e:
         return jsonify({"status": "error", "message": f"마운트 재시도 실패: {str(e)}"}), 500
 
 @app.route('/clear_log')
@@ -948,7 +955,7 @@ def set_log_level(level):
         
         return jsonify({
             "status": "success",
-            "message": f"로그 레벨이 {level.upper()}로 변경되었습니다. 최대 {Config().CHECK_INTERVAL}초 후 다음 모니터링 루프에서 적용됩니다."
+            "message": f"로그 레벨이 {level.upper()}로 변경되었습니다. 다음 모니터링 루프에서 적용됩니다."
         })
     except Exception as e:
         return jsonify({
