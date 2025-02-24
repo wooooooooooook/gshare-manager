@@ -556,6 +556,50 @@ class FolderMonitor:
     def _activate_smb_share(self) -> bool:
         """links_dir의 SMB 공유를 활성화"""
         try:
+            # 먼저 SMB 사용자의 UID/GID 설정을 업데이트
+            self._set_smb_user_ownership(start_service=True)
+            
+            share_name = self.config.SMB_SHARE_NAME
+            
+            # 공유 설정 생성
+            share_config = f"""
+[{share_name}]
+   path = {self.links_dir}
+   comment = {self.config.SMB_COMMENT}
+   browseable = yes
+   guest ok = {'yes' if self.config.SMB_GUEST_OK else 'no'}
+   read only = yes
+   create mask = 0644
+   directory mask = 0755
+   force user = {self.config.SMB_USERNAME}
+   force group = {self.config.SMB_USERNAME}
+   veto files = /@*
+   hide dot files = yes
+   delete veto files = no
+   follow symlinks = yes
+   wide links = yes
+   unix extensions = no
+"""
+            # 설정 파일 읽기
+            with open('/etc/samba/smb.conf', 'r') as f:
+                lines = f.readlines()
+
+            # [global] 섹션만 유지
+            new_lines = []
+            for line in lines:
+                if line.strip().startswith('[') and not line.strip() == '[global]':
+                    break
+                new_lines.append(line)
+            
+            # 새로운 공유 설정 추가
+            new_lines.append(share_config)
+            
+            # 설정 파일 저장
+            with open('/etc/samba/smb.conf', 'w') as f:
+                f.writelines(new_lines)
+            
+            # Samba 서비스 상태 확인 및 시작/재시작
+
             # Samba 서비스 시작
             try:
                 # smbd 상태 확인
