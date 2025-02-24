@@ -92,7 +92,7 @@ window.onload = function () {
     });
 
     // 프로그레스 바 업데이트 시작
-    setInterval(updateProgressBar, 100);  // 100ms마다 업데이트
+    setInterval(updateProgressBar, 1000);  // 1000ms마다 업데이트
 
     // 1초마다 시간 표시 업데이트
     setInterval(function () {
