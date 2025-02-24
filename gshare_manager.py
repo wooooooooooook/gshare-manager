@@ -10,7 +10,7 @@ import pytz
 from config import Config
 from dotenv import load_dotenv, set_key
 import os
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 import threading
 import sys
 import atexit
@@ -734,7 +734,6 @@ class GShareManager:
                 smb_running=self.folder_monitor._check_smb_status(),
                 check_interval=self.config.CHECK_INTERVAL
             )
-            logging.debug(f"상태 업데이트: {current_state.to_dict()}")
         except Exception as e:
             logging.error(f"상태 업데이트 실패: {e}")
 
@@ -1029,12 +1028,89 @@ def toggle_mount(folder):
     except Exception as e:
         return jsonify({"status": "error", "message": f"마운트 상태 변경 실패: {str(e)}"}), 500
 
+@app.route('/get_config')
+def get_config():
+    try:
+        config = Config.load_config()
+        config_dict = {
+            'PROXMOX_HOST': config.PROXMOX_HOST,
+            'NODE_NAME': config.NODE_NAME,
+            'VM_ID': config.VM_ID,
+            'TOKEN_ID': config.TOKEN_ID,
+            'SECRET': '********',  # 보안을 위해 실제 값은 숨김
+            'CPU_THRESHOLD': config.CPU_THRESHOLD,
+            'CHECK_INTERVAL': config.CHECK_INTERVAL,
+            'THRESHOLD_COUNT': config.THRESHOLD_COUNT,
+            'MOUNT_PATH': config.MOUNT_PATH,
+            'GET_FOLDER_SIZE_TIMEOUT': config.GET_FOLDER_SIZE_TIMEOUT,
+            'SHUTDOWN_WEBHOOK_URL': config.SHUTDOWN_WEBHOOK_URL,
+            'SMB_SHARE_NAME': config.SMB_SHARE_NAME,
+            'SMB_USERNAME': config.SMB_USERNAME,
+            'SMB_PASSWORD': '********',  # 보안을 위해 실제 값은 숨김
+            'SMB_COMMENT': config.SMB_COMMENT,
+            'SMB_GUEST_OK': config.SMB_GUEST_OK,
+            'SMB_READ_ONLY': config.SMB_READ_ONLY,
+            'TIMEZONE': config.TIMEZONE
+        }
+        return jsonify({"status": "success", "config": config_dict})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/update_config', methods=['POST'])
+def update_config():
+    try:
+        data = request.get_json()
+        
+        # 필수 환경변수 목록
+        env_vars = [
+            'PROXMOX_HOST', 'TOKEN_ID', 'SECRET',
+            'SHUTDOWN_WEBHOOK_URL', 'SMB_USERNAME', 'SMB_PASSWORD',
+            'SMB_SHARE_NAME'
+        ]
+        
+        # 숫자형 변수 목록
+        numeric_vars = {
+            'CPU_THRESHOLD': float,
+            'CHECK_INTERVAL': int,
+            'THRESHOLD_COUNT': int,
+            'GET_FOLDER_SIZE_TIMEOUT': int
+        }
+        
+        # 환경변수 업데이트
+        for key, value in data.items():
+            if key in env_vars:
+                if key in ['SECRET', 'SMB_PASSWORD'] and value == '********':
+                    continue  # 비밀번호가 변경되지 않은 경우 스킵
+                
+                if not value and key in ['PROXMOX_HOST', 'TOKEN_ID', 'SECRET', 'SHUTDOWN_WEBHOOK_URL', 'SMB_USERNAME', 'SMB_PASSWORD']:
+                    return jsonify({
+                        "status": "error",
+                        "message": f"{key}는 필수 값입니다."
+                    }), 400
+                
+                set_key('.env', key, str(value))
+        
+        # YAML 설정 업데이트
+        yaml_config = {k: v for k, v in data.items() if k not in env_vars}
+        Config.update_yaml_config(yaml_config)
+        
+        return jsonify({
+            "status": "success",
+            "message": "설정이 업데이트되었습니다. 변경사항을 적용하려면 서비스를 재시작하세요."
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 def run_flask_app():
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
 
 if __name__ == '__main__':
     logger = setup_logging()
-    config = Config()
+    try:
+        config = Config.load_config()
+    except Exception as e:
+        logging.error(f"설정을 로드할 수 없습니다: {e}")
+        sys.exit(1)
     
     # Flask 스레드 먼저 시작
     flask_thread = threading.Thread(target=run_flask_app)

@@ -1,0 +1,24 @@
+# Proxmox 설정
+proxmox:
+  node_name: "woooook"
+  vm_id: "101"
+  cpu:
+    threshold: 2.0
+    check_interval: 120
+    threshold_count: 2
+
+# 마운트 설정
+mount:
+  path: "/mnt/gshare"
+  folder_size_timeout: 500
+
+# SMB 설정
+smb:
+  share_name: "gshare"  # 기본값 설정
+  comment: "GShare Folder"
+  guest_ok: false
+  read_only: true
+  links_dir: "/mnt/gshare_links"  # 심볼릭 링크 저장 경로도 추가
+
+# 시스템 설정
+timezone: "Asia/Seoul" 
