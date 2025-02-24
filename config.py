@@ -18,7 +18,7 @@ class Config:
     ## API 토큰 시크릿
     SECRET: str = os.getenv('SECRET')
     ## CPU 사용량 임계치(%)
-    CPU_THRESHOLD: float = 1.0
+    CPU_THRESHOLD: float = 2.0
     ## 체크 간격(초)
     CHECK_INTERVAL: int = 120
     ## 체크 횟수
@@ -42,9 +42,9 @@ class Config:
     ## SMB 설명
     SMB_COMMENT: str = os.getenv('SMB_COMMENT', 'GShare Folder')
     ## SMB 게스트 허용 여부
-    SMB_GUEST_OK: bool = os.getenv('SMB_GUEST_OK', 'yes').lower() == 'yes'
+    SMB_GUEST_OK: bool = os.getenv('SMB_GUEST_OK', 'no').lower() == 'yes'
     ## SMB 읽기 전용 여부
-    SMB_READ_ONLY: bool = os.getenv('SMB_READ_ONLY', 'no').lower() == 'yes'
+    SMB_READ_ONLY: bool = os.getenv('SMB_READ_ONLY', 'yes').lower() == 'yes'
     
     # 로그 시간대
     TIMEZONE: str = "Asia/Seoul"
