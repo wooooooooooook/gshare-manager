@@ -61,11 +61,11 @@ window.onload = function () {
     let lastCheckTimeData = '';
 
     // 초기 VM 상태에 따라 컨테이너 표시 설정
-    const initialVMStatus = document.querySelector('.vm-status').innerText;
+    const initialVMStatus = document.querySelector('.vm-status span').innerText;
     updateVMStatus(initialVMStatus);
 
     // 초기 SMB 상태에 따라 컨테이너 표시 설정
-    const initialSMBStatus = document.querySelector('.smb-status').innerText;
+    const initialSMBStatus = document.querySelector('.smb-status span').innerText;
     updateSMBStatus(initialSMBStatus);
 
     // .toggle-text 클릭이벤트 추가
@@ -135,15 +135,21 @@ window.onload = function () {
                 if (elements.lastCheckTimeString) elements.lastCheckTimeString.innerText = data.last_check_time;
                 if (elements.lastAction) elements.lastAction.innerText = data.last_action;
                 if (elements.vmStatus) {
-                    elements.vmStatus.innerText = data.vm_status;
-                    updateVMStatus(data.vm_status);
+                    const vmStatusSpan = elements.vmStatus.querySelector('span');
+                    if (vmStatusSpan) {
+                        vmStatusSpan.innerText = data.vm_status;
+                        updateVMStatus(data.vm_status);
+                    }
                 }
                 if (elements.smbStatus) {
-                    elements.smbStatus.innerText = data.smb_status;
-                    updateSMBStatus(data.smb_status);
+                    const smbStatusSpan = elements.smbStatus.querySelector('span');
+                    if (smbStatusSpan) {
+                        smbStatusSpan.innerText = data.smb_status;
+                        updateSMBStatus(data.smb_status);
+                    }
                 }
                 if (elements.cpuUsage) elements.cpuUsage.innerText = data.cpu_usage + '%';
-                if (elements.lowCpuCount) elements.lowCpuCount.innerText = data.low_cpu_count;
+                if (elements.lowCpuCount) elements.lowCpuCount.innerText = data.low_cpu_count + '/' + data.threshold_count;
                 if (elements.uptime) elements.uptime.innerText = data.uptime;
                 if (elements.lastShutdownTimeReadable) {
                     elements.lastShutdownTimeReadable.innerText = data.last_shutdown_time !== '-' ? 
@@ -151,6 +157,14 @@ window.onload = function () {
                 }
                 if (elements.lastShutdownTimeString) {
                     elements.lastShutdownTimeString.innerText = data.last_shutdown_time;
+                }
+
+                // Last VM Start 시간 업데이트
+                const lastVMStartTimeReadable = document.querySelector('.last-vm-start-time .readable-time');
+                const lastVMStartTimeString = document.querySelector('.last-vm-start-time .time-string');
+                if (lastVMStartTimeReadable && lastVMStartTimeString) {
+                    lastVMStartTimeString.innerText = data.last_vm_start_time;
+                    lastVMStartTimeReadable.innerText = get_time_ago(data.last_vm_start_time);
                 }
 
                 // 감시 중인 폴더 목록 업데이트
@@ -168,6 +182,14 @@ window.onload = function () {
                             return timeB - timeA; // 최신순 정렬
                         });
                     monitoredFoldersContainer.innerHTML = generateFolderListHtml(sortedFolders);
+
+                    // 토글 이벤트 리스너 다시 추가
+                    monitoredFoldersContainer.querySelectorAll('.toggle-text').forEach(el => {
+                        el.addEventListener('click', () => {
+                            el.querySelector('.time-string').classList.toggle('hidden');
+                            el.querySelector('.readable-time').classList.toggle('hidden');
+                        });
+                    });
                 }
             });
 
@@ -462,19 +484,15 @@ function toggleMount(folder) {
                     .then(response => response.json())
                     .then(data => {
                         // VM과 SMB 상태 업데이트
-                        if (data.vm_status) {
-                            const vmStatus = document.querySelector('.vm-status');
-                            if (vmStatus) {
-                                vmStatus.innerText = data.vm_status;
-                                updateVMStatus(data.vm_status);
-                            }
+                        const vmStatusSpan = document.querySelector('.vm-status span');
+                        if (vmStatusSpan) {
+                            vmStatusSpan.innerText = data.vm_status;
+                            updateVMStatus(data.vm_status);
                         }
-                        if (data.smb_status) {
-                            const smbStatus = document.querySelector('.smb-status');
-                            if (smbStatus) {
-                                smbStatus.innerText = data.smb_status;
-                                updateSMBStatus(data.smb_status);
-                            }
+                        const smbStatusSpan = document.querySelector('.smb-status span');
+                        if (smbStatusSpan) {
+                            smbStatusSpan.innerText = data.smb_status;
+                            updateSMBStatus(data.smb_status);
                         }
 
                         // 폴더 목록 업데이트
@@ -492,6 +510,14 @@ function toggleMount(folder) {
                                     return timeB - timeA; // 최신순 정렬
                                 });
                             monitoredFoldersContainer.innerHTML = generateFolderListHtml(sortedFolders);
+
+                            // 토글 이벤트 리스너 다시 추가
+                            monitoredFoldersContainer.querySelectorAll('.toggle-text').forEach(el => {
+                                el.addEventListener('click', () => {
+                                    el.querySelector('.time-string').classList.toggle('hidden');
+                                    el.querySelector('.readable-time').classList.toggle('hidden');
+                                });
+                            });
                         }
                     });
             } else {

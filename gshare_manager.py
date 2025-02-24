@@ -33,6 +33,7 @@ class State:
     cpu_usage: float
     last_action: str
     low_cpu_count: int
+    threshold_count: int
     uptime: str
     last_shutdown_time: str
     monitored_folders: dict
@@ -734,6 +735,7 @@ class GShareManager:
                 cpu_usage=round(cpu_usage, 2),
                 last_action=self.last_action,
                 low_cpu_count=self.low_cpu_count,
+                threshold_count=self.config.THRESHOLD_COUNT,
                 uptime=uptime_str,
                 last_shutdown_time=self.last_shutdown_time,
                 monitored_folders=self.folder_monitor.get_monitored_folders(),
@@ -858,6 +860,7 @@ def get_default_state() -> State:
         cpu_usage=0.0,
         last_action="초기화되지 않음",
         low_cpu_count=0,
+        threshold_count=0,
         uptime="알 수 없음",
         last_shutdown_time="-",
         monitored_folders={},
