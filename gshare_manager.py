@@ -875,6 +875,10 @@ def show_log():
                          state=state.to_dict(), 
                          log_content=log_content)
 
+@app.route('/settings')
+def show_settings():
+    return render_template('settings.html')
+
 @app.route('/update_state')
 def update_state():
     state = current_state if current_state is not None else get_default_state()
