@@ -39,6 +39,7 @@ class State:
     monitored_folders: dict
     last_vm_start_time: str
     smb_running: bool
+    check_interval: int
     
     def to_dict(self):
         data = asdict(self)
@@ -740,7 +741,8 @@ class GShareManager:
                 last_shutdown_time=self.last_shutdown_time,
                 monitored_folders=self.folder_monitor.get_monitored_folders(),
                 last_vm_start_time=last_vm_start,
-                smb_running=self.folder_monitor._check_smb_status()
+                smb_running=self.folder_monitor._check_smb_status(),
+                check_interval=self.config.CHECK_INTERVAL
             )
             logging.debug(f"상태 업데이트: {current_state.to_dict()}")
         except Exception as e:
@@ -865,7 +867,8 @@ def get_default_state() -> State:
         last_shutdown_time="-",
         monitored_folders={},
         last_vm_start_time="-",
-        smb_running=False
+        smb_running=False,
+        check_interval=Config().CHECK_INTERVAL
     )
 
 @app.route('/')

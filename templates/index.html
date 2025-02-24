@@ -16,8 +16,11 @@
             <div class="space-y-4">
                 <!-- 상태 요약 섹션 -->
                 <div class="grid grid-cols-2 gap-2">
-                    <div class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 toggle-text">
-                        <div class="flex items-center gap-1">
+                    <div class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 toggle-text relative overflow-hidden">
+                        <div class="absolute inset-0 bg-gray-100">
+                            <div class="last-check-progress h-full bg-blue-50 transition-all duration-100" style="width: 0%"></div>
+                        </div>
+                        <div class="flex items-center gap-1 relative">
                             <svg class="w-4 h-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none"
                                 viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round"
@@ -25,7 +28,7 @@
                             </svg>
                             <span class="text-xs text-gray-500">마지막 확인</span>
                         </div>
-                        <div class="flex items-center gap-1 font-medium text-sm justify-end last-check-time">
+                        <div class="flex items-center gap-1 font-medium text-sm justify-end last-check-time relative">
                             <span class="text-right readable-time">{{state['last_check_time']}}</span>
                             <span class="hidden text-right time-string">{{state['last_check_time']}}</span>
                         </div>
@@ -166,7 +169,7 @@
                                 <span class="text-xs text-gray-500">Low CPU count</span>
                             </div>
                             <div class="flex items-center font-medium text-sm text-blue-800 low-cpu-count">
-                                <span class="text-right">{{state['low_cpu_count']}}/3</span>
+                                <span class="text-right">{{state['low_cpu_count']}}/{{state['threshold_count']}}</span>
                             </div>
                         </div>
                         <div

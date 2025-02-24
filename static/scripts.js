@@ -22,7 +22,7 @@ function get_time_ago(timestamp_str) {
     }
 }
 
-// 페재 로그 레벨 가져오기
+// 로그 레벨 가져오기
 async function getCurrentLogLevel() {
     try {
         const response = await fetch('/get_log_level');
@@ -52,6 +52,21 @@ async function setLogLevel() {
     }
 }
 
+let checkInterval = 120; // 기본값
+
+// 프로그레스 바 업데이트
+function updateProgressBar() {
+    const progressBar = document.querySelector('.last-check-progress');
+    if (!progressBar) return;
+
+    const now = new Date();
+    const lastCheckTime = new Date(document.querySelector('.last-check-time .time-string').innerText.replace(' ', 'T') + '+09:00');
+    const elapsedTime = (now - lastCheckTime) / 1000;
+    const progress = Math.min(100, (elapsedTime / checkInterval) * 100);
+    
+    progressBar.style.width = `${progress}%`;
+}
+
 // 페이지 로드 시 로그를 맨 아래로 스크롤
 window.onload = function () {
     getCurrentLogLevel();
@@ -71,11 +86,13 @@ window.onload = function () {
     // .toggle-text 클릭이벤트 추가
     document.querySelectorAll('.toggle-text').forEach(el => {
         el.addEventListener('click', () => {
-            // el 자식요소 중 .time-string, .readable-time 요소 표시/숨김
             el.querySelector('.time-string').classList.toggle('hidden');
             el.querySelector('.readable-time').classList.toggle('hidden');
         });
     });
+
+    // 프로그레스 바 업데이트 시작
+    setInterval(updateProgressBar, 100);  // 100ms마다 업데이트
 
     // 1초마다 시간 표시 업데이트
     setInterval(function () {
@@ -111,11 +128,16 @@ window.onload = function () {
         });
     }, 1000);
 
-    // 5초마다 상태 업데이트 요청
+    // 1초마다 상태 업데이트 요청
     setInterval(function () {
         fetch('/update_state')
             .then(response => response.json())
             .then(data => {
+                // check_interval 업데이트
+                if (data.check_interval) {
+                    checkInterval = data.check_interval;
+                }
+
                 // 필수 요소들 존재 여부 확인 및 업데이트
                 const elements = {
                     lastCheckTimeReadable: document.querySelector('.last-check-time .readable-time'),
@@ -199,7 +221,7 @@ window.onload = function () {
             .then(logContent => {
                 document.querySelector('#logContent').innerText = logContent;
             });
-    }, 5000);
+    }, 1000);
 };
 
 function updateVMStatus(status) {
@@ -272,7 +294,7 @@ function restartService() {
                     statusText.textContent = '서비스 재시작이 요청되었습니다. 페이지가 곧 새로고침됩니다.';
                     setTimeout(() => {
                         checkServerAndReload();
-                    }, 5000);
+                    }, 3000);
                 } else {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -282,7 +304,7 @@ function restartService() {
                     statusText.textContent = '서비스가 재시작 중입니다. 페이지가 곧 새로고침됩니다.';
                     setTimeout(() => {
                         checkServerAndReload();
-                    }, 5000);
+                    }, 3000);
                 } else {
                     console.error('Error:', error);
                     statusText.textContent = '서비스 재시작 중 오류가 발생했습니다: ' + error.message;
@@ -308,7 +330,7 @@ function retryMount() {
                     statusText.textContent = '마운트 재시도가 요청되었습니다. 페이지가 곧 새로고침됩니다.';
                     setTimeout(() => {
                         checkServerAndReload();
-                    }, 5000);
+                    }, 3000);
                 } else {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -318,7 +340,7 @@ function retryMount() {
                     statusText.textContent = '마운트 재시도가 요청되었습니다. 페이지가 곧 새로고침됩니다.';
                     setTimeout(() => {
                         checkServerAndReload();
-                    }, 5000);
+                    }, 3000);
                 } else {
                     console.error('Error:', error);
                     statusText.textContent = '마운트 재시도 중 오류가 발생했습니다: ' + error.message;
