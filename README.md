@@ -4,7 +4,7 @@ GShare Manager는 Proxmox 환경에서 Android VM을 효율적으로 관리하�
 
 ## 주요 기능
 
-- 공유 폴더 용량 모니터링
+- 공유 폴더 수정시간간 모니터링
 - 폴더 내용 변경 시 자동 VM 시작
 - VM CPU 사용량 모니터링
 - 저사용량 감지 시 자동 종료 웹훅 전송
@@ -28,11 +28,8 @@ GShare Manager는 Proxmox 환경에서 Android VM을 효율적으로 관리하�
 
 2. NAS 폴더 마운트
    ```bash
-   # NFS 마운트 예시
+   # NFS 마운트
    sudo mount -t nfs 192.168.0.100:/volume1/photos /mnt/gshare
-
-   # CIFS/SMB 마운트 예시
-   sudo mount -t cifs //192.168.0.100/photos /mnt/gshare -o username=user,password=pass
    ```
 
 3. 설정 파일 구성
@@ -68,34 +65,10 @@ GShare Manager는 Proxmox 환경에서 Android VM을 효율적으로 관리하�
    WantedBy=multi-user.target
    ```
 
-   웹 인터페이스용 서비스 파일 생성:
-   ```bash
-   sudo nano /etc/systemd/system/gshare_web.service
-   ```
-
-   gshare_web.service 내용:
-   ```ini
-   [Unit]
-   Description=GShare Web Interface
-   After=network.target
-
-   [Service]
-   Type=simple
-   User=root
-   WorkingDirectory=/설치경로/gshare-manager
-   ExecStart=/usr/bin/python3 /설치경로/gshare-manager/app.py
-   Restart=always
-   RestartSec=3
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
    서비스 등록 및 시작:
    ```bash
    # 서비스 파일 권한 설정
    sudo chmod 644 /etc/systemd/system/gshare_manager.service
-   sudo chmod 644 /etc/systemd/system/gshare_web.service
 
    # systemd 데몬 리로드
    sudo systemctl daemon-reload
@@ -103,12 +76,9 @@ GShare Manager는 Proxmox 환경에서 Android VM을 효율적으로 관리하�
    # 서비스 등록 및 시작
    sudo systemctl enable gshare_manager
    sudo systemctl start gshare_manager
-   sudo systemctl enable gshare_web
-   sudo systemctl start gshare_web
 
    # 서비스 상태 확인
    sudo systemctl status gshare_manager
-   sudo systemctl status gshare_web
    ```
 
 ## 설정 파일
