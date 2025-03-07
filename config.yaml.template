@@ -1,0 +1,37 @@
+# Proxmox 설정
+proxmox:
+  node_name: ""  # Proxmox 노드 이름 (예: pve)
+  vm_id: ""  # Android VM ID (예: 100)
+  cpu:
+    threshold: 10.0  # CPU 사용량 임계치 (%)
+    check_interval: 60  # CPU 사용량 체크 간격 (초)
+    threshold_count: 3  # 임계치 체크 횟수
+
+# 마운트 설정
+mount:
+  path: "/mnt/gshare"  # 로컬 마운트 경로
+  folder_size_timeout: 30  # 폴더 용량 확인 시간 초과 (초)
+
+# NFS 설정
+nfs:
+  path: ""  # NFS 서버 경로 (예: 192.168.1.100:/volume1/shared)
+
+# SMB 설정
+smb:
+  share_name: "gshare"  # SMB 공유 이름
+  comment: "GShare SMB 공유"  # SMB 설명
+  guest_ok: false  # 게스트 접근 허용 여부
+  read_only: true  # 읽기 전용 여부
+  links_dir: "/mnt/gshare_links"  # SMB 링크 디렉토리
+
+# 자격 증명 정보 (보안을 위해 수정 필요)
+credentials:
+  proxmox_host: ""  # Proxmox 호스트 주소 (예: https://proxmox.example.com:8006)
+  token_id: ""  # Proxmox API 토큰 ID (예: user@pam!token)
+  secret: ""  # Proxmox API 토큰 시크릿
+  shutdown_webhook_url: ""  # MacroDroid 종료 웹훅 URL
+  smb_username: ""  # SMB 사용자 이름
+  smb_password: ""  # SMB 비밀번호
+
+# 시스템 설정
+timezone: "Asia/Seoul"  # 시간대 

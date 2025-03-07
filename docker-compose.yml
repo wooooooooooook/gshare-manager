@@ -1,0 +1,33 @@
+services:
+  gshare:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gshare_manager
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./config:/config
+      - ./logs:/logs
+      - gshare_data:/mnt/gshare
+      - gshare_links:/mnt/gshare_links
+    environment:
+      - TZ=Asia/Seoul
+    # NFS 마운트 기능을 사용하려면 아래 주석을 해제하고 수정하세요
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+    # devices:
+    #   - /dev/fuse:/dev/fuse
+    networks:
+      - gshare_network
+
+networks:
+  gshare_network:
+    driver: bridge
+
+volumes:
+  gshare_data:
+  gshare_links: 

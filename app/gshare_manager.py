@@ -10,17 +10,12 @@ import pytz
 from config import Config
 from dotenv import load_dotenv, set_key
 import os
-from flask import Flask, jsonify, render_template, request
 import threading
 import sys
 import atexit
-
-cli = sys.modules['flask.cli']
-cli.show_server_banner = lambda *x: None
-app = Flask(__name__)
-app.logger.disabled = True
-log = logging.getLogger('werkzeug')
-log.disabled = True
+from web_server import init_server, run_flask_app, run_landing_page
+import urllib3
+import yaml
 
 # 전역 변수로 상태와 관리자 객체 선언
 current_state = None
@@ -754,7 +749,7 @@ class GShareManager:
         else:
             logging.info("종료 웹훅을 전송하려했지만 vm이 이미 종료상태입니다.")
 
-    def _update_state(self) -> None:
+    def _update_state(self) -> State:
         try:
             global current_state
             current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
@@ -781,8 +776,10 @@ class GShareManager:
                 smb_running=self.folder_monitor._check_smb_status(),
                 check_interval=self.config.CHECK_INTERVAL
             )
+            return current_state
         except Exception as e:
             logging.error(f"상태 업데이트 실패: {e}")
+            return None
 
     def monitor(self) -> None:
         last_vm_status = None  # VM 상태 변화 감지를 위한 변수
@@ -839,7 +836,9 @@ class GShareManager:
                     logging.error(f"VM 모니터링 중 오류: {e}")
 
                 try:
-                    self._update_state()
+                    # 상태 업데이트 (웹서버용)
+                    global current_state
+                    current_state = self._update_state()
                 except Exception as e:
                     logging.error(f"상태 업데이트 중 오류: {e}")
 
@@ -849,7 +848,7 @@ class GShareManager:
                 logging.error(f"모니터링 루프에서 예상치 못한 오류 발생: {e}")
                 time.sleep(self.config.CHECK_INTERVAL)  # 오류 발생시에도 대기 후 계속 실행
 
-def setup_logging():
+def setup_logging(log_file: str = 'gshare_manager.log'):
     load_dotenv()
     log_level = os.getenv('LOG_LEVEL', 'INFO')
     
@@ -862,7 +861,7 @@ def setup_logging():
 
     # 로그 로테이션 설정
     file_handler = RotatingFileHandler(
-        'gshare_manager.log',
+        log_file,
         maxBytes=5*1024*1024,  # 5MB
         backupCount=1,
         encoding='utf-8'
@@ -890,297 +889,108 @@ def update_log_level():
     log_level = os.getenv('LOG_LEVEL', 'INFO')
     logging.getLogger().setLevel(getattr(logging, log_level))
 
-def get_default_state() -> State:
-    """State가 초기화되지 않았을 때 사용할 기본값을 반환"""
-    # 기본 시간대를 'Asia/Seoul'로 설정
-    current_time = datetime.now(tz=pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S')
-    return State(
-        last_check_time=current_time,
-        vm_running=False,
-        cpu_usage=0.0,
-        last_action="초기화되지 않음",
-        low_cpu_count=0,
-        threshold_count=0,
-        uptime="알 수 없음",
-        last_shutdown_time="-",
-        monitored_folders={},
-        smb_running=False,
-        check_interval=60  # 기본값 60초
-    )
-
-@app.route('/')
-def show_log():
-    log_content = ""
-    if os.path.exists('gshare_manager.log'):
-        with open('gshare_manager.log', 'r') as file:
-            log_content = file.read()
-    else:
-        log_content = "로그 파일을 찾을 수 없습니다."
-
-    state = current_state if current_state is not None else get_default_state()
-    return render_template('index.html', 
-                         state=state.to_dict(), 
-                         log_content=log_content)
-
-@app.route('/settings')
-def show_settings():
-    return render_template('settings.html')
-
-@app.route('/update_state')
-def update_state():
-    state = current_state if current_state is not None else get_default_state()
-    return jsonify(state.to_dict())
-
-@app.route('/update_log')
-def update_log():
-    if os.path.exists('gshare_manager.log'):
-        with open('gshare_manager.log', 'r') as file:
-            log_content = file.read()
-            return log_content
-    else:
-        return "Log file not found.", 404
-
-@app.route('/restart_service')
-def restart_service():
+def check_config_complete():
+    """설정이 완료되었는지 확인"""
     try:
-        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager.service'], check=True)
-        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager_log_server.service'], check=True)
-        return jsonify({"status": "success", "message": "서비스가 재시작되었습니다."})
-    except subprocess.CalledProcessError as e:
-        return jsonify({"status": "error", "message": f"서비스 재시작 실패: {str(e)}"}), 500
-
-@app.route('/retry_mount')
-def retry_mount():
-    try:
-        # 설정을 다시 로드
-        try:
-            config = Config.load_config()
-            subprocess.run(['sudo', 'mount', config.MOUNT_PATH], check=True)
-            subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager.service'], check=True)
-            subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager_log_server.service'], check=True)
-            return jsonify({"status": "success", "message": "마운트 재시도 및 서비스를 재시작했습니다."})
-        except Exception as e:
-            return jsonify({"status": "error", "message": f"설정 로드 또는 마운트 재시도 실패: {str(e)}"}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"마운트 재시도 실패: {str(e)}"}), 500
-
-@app.route('/clear_log')
-def clear_log():
-    try:
-        open('gshare_manager.log', 'w').close()
-        return jsonify({"status": "success", "message": "로그가 성공적으로 삭제되었습니다."})
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"로그 삭제 실패: {str(e)}"}), 500
-
-@app.route('/trim_log/<int:lines>')
-def trim_log(lines):
-    try:
-        with open('gshare_manager.log', 'r') as file:
-            log_lines = file.readlines()
-        
-        trimmed_lines = log_lines[-lines:] if len(log_lines) > lines else log_lines
-        
-        with open('gshare_manager.log', 'w') as file:
-            file.writelines(trimmed_lines)
+        # 모든 실행이 Docker 환경에서 이루어진다고 가정
+        # 첫 실행 시 (설정 파일이 없는 경우) 무조건 랜딩 페이지로 이동
+        if not os.path.exists('/config/config.yaml'):
+            logging.info("설정 파일이 없습니다. 랜딩 페이지로 이동합니다.")
+            return False
             
-        return jsonify({
-            "status": "success", 
-            "message": f"로그가 마지막 {lines}줄만 남도록 정리되었습니다.",
-            "total_lines": len(trimmed_lines)
-        })
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"로그 정리 실패: {str(e)}"}), 500
-
-@app.route('/set_log_level/<string:level>')
-def set_log_level(level):
-    try:
-        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        # YAML 설정 파일 확인
+        config_path = '/config/config.yaml'
         
-        if level.upper() not in valid_levels:
-            return jsonify({
-                "status": "error",
-                "message": f"유효하지 않은 로그 레벨입니다. 가능한 레벨: {', '.join(valid_levels)}"
-            }), 400
-
-        set_key('.env', 'LOG_LEVEL', level.upper())
-        
-        return jsonify({
-            "status": "success",
-            "message": f"로그 레벨이 {level.upper()}로 변경되었습니다. 다음 모니터링 루프에서 적용됩니다."
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": f"로그 레벨 변경 실패: {str(e)}"
-        }), 500
-
-@app.route('/get_log_level')
-def get_log_level():
-    try:
-        load_dotenv()
-        level = os.getenv('LOG_LEVEL', 'INFO')
+        # 설정 파일이 존재하면 기본 설정이 있는지 확인
+        with open(config_path, 'r', encoding='utf-8') as f:
+            yaml_config = yaml.safe_load(f)
             
-        return jsonify({
-            "status": "success",
-            "current_level": level
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": f"로그 레벨 확인 실패: {str(e)}"
-        }), 500
-
-@app.route('/start_vm')
-def start_vm():
-    try:
-        if current_state is None:
-            return jsonify({"status": "error", "message": "State not initialized."}), 404
-
-        if current_state.vm_running:
-            return jsonify({"status": "error", "message": "VM이 이미 실행 중입니다."}), 400
-
-        if gshare_manager.proxmox_api.start_vm():
-            return jsonify({"status": "success", "message": "VM 시작이 요청되었습니다."})
-        else:
-            return jsonify({"status": "error", "message": "VM 시작 실패"}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"VM 시작 요청 실패: {str(e)}"}), 500
-
-@app.route('/shutdown_vm')
-def shutdown_vm():
-    try:
-        if current_state is None:
-            return jsonify({"status": "error", "message": "State not initialized."}), 404
-
-        if not current_state.vm_running:
-            return jsonify({"status": "error", "message": "VM이 이미 종료되어 있습니다."}), 400
-        
-        response = requests.post(config.SHUTDOWN_WEBHOOK_URL, timeout=5)
-        response.raise_for_status()
-        return jsonify({"status": "success", "message": "VM 종료가 요청되었습니다."})
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"VM 종료 요청 실패: {str(e)}"}), 500
-
-@app.route('/toggle_mount/<path:folder>')
-def toggle_mount(folder):
-    try:
-        if current_state is None:
-            return jsonify({"status": "error", "message": "State not initialized."}), 404
-
-        if folder in gshare_manager.folder_monitor.active_links:
-            # 마운트 해제
-            if gshare_manager.folder_monitor._remove_symlink(folder):
-                # 상태 즉시 업데이트
-                gshare_manager._update_state()
-                return jsonify({"status": "success", "message": f"{folder} 마운트가 해제되었습니다."})
-            else:
-                return jsonify({"status": "error", "message": f"{folder} 마운트 해제 실패"}), 500
-        else:
-            # 마운트
-            if gshare_manager.folder_monitor._create_symlink(folder) and gshare_manager.folder_monitor._activate_smb_share():
-                # 상태 즉시 업데이트
-                gshare_manager._update_state()
-                return jsonify({"status": "success", "message": f"{folder} 마운트가 활성화되었습니다."})
-            else:
-                return jsonify({"status": "error", "message": f"{folder} 마운트 활성화 실패"}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"마운트 상태 변경 실패: {str(e)}"}), 500
-
-@app.route('/get_config')
-def get_config():
-    try:
-        config = Config.load_config()
-        config_dict = {
-            'PROXMOX_HOST': config.PROXMOX_HOST,
-            'NODE_NAME': config.NODE_NAME,
-            'VM_ID': config.VM_ID,
-            'TOKEN_ID': config.TOKEN_ID,
-            'SECRET': '********',  # 보안을 위해 실제 값은 숨김
-            'CPU_THRESHOLD': config.CPU_THRESHOLD,
-            'CHECK_INTERVAL': config.CHECK_INTERVAL,
-            'THRESHOLD_COUNT': config.THRESHOLD_COUNT,
-            'MOUNT_PATH': config.MOUNT_PATH,
-            'GET_FOLDER_SIZE_TIMEOUT': config.GET_FOLDER_SIZE_TIMEOUT,
-            'SHUTDOWN_WEBHOOK_URL': config.SHUTDOWN_WEBHOOK_URL,
-            'SMB_SHARE_NAME': config.SMB_SHARE_NAME,
-            'SMB_USERNAME': config.SMB_USERNAME,
-            'SMB_PASSWORD': '********',  # 보안을 위해 실제 값은 숨김
-            'SMB_COMMENT': config.SMB_COMMENT,
-            'SMB_GUEST_OK': config.SMB_GUEST_OK,
-            'SMB_READ_ONLY': config.SMB_READ_ONLY,
-            'TIMEZONE': config.TIMEZONE
-        }
-        return jsonify({"status": "success", "config": config_dict})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/update_config', methods=['POST'])
-def update_config():
-    try:
-        data = request.get_json()
-        
-        # 필수 환경변수 목록
-        env_vars = [
-            'PROXMOX_HOST', 'TOKEN_ID', 'SECRET',
-            'SHUTDOWN_WEBHOOK_URL', 'SMB_USERNAME', 'SMB_PASSWORD',
-            'SMB_SHARE_NAME'
+        if not yaml_config:
+            logging.warning("설정 파일이 비어있습니다.")
+            return False
+            
+        # 필수 섹션과 필드 확인
+        if 'credentials' not in yaml_config:
+            logging.warning("인증 정보가 설정되지 않았습니다.")
+            return False
+            
+        # 필수 인증 정보 확인
+        required_credentials = [
+            'proxmox_host', 'token_id', 'secret', 
+            'shutdown_webhook_url', 'smb_username', 'smb_password'
         ]
         
-        # 숫자형 변수 목록
-        numeric_vars = {
-            'CPU_THRESHOLD': float,
-            'CHECK_INTERVAL': int,
-            'THRESHOLD_COUNT': int,
-            'GET_FOLDER_SIZE_TIMEOUT': int
-        }
+        for cred in required_credentials:
+            if cred not in yaml_config['credentials'] or not yaml_config['credentials'][cred]:
+                logging.warning(f"{cred} 정보가 설정되지 않았습니다.")
+                return False
         
-        # 환경변수 업데이트
-        for key, value in data.items():
-            if key in env_vars:
-                if key in ['SECRET', 'SMB_PASSWORD'] and value == '********':
-                    continue  # 비밀번호가 변경되지 않은 경우 스킵
-                
-                if not value and key in ['PROXMOX_HOST', 'TOKEN_ID', 'SECRET', 'SHUTDOWN_WEBHOOK_URL', 'SMB_USERNAME', 'SMB_PASSWORD']:
-                    return jsonify({
-                        "status": "error",
-                        "message": f"{key}는 필수 값입니다."
-                    }), 400
-                
-                set_key('.env', key, str(value))
-        
-        # YAML 설정 업데이트
-        yaml_config = {k: v for k, v in data.items() if k not in env_vars}
-        Config.update_yaml_config(yaml_config)
-        
-        return jsonify({
-            "status": "success",
-            "message": "설정이 업데이트되었습니다. 변경사항을 적용하려면 서비스를 재시작하세요."
-        })
+        return True
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logging.error(f"설정 확인 중 오류 발생: {e}")
+        return False
 
-def run_flask_app():
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
-
-if __name__ == '__main__':
-    logger = setup_logging()
+if __name__ == "__main__":
+    setup_logging()
+    logging.info("GShare 매니저 시작")
+    
     try:
+        # 모든 환경을 Docker로 간주
+        
+        # 템플릿 파일이 있고 설정 파일이 없으면 복사
+        if os.path.exists('/config/config.yaml.template') and not os.path.exists('/config/config.yaml'):
+            try:
+                import shutil
+                shutil.copy('/config/config.yaml.template', '/config/config.yaml')
+                logging.info("템플릿 파일을 설정 파일로 복사했습니다.")
+            except Exception as e:
+                logging.error(f"템플릿 파일 복사 실패: {e}")
+        
+        # 설정 완료 여부 확인
+        if not check_config_complete():
+            logging.info("필수 설정이 완료되지 않았습니다. 랜딩 페이지 실행 중...")
+            # 랜딩 페이지 실행
+            run_landing_page()
+            sys.exit(0)
+        
+        # 설정이 완료된 경우 애플리케이션 실행
+        logging.info("설정이 완료되었습니다. 애플리케이션 실행 중...")
+        
+        # 설정 로드
         config = Config.load_config()
-    except Exception as e:
-        logging.error(f"설정을 로드할 수 없습니다: {e}")
-        sys.exit(1)
-    
-    # Flask 스레드 먼저 시작
-    flask_thread = threading.Thread(target=run_flask_app)
-    flask_thread.daemon = True
-    flask_thread.start()
-    
-    try:
-        logging.info("───────────────────────────────────────────────")
+        
+        # 시간대 설정
+        os.environ['TZ'] = config.TIMEZONE
+        try:
+            time.tzset()
+        except AttributeError:
+            # Windows에서는 tzset()을 지원하지 않음
+            pass
+        
+        # Proxmox API 경고 비활성화
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        # 로그 파일 경로 설정 (항상 Docker 환경)
+        log_dir = '/logs'
+        os.makedirs(log_dir, exist_ok=True)
+        
+        log_file = os.path.join(log_dir, 'gshare_manager.log')
+        setup_logging(log_file)
+        
+        # 객체 초기화
         proxmox_api = ProxmoxAPI(config)
         gshare_manager = GShareManager(config, proxmox_api)
         logging.info(f"VM is_running - {gshare_manager.proxmox_api.is_vm_running()}")
         logging.info("GShare 관리 시작")
+        
+        # Flask 앱 초기화 및 상태 전달
+        current_state = gshare_manager._update_state()
+        init_server(current_state, gshare_manager, config)
+        
+        # Flask 스레드 시작
+        flask_thread = threading.Thread(target=run_flask_app)
+        flask_thread.daemon = True
+        flask_thread.start()
         
         gshare_manager.monitor()
     except KeyboardInterrupt:

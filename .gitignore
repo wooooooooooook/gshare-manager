@@ -1,2 +1,11 @@
 .cursorrules
 .cursorrule
+__pycache__
+*.log
+*.log.*
+*.log.*.*
+*.log.*.*.*
+*.log.*.*.*.*
+*.log.*.*.*.*.*
+.vscode/
+config.yaml.secret

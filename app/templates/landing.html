@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GShare 설정</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            padding-top: 20px;
+            background-color: #f5f5f5;
+        }
+        .setup-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        .setup-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+        }
+        .form-section h3 {
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .btn-next {
+            float: right;
+        }
+        .tab-content {
+            padding-top: 20px;
+        }
+        .alert-info {
+            background-color: #e8f4f8;
+            border-color: #d1ecf1;
+        }
+        #progress-bar {
+            margin-bottom: 30px;
+        }
+        .alert-danger {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container setup-container">
+        <div class="setup-header">
+            <h1>GShare 초기 설정</h1>
+            <p>앱을 사용하기 위한 필수 설정을 구성해주세요.</p>
+        </div>
+        
+        {% if error %}
+        <div class="alert alert-danger">
+            <strong>오류:</strong> {{ error }}
+        </div>
+        {% endif %}
+        
+        <div class="progress" id="progress-bar">
+            <div class="progress-bar" role="progressbar" style="width: 25%;" aria-valuenow="25" aria-valuemin="0" aria-valuemax="100">1/4</div>
+        </div>
+        
+        <form id="setup-form" action="/save-config" method="post">
+            <ul class="nav nav-tabs" id="setupTabs" role="tablist">
+                <li class="nav-item">
+                    <a class="nav-link active" id="proxmox-tab" data-toggle="tab" href="#proxmox" role="tab">Proxmox API</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="nfs-tab" data-toggle="tab" href="#nfs" role="tab">NFS 설정</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="vm-tab" data-toggle="tab" href="#vm" role="tab">VM 설정</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="monitoring-tab" data-toggle="tab" href="#monitoring" role="tab">모니터링</a>
+                </li>
+            </ul>
+            
+            <div class="tab-content" id="setupTabContent">
+                <!-- Proxmox API 설정 -->
+                <div class="tab-pane fade show active" id="proxmox" role="tabpanel" aria-labelledby="proxmox-tab">
+                    <div class="form-section">
+                        <h3>Proxmox API 설정</h3>
+                        <div class="form-group">
+                            <label for="proxmox_host">Proxmox 호스트 주소</label>
+                            <input type="text" class="form-control" id="proxmox_host" name="PROXMOX_HOST" required placeholder="https://proxmox.example.com:8006" value="{{ form_data.get('PROXMOX_HOST', '') }}">
+                            <small class="form-text text-muted">https://를 포함한 전체 URL을 입력하세요.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="node_name">Proxmox 노드 이름</label>
+                            <input type="text" class="form-control" id="node_name" name="NODE_NAME" required placeholder="pve" value="{{ form_data.get('NODE_NAME', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="vm_id">Android VM ID</label>
+                            <input type="text" class="form-control" id="vm_id" name="VM_ID" required placeholder="100" value="{{ form_data.get('VM_ID', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="token_id">API 토큰 ID</label>
+                            <input type="text" class="form-control" id="token_id" name="TOKEN_ID" required placeholder="user@pam!token" value="{{ form_data.get('TOKEN_ID', '') }}">
+                            <small class="form-text text-muted">Proxmox API 토큰 ID를 입력하세요 (예: user@pam!token)</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="secret">API 토큰 시크릿</label>
+                            <input type="password" class="form-control" id="secret" name="SECRET" required value="{{ form_data.get('SECRET', '') }}">
+                        </div>
+                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('nfs-tab')">다음</button>
+                    </div>
+                </div>
+                
+                <!-- NFS 설정 -->
+                <div class="tab-pane fade" id="nfs" role="tabpanel" aria-labelledby="nfs-tab">
+                    <div class="form-section">
+                        <h3>NFS 설정</h3>
+                        <div class="alert alert-info">
+                            <h5>NAS에서 NFS 설정하는 방법</h5>
+                            <ol>
+                                <li>NAS 관리 페이지에서 "공유 폴더" 섹션으로 이동</li>
+                                <li>공유할 폴더를 선택하고 "NFS 권한" 설정</li>
+                                <li>액세스 권한을 설정하고 IP 주소 기반으로 접근 제한 설정</li>
+                                <li>아래 필드에 NAS의 NFS 공유 경로를 입력 (예: 192.168.1.100:/volume1/shared)</li>
+                            </ol>
+                        </div>
+                        <div class="form-group">
+                            <label for="mount_path">로컬 마운트 경로</label>
+                            <input type="text" class="form-control" id="mount_path" name="MOUNT_PATH" required placeholder="/mnt/gshare" value="{{ form_data.get('MOUNT_PATH', '/mnt/gshare') }}">
+                            <small class="form-text text-muted">NFS 공유를 마운트할 로컬 경로를 입력하세요.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="nfs_path">NFS 공유 경로</label>
+                            <input type="text" class="form-control" id="nfs_path" name="NFS_PATH" required placeholder="192.168.1.100:/volume1/shared" value="{{ form_data.get('NFS_PATH', '') }}">
+                            <small class="form-text text-muted">NAS의 IP 주소와 공유 경로를 입력하세요.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="folder_size_timeout">폴더 용량 확인 시간 초과(초)</label>
+                            <input type="number" class="form-control" id="folder_size_timeout" name="GET_FOLDER_SIZE_TIMEOUT" required value="{{ form_data.get('GET_FOLDER_SIZE_TIMEOUT', 30) }}">
+                        </div>
+                        <button type="button" class="btn btn-secondary" onclick="prevTab('proxmox-tab')">이전</button>
+                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('vm-tab')">다음</button>
+                    </div>
+                </div>
+                
+                <!-- VM 설정 -->
+                <div class="tab-pane fade" id="vm" role="tabpanel" aria-labelledby="vm-tab">
+                    <div class="form-section">
+                        <h3>VM 설정</h3>
+                        <div class="form-group">
+                            <label for="shutdown_webhook">MacroDroid 종료 웹훅 URL</label>
+                            <input type="text" class="form-control" id="shutdown_webhook" name="SHUTDOWN_WEBHOOK_URL" required placeholder="https://example.com/webhook" value="{{ form_data.get('SHUTDOWN_WEBHOOK_URL', '') }}">
+                            <small class="form-text text-muted">Android VM을 종료할 때 사용할 웹훅 URL을 입력하세요.</small>
+                        </div>
+                        <button type="button" class="btn btn-secondary" onclick="prevTab('nfs-tab')">이전</button>
+                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('monitoring-tab')">다음</button>
+                    </div>
+                </div>
+                
+                <!-- 모니터링 설정 -->
+                <div class="tab-pane fade" id="monitoring" role="tabpanel" aria-labelledby="monitoring-tab">
+                    <div class="form-section">
+                        <h3>모니터링 설정</h3>
+                        <div class="form-group">
+                            <label for="cpu_threshold">CPU 사용량 임계치(%)</label>
+                            <input type="number" class="form-control" id="cpu_threshold" name="CPU_THRESHOLD" required value="{{ form_data.get('CPU_THRESHOLD', 10) }}" min="1" max="100">
+                            <small class="form-text text-muted">이 값 이하로 CPU 사용량이 떨어지면 VM을 종료합니다.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="check_interval">CPU 사용량 체크 간격(초)</label>
+                            <input type="number" class="form-control" id="check_interval" name="CHECK_INTERVAL" required value="{{ form_data.get('CHECK_INTERVAL', 60) }}" min="10">
+                        </div>
+                        <div class="form-group">
+                            <label for="threshold_count">임계치 체크 횟수</label>
+                            <input type="number" class="form-control" id="threshold_count" name="THRESHOLD_COUNT" required value="{{ form_data.get('THRESHOLD_COUNT', 3) }}" min="1">
+                            <small class="form-text text-muted">연속으로 이 횟수만큼 임계치 이하로 측정되면 VM을 종료합니다.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="smb_username">SMB 사용자 이름</label>
+                            <input type="text" class="form-control" id="smb_username" name="SMB_USERNAME" required value="{{ form_data.get('SMB_USERNAME', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="smb_password">SMB 비밀번호</label>
+                            <input type="password" class="form-control" id="smb_password" name="SMB_PASSWORD" required value="{{ form_data.get('SMB_PASSWORD', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="smb_share_name">SMB 공유 이름</label>
+                            <input type="text" class="form-control" id="smb_share_name" name="SMB_SHARE_NAME" required value="{{ form_data.get('SMB_SHARE_NAME', 'gshare') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="smb_comment">SMB 설명</label>
+                            <input type="text" class="form-control" id="smb_comment" name="SMB_COMMENT" value="{{ form_data.get('SMB_COMMENT', 'GShare SMB 공유') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="smb_guest_ok">게스트 접근 허용</label>
+                            <select class="form-control" id="smb_guest_ok" name="SMB_GUEST_OK">
+                                <option value="no" {% if form_data.get('SMB_GUEST_OK') != 'yes' %}selected{% endif %}>아니오</option>
+                                <option value="yes" {% if form_data.get('SMB_GUEST_OK') == 'yes' %}selected{% endif %}>예</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="smb_read_only">읽기 전용</label>
+                            <select class="form-control" id="smb_read_only" name="SMB_READ_ONLY">
+                                <option value="no" {% if form_data.get('SMB_READ_ONLY') != 'yes' %}selected{% endif %}>아니오</option>
+                                <option value="yes" {% if form_data.get('SMB_READ_ONLY') == 'yes' %}selected{% endif %}>예</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="smb_links_dir">SMB 링크 디렉토리</label>
+                            <input type="text" class="form-control" id="smb_links_dir" name="SMB_LINKS_DIR" value="{{ form_data.get('SMB_LINKS_DIR', '/mnt/gshare_links') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="timezone">시간대</label>
+                            <select class="form-control" id="timezone" name="TIMEZONE">
+                                <option value="Asia/Seoul" {% if form_data.get('TIMEZONE') == 'Asia/Seoul' or not form_data.get('TIMEZONE') %}selected{% endif %}>아시아/서울</option>
+                                <option value="UTC" {% if form_data.get('TIMEZONE') == 'UTC' %}selected{% endif %}>UTC</option>
+                                <option value="America/New_York" {% if form_data.get('TIMEZONE') == 'America/New_York' %}selected{% endif %}>미국/뉴욕</option>
+                                <option value="Europe/London" {% if form_data.get('TIMEZONE') == 'Europe/London' %}selected{% endif %}>유럽/런던</option>
+                            </select>
+                        </div>
+                        <button type="button" class="btn btn-secondary" onclick="prevTab('vm-tab')">이전</button>
+                        <button type="submit" class="btn btn-success">설정 완료</button>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script>
+        function nextTab(tabId) {
+            $('#setupTabs a[href="#' + tabId.split('-')[0] + '"]').tab('show');
+            updateProgressBar(tabId);
+        }
+        
+        function prevTab(tabId) {
+            $('#setupTabs a[href="#' + tabId.split('-')[0] + '"]').tab('show');
+            updateProgressBar(tabId);
+        }
+        
+        function updateProgressBar(tabId) {
+            const tabs = ['proxmox-tab', 'nfs-tab', 'vm-tab', 'monitoring-tab'];
+            const currentIndex = tabs.indexOf(tabId);
+            const progressPercentage = ((currentIndex + 1) / tabs.length) * 100;
+            
+            $('.progress-bar').css('width', progressPercentage + '%');
+            $('.progress-bar').attr('aria-valuenow', progressPercentage);
+            $('.progress-bar').text((currentIndex + 1) + '/' + tabs.length);
+        }
+        
+        // 폼 제출 전 유효성 검사
+        document.getElementById('setup-form').addEventListener('submit', function(e) {
+            const requiredFields = document.querySelectorAll('input[required]');
+            let allValid = true;
+            
+            requiredFields.forEach(field => {
+                if (!field.value) {
+                    allValid = false;
+                    field.classList.add('is-invalid');
+                } else {
+                    field.classList.remove('is-invalid');
+                }
+            });
+            
+            if (!allValid) {
+                e.preventDefault();
+                alert('모든 필수 항목을 입력해주세요.');
+            }
+        });
+    </script>
+</body>
+</html> 
