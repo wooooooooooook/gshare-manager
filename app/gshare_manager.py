@@ -189,6 +189,7 @@ class FolderMonitor:
         """Samba가 설치되어 있는지 확인하고 설치"""
         try:
             subprocess.run(['which', 'smbd'], check=True, capture_output=True)
+            logging.info("Samba가 이미 설치되어 있습니다.")
         except subprocess.CalledProcessError:
             logging.info("Samba가 설치되어 있지 않습니다. 설치를 시도합니다.")
             try:
@@ -374,8 +375,17 @@ class FolderMonitor:
             
             # 디렉토리 권한 설정
             os.chmod(self.links_dir, 0o755)
-            subprocess.run(['sudo', 'chown', f"{self.config.SMB_USERNAME}:{self.config.SMB_USERNAME}", self.links_dir], check=True)
-            logging.info("공유용 링크 디렉토리 권한 설정 완료")
+            
+            try:
+                subprocess.run(['sudo', 'chown', f"{self.config.SMB_USERNAME}:{self.config.SMB_USERNAME}", self.links_dir], check=True)
+                logging.info("공유용 링크 디렉토리 권한 설정 완료")
+            except subprocess.CalledProcessError as e:
+                logging.error(f"디렉토리 소유권 변경 실패: {e} - 사용자가 시스템에 존재하는지 확인하세요.")
+                # 사용자 생성 로직 호출
+                self._set_smb_user_ownership(start_service=False)
+                # 다시 시도
+                subprocess.run(['sudo', 'chown', f"{self.config.SMB_USERNAME}:{self.config.SMB_USERNAME}", self.links_dir], check=True)
+                logging.info("사용자 생성 후 공유용 링크 디렉토리 권한 설정 완료")
         except Exception as e:
             logging.error(f"공유용 링크 디렉토리 생성/설정 실패: {e}")
             raise
@@ -383,9 +393,40 @@ class FolderMonitor:
     def _set_smb_user_ownership(self, start_service: bool = True) -> None:
         """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
         try:
-            # 현재 SMB 사용자의 UID/GID 확인
+            # 설정에서 SMB 사용자 이름 가져오기
+            smb_username = self.config.SMB_USERNAME
+            logging.info(f"SMB 사용자 설정: {smb_username}")
+            
+            # 현재 SMB 사용자의 존재 여부 확인
+            user_exists = False
             try:
-                user_info = subprocess.run(['id', self.config.SMB_USERNAME], capture_output=True, text=True)
+                user_info = subprocess.run(['id', smb_username], capture_output=True, text=True)
+                user_exists = user_info.returncode == 0
+                logging.info(f"사용자 존재 여부: {user_exists}")
+            except Exception as e:
+                logging.error(f"사용자 확인 중 오류: {e}")
+                user_exists = False
+                
+            # 사용자가 없으면 생성
+            if not user_exists:
+                logging.info(f"사용자 '{smb_username}'가 존재하지 않습니다. 사용자를 생성합니다.")
+                try:
+                    # 사용자 그룹 생성 시도
+                    group_result = subprocess.run(['groupadd', '-r', smb_username], capture_output=True, text=True)
+                    logging.info(f"그룹 생성 결과: {group_result.returncode}, 출력: {group_result.stdout}, 오류: {group_result.stderr}")
+                    
+                    # 사용자 생성 시도
+                    user_result = subprocess.run(['useradd', '-r', '-g', smb_username, smb_username], capture_output=True, text=True)
+                    logging.info(f"사용자 생성 결과: {user_result.returncode}, 출력: {user_result.stdout}, 오류: {user_result.stderr}")
+                    
+                    # SMB 패스워드 설정은 생략 (디버깅 중)
+                    logging.info(f"사용자 '{smb_username}' 생성 완료")
+                except Exception as e:
+                    logging.error(f"사용자 생성 중 오류 발생: {e}")
+            
+            # 현재 SMB 사용자의 UID/GID 확인 (사용자가 생성된 후)
+            try:
+                user_info = subprocess.run(['id', smb_username], capture_output=True, text=True)
                 if user_info.returncode == 0:
                     # 출력 형식: uid=1000(user) gid=1000(user) groups=1000(user)
                     info_parts = user_info.stdout.strip().split()
