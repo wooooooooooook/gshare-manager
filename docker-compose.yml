@@ -15,6 +15,7 @@ services:
     environment:
       - TZ=Asia/Seoul
       - FLASK_PORT=5000
+      - LOG_LEVEL=DEBUG
     # NFS 마운트 기능을 사용하려면 아래 주석을 해제하고 수정하세요
     privileged: true
     cap_add:

@@ -126,8 +126,21 @@ class FolderMonitor:
             logging.error(f"마지막 종료 시간 로드 실패: {e}")
             self.last_shutdown_time = time.time()  # 현재 시간으로 설정
         
-        # 공유용 링크 디렉토리 생성
+        # 공유용 링크 디렉토리 경로 설정
         self.links_dir = "/mnt/gshare_links"
+        
+        # SMB 관련 초기 설정
+        logging.debug("SMB 설치 확인 중...")
+        self._ensure_smb_installed()
+        self._init_smb_config()
+        
+        # NFS 마운트 경로의 UID/GID 확인
+        logging.info("NFS 마운트 경로의 UID/GID 확인 중...")
+        self.nfs_uid, self.nfs_gid = self._get_nfs_ownership()
+        logging.info(f"NFS 마운트 경로의 UID/GID 확인 완료: {self.nfs_uid}/{self.nfs_gid}")
+        
+        # 공유용 링크 디렉토리 생성 및 권한 설정
+        logging.debug("공유용 링크 디렉토리 생성 중...")
         self._ensure_links_directory()
         
         # 시작 시 기존 심볼릭 링크 모두 제거
@@ -144,21 +157,16 @@ class FolderMonitor:
         except Exception as e:
             logging.error(f"기존 심볼릭 링크 제거 중 오류 발생: {e}")
         
+        # 서브폴더 정보 업데이트
+        logging.debug("서브폴더 정보 업데이트 중...")
         self._update_subfolder_mtimes()
         
-        # SMB 관련 초기 설정
-        self._ensure_smb_installed()
-        self._init_smb_config()
-        
-        # NFS 마운트 경로의 UID/GID 확인 (중요: 이 작업은 실패하면 안 됨)
-        logging.info("NFS 마운트 경로의 UID/GID 확인 중...")
-        self.nfs_uid, self.nfs_gid = self._get_nfs_ownership()
-        logging.info(f"NFS 마운트 경로의 UID/GID 확인 완료: {self.nfs_uid}/{self.nfs_gid}")
-        
         # SMB 사용자의 UID/GID 설정 (서비스는 시작하지 않음)
+        logging.debug("SMB 사용자 설정 중...")
         self._set_smb_user_ownership(start_service=False)
         
         # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성
+        logging.debug("최근 수정된 폴더의 링크 생성 중...")
         self._create_links_for_recently_modified()
 
     def _load_last_shutdown_time(self) -> float:
@@ -379,20 +387,13 @@ class FolderMonitor:
             if not os.path.exists(self.links_dir):
                 os.makedirs(self.links_dir)
                 logging.info(f"공유용 링크 디렉토리 생성됨: {self.links_dir}")
-            
-            # 디렉토리 권한 설정
-            os.chmod(self.links_dir, 0o755)
+                self._set_smb_user_ownership(start_service=False)
             
             try:
                 subprocess.run(['sudo', 'chown', f"{self.config.SMB_USERNAME}:{self.config.SMB_USERNAME}", self.links_dir], check=True)
                 logging.info("공유용 링크 디렉토리 권한 설정 완료")
             except subprocess.CalledProcessError as e:
-                logging.error(f"디렉토리 소유권 변경 실패: {e} - 사용자가 시스템에 존재하는지 확인하세요.")
-                # 사용자 생성 로직 호출
-                self._set_smb_user_ownership(start_service=False)
-                # 다시 시도
-                subprocess.run(['sudo', 'chown', f"{self.config.SMB_USERNAME}:{self.config.SMB_USERNAME}", self.links_dir], check=True)
-                logging.info("사용자 생성 후 공유용 링크 디렉토리 권한 설정 완료")
+                logging.error(f"디렉토리 소유권 변경 실패: {e}")
         except Exception as e:
             logging.error(f"공유용 링크 디렉토리 생성/설정 실패: {e}")
             raise
@@ -400,134 +401,87 @@ class FolderMonitor:
     def _set_smb_user_ownership(self, start_service: bool = True) -> None:
         """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
         try:
-            # 설정에서 SMB 사용자 이름 가져오기
+            # 설정에서 SMB 사용자 이름과 비밀번호 가져오기
             smb_username = self.config.SMB_USERNAME
+            smb_password = self.config.SMB_PASSWORD
             logging.info(f"SMB 사용자 설정: {smb_username}")
             
-            # 현재 SMB 사용자의 존재 여부 확인
+            # 사용자 존재 여부와 UID/GID 일치 여부 한 번에 확인
             user_exists = False
-            try:
-                user_info = subprocess.run(['id', smb_username], capture_output=True, text=True)
-                user_exists = user_info.returncode == 0
-                logging.info(f"사용자 존재 여부: {user_exists}")
-            except Exception as e:
-                logging.error(f"사용자 확인 중 오류: {e}")
-                user_exists = False
-                
-            # 사용자가 없으면 생성
-            if not user_exists:
-                logging.info(f"사용자 '{smb_username}'가 존재하지 않습니다. 사용자를 생성합니다.")
-                try:
-                    # 사용자 그룹 생성 시도
-                    group_result = subprocess.run(['groupadd', '-r', smb_username], capture_output=True, text=True)
-                    logging.info(f"그룹 생성 결과: {group_result.returncode}, 출력: {group_result.stdout}, 오류: {group_result.stderr}")
-                    
-                    # 사용자 생성 시도
-                    user_result = subprocess.run(['useradd', '-r', '-g', smb_username, smb_username], capture_output=True, text=True)
-                    logging.info(f"사용자 생성 결과: {user_result.returncode}, 출력: {user_result.stdout}, 오류: {user_result.stderr}")
-                    
-                    # SMB 패스워드 설정은 생략 (디버깅 중)
-                    logging.info(f"사용자 '{smb_username}' 생성 완료")
-                except Exception as e:
-                    logging.error(f"사용자 생성 중 오류 발생: {e}")
+            uid_gid_match = False
+            current_uid = 0
+            current_gid = 0
             
-            # 현재 SMB 사용자의 UID/GID 확인 (사용자가 생성된 후)
             try:
                 user_info = subprocess.run(['id', smb_username], capture_output=True, text=True)
-                if user_info.returncode == 0:
-                    # 출력 형식: uid=1000(user) gid=1000(user) groups=1000(user)
+                if user_info.returncode == 0:  # 사용자 존재
+                    user_exists = True
                     info_parts = user_info.stdout.strip().split()
                     current_uid = int(info_parts[0].split('=')[1].split('(')[0])
                     current_gid = int(info_parts[1].split('=')[1].split('(')[0])
-                    
-                    # UID/GID가 이미 일치하는 경우
-                    if current_uid == self.nfs_uid and current_gid == self.nfs_gid:
-                        logging.info(f"SMB 사용자와 NFS의 UID/GID 일치 확인. (UID: {current_uid}, GID: {current_gid})")
-                        # 서비스 시작이 요청된 경우에만 서비스 시작
-                        if start_service:
-                            subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
-                            subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
-                        return
-            except subprocess.CalledProcessError:
-                pass  # 사용자가 없는 경우 계속 진행
+                    uid_gid_match = (current_uid == self.nfs_uid and current_gid == self.nfs_gid)
+                    logging.info(f"사용자 '{smb_username}' 존재: UID={current_uid}, GID={current_gid}")
+                    logging.info(f"NFS UID/GID와 일치: {uid_gid_match} (NFS: UID={self.nfs_uid}, GID={self.nfs_gid})")
+            except Exception as e:
+                logging.error(f"사용자 확인 중 오류: {e}")
             
-            # 먼저 Samba 서비스 중지
-            logging.debug("Samba 서비스 중지 시도...")
-            subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=True)
-            subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=True)
-            logging.debug("Samba 서비스 중지 완료")
-            
-            # 그룹 존재 여부 확인
-            try:
-                group_info = subprocess.run(['getent', 'group', str(self.nfs_gid)], 
-                                         capture_output=True, text=True).stdout.strip()
-                if group_info:
-                    # GID가 이미 사용 중이면 해당 그룹 사용
-                    existing_group = group_info.split(':')[0]
-                    self.config.SMB_USERNAME = existing_group
-                else:
-                    # 그룹이 없으면 생성
-                    try:
-                        subprocess.run(['sudo', 'groupadd', '-g', str(self.nfs_gid), self.config.SMB_USERNAME], check=True)
-                        logging.info(f"그룹 '{self.config.SMB_USERNAME}' 생성됨 (GID: {self.nfs_gid})")
-                    except subprocess.CalledProcessError as e:
-                        if e.returncode == 4:  # GID already exists
-                            # 다른 GID로 시도
-                            subprocess.run(['sudo', 'groupadd', self.config.SMB_USERNAME], check=True)
-                            logging.warning(f"GID {self.nfs_gid}가 사용 중이어서 시스템이 할당한 GID로 그룹을 생성했습니다. 공유 폴더에 권한이 없을 수 있습니다.")
-            except subprocess.CalledProcessError as e:
-                logging.error(f"그룹 정보 확인 실패: {e}")
-                raise
-
-            # 사용자 존재 여부 확인
-            user_exists = subprocess.run(['id', self.config.SMB_USERNAME], capture_output=True).returncode == 0
-            
+            # 사용자 처리 로직 (세 가지 경우)
             if not user_exists:
-                # 사용자가 없으면 생성
-                logging.info(f"사용자 '{self.config.SMB_USERNAME}' 생성...")
+                # 1. 사용자가 없음 - 새 사용자 생성 (지정된 UID/GID 사용)
+                logging.info(f"사용자 '{smb_username}'가 존재하지 않습니다. NFS UID/GID로 사용자를 생성합니다.")
                 try:
-                    subprocess.run([
-                        'sudo', 'useradd',
-                        '-u', str(self.nfs_uid),
-                        '-g', self.config.SMB_USERNAME,
-                        '-M',  # 홈 디렉토리 생성하지 않음
-                        '-s', '/sbin/nologin',  # 로그인 셸 비활성화
-                        self.config.SMB_USERNAME
-                    ], check=True)
-                except subprocess.CalledProcessError as e:
-                    if e.returncode == 4:  # UID already exists
-                        # 다른 UID로 시도
-                        subprocess.run([
-                            'sudo', 'useradd',
-                            '-g', self.config.SMB_USERNAME,
-                            '-M',
-                            '-s', '/sbin/nologin',
-                            self.config.SMB_USERNAME
-                        ], check=True)
-                        logging.warning(f"UID {self.nfs_uid}가 사용 중이어서 시스템이 할당한 UID로 사용자를 생성했습니다. 공유 폴더에 권한이 없을 수 있습니다.")
+                    # 그룹 생성
+                    group_result = subprocess.run(['groupadd', '-r', '-g', str(self.nfs_gid), smb_username], capture_output=True, text=True, check=False)
+                    logging.info(f"그룹 생성 결과: {group_result.returncode}, 오류: {group_result.stderr.strip() if group_result.stderr else '없음'}")
+                    
+                    # 사용자 생성 (지정된 UID/GID 사용)
+                    user_result = subprocess.run(['useradd', '-r', '-u', str(self.nfs_uid), '-g', str(self.nfs_gid), smb_username], capture_output=True, text=True, check=False)
+                    logging.info(f"사용자 생성 결과: {user_result.returncode}, 오류: {user_result.stderr.strip() if user_result.stderr else '없음'}")
+                    
+                    # SMB 패스워드 설정
+                    if smb_password:
+                        proc = subprocess.Popen(['passwd', smb_username], stdin=subprocess.PIPE)
+                        proc.communicate(input=f"{smb_password}\n{smb_password}\n".encode())
+                        logging.info(f"사용자 '{smb_username}' 패스워드 설정 완료")
+                    
+                    logging.info(f"사용자 '{smb_username}' 생성 완료 (UID={self.nfs_uid}, GID={self.nfs_gid})")
+                except Exception as e:
+                    logging.error(f"사용자 생성 중 오류 발생: {e}")
+            elif not uid_gid_match:
+                # 2. 사용자는 있지만 UID/GID가 일치하지 않음 - Samba 서비스 중지 후 UID/GID 수정
+                logging.info(f"사용자 '{smb_username}'의 UID/GID가 NFS와 일치하지 않아 수정합니다.")
+                
+                # Samba 서비스 중지
+                try:
+                    logging.debug("Samba 서비스 중지...")
+                    subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=False)
+                    subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=False)
+                    
+                    # 사용자 UID/GID 수정
+                    usermod_result = subprocess.run(['usermod', '-u', str(self.nfs_uid), '-g', str(self.nfs_gid), smb_username], capture_output=True, text=True, check=False)
+                    logging.info(f"사용자 UID/GID 수정 결과: {usermod_result.returncode}, 오류: {usermod_result.stderr.strip() if usermod_result.stderr else '없음'}")
+                    
+                    # 필요한 파일의 소유권 변경
+                    subprocess.run(['chown', '-R', f"{smb_username}:{smb_username}", self.links_dir], check=False)
+                    logging.info(f"사용자 '{smb_username}'의 UID/GID 수정 완료 (UID={self.nfs_uid}, GID={self.nfs_gid})")
+                except Exception as e:
+                    logging.error(f"사용자 UID/GID 수정 중 오류 발생: {e}")
+            else:
+                # 3. 사용자가 있고 UID/GID도 일치함 - 작업 없음
+                logging.info(f"사용자 '{smb_username}'의 UID/GID가 이미 NFS와 일치합니다.")
             
-            # Samba 사용자 비밀번호 설정
-            password_bytes = f"{self.config.SMB_PASSWORD}\n{self.config.SMB_PASSWORD}\n".encode('utf-8')
-            subprocess.run(['sudo', 'smbpasswd', '-a', self.config.SMB_USERNAME],
-                         input=password_bytes, check=True)
-            
-            # Samba 사용자 활성화
-            subprocess.run(['sudo', 'smbpasswd', '-e', self.config.SMB_USERNAME], check=True)
-            
-            # 서비스 시작이 요청된 경우
-            if start_service:
-                subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
-                subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
-            
-            logging.info(f"SMB 사용자 설정이 완료되었습니다.")
-        except Exception as e:
-            logging.error(f"SMB 사용자의 UID/GID 설정 실패: {str(e)}")
+            # 서비스 시작 (요청된 경우)
             if start_service:
                 try:
+                    logging.info("Samba 서비스 시작...")
                     subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
                     subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
-                except Exception as restart_error:
-                    logging.error(f"Samba 서비스 재시작 실패: {restart_error}")
+                    logging.info("Samba 서비스 시작 완료")
+                except Exception as e:
+                    logging.error(f"Samba 서비스 시작 중 오류 발생: {e}")
+            
+        except Exception as e:
+            logging.error(f"SMB 사용자의 UID/GID 설정 실패: {e}")
             raise
 
     def _create_symlink(self, subfolder: str) -> bool:
@@ -795,13 +749,19 @@ class GShareManager:
         self.proxmox_api = proxmox_api
         self.low_cpu_count = 0
         self.last_action = "프로그램 시작"
+        self.restart_required = False
+        
+        # NFS 마운트 먼저 시도
+        logging.info("NFS 마운트 시도 중...")
+        self._mount_nfs()
+        logging.info("NFS 마운트 작업 완료")
+        
+        # FolderMonitor 초기화 (NFS 마운트 이후에 수행)
+        logging.info("FolderMonitor 초기화 중...")
         self.folder_monitor = FolderMonitor(config, proxmox_api)
         self.proxmox_api.set_folder_monitor(self.folder_monitor)  # FolderMonitor 인스턴스 설정
         self.last_shutdown_time = datetime.fromtimestamp(self.folder_monitor.last_shutdown_time).strftime('%Y-%m-%d %H:%M:%S')
-        self.restart_required = False
-        
-        # NFS 마운트 시도
-        self._mount_nfs()
+        logging.info("FolderMonitor 초기화 완료")
     
     def _mount_nfs(self):
         """NFS 마운트 시도"""
