@@ -454,8 +454,7 @@ class FolderMonitor:
                 # Samba 서비스 중지
                 try:
                     logging.debug("Samba 서비스 중지...")
-                    subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=False)
-                    subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=False)
+                    self._stop_samba_service()
                     
                     # 사용자 UID/GID 수정
                     usermod_result = subprocess.run(['usermod', '-u', str(self.nfs_uid), '-g', str(self.nfs_gid), smb_username], capture_output=True, text=True, check=False)
@@ -474,8 +473,7 @@ class FolderMonitor:
             if start_service:
                 try:
                     logging.info("Samba 서비스 시작...")
-                    subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
-                    subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
+                    self._start_samba_service()
                     logging.info("Samba 서비스 시작 완료")
                 except Exception as e:
                     logging.error(f"Samba 서비스 시작 중 오류 발생: {e}")
@@ -549,74 +547,30 @@ class FolderMonitor:
             logging.error(f"최근 수정된 폴더 링크 생성 중 오류 발생: {e}")
 
     def _activate_smb_share(self) -> bool:
-        """links_dir의 SMB 공유를 활성화"""
+        """SMB 공유 활성화 - SMB 설정 파일 업데이트 및 서비스 재시작"""
         try:
-            # 먼저 SMB 사용자의 UID/GID 설정을 업데이트
-            self._set_smb_user_ownership(start_service=True)
+            # 이미 SMB 서비스가 실행 중인지 확인
+            is_running = self._check_smb_status()
             
-            share_name = self.config.SMB_SHARE_NAME
+            # SMB 설정 파일 업데이트
+            self._update_smb_config()
             
-            # 공유 설정 생성
-            share_config = f"""
-[{share_name}]
-   path = {self.links_dir}
-   comment = {self.config.SMB_COMMENT}
-   browseable = yes
-   guest ok = {'yes' if self.config.SMB_GUEST_OK else 'no'}
-   read only = yes
-   create mask = 0644
-   directory mask = 0755
-   force user = {self.config.SMB_USERNAME}
-   force group = {self.config.SMB_USERNAME}
-   veto files = /@*
-   hide dot files = yes
-   delete veto files = no
-   follow symlinks = yes
-   wide links = yes
-   unix extensions = no
-"""
-            # 설정 파일 읽기
-            with open('/etc/samba/smb.conf', 'r') as f:
-                lines = f.readlines()
-
-            # [global] 섹션만 유지
-            new_lines = []
-            for line in lines:
-                if line.strip().startswith('[') and not line.strip() == '[global]':
-                    break
-                new_lines.append(line)
+            # 서비스 재시작/시작
+            if is_running:
+                logging.info("SMB 서비스가 이미 실행 중입니다. 서비스를 재시작합니다.")
+                self._restart_samba_service()
+            else:
+                logging.info("SMB 서비스를 시작합니다.")
+                self._start_samba_service()
             
-            # 새로운 공유 설정 추가
-            new_lines.append(share_config)
-            
-            # 설정 파일 저장
-            with open('/etc/samba/smb.conf', 'w') as f:
-                f.writelines(new_lines)
-            
-            # Samba 서비스 상태 확인 및 시작/재시작
-
-            # Samba 서비스 시작
-            try:
-                # smbd 상태 확인
-                smbd_status = subprocess.run(['systemctl', 'is-active', 'smbd'], capture_output=True, text=True).stdout.strip()
-                nmbd_status = subprocess.run(['systemctl', 'is-active', 'nmbd'], capture_output=True, text=True).stdout.strip()
+            # 서비스 상태 확인
+            if self._check_smb_status():
+                logging.info("SMB 공유가 활성화되었습니다.")
+                return True
+            else:
+                logging.error("SMB 서비스가 시작되지 않았습니다.")
+                return False
                 
-                if smbd_status == 'active' or nmbd_status == 'active':
-                    # 서비스가 실행 중이면 재시작
-                    logging.debug("Samba 서비스가 실행 중입니다. 재시작합니다.")
-                    subprocess.run(['sudo', 'systemctl', 'restart', 'smbd'], check=True)
-                    subprocess.run(['sudo', 'systemctl', 'restart', 'nmbd'], check=True)
-                else:
-                    # 서비스가 중지되어 있으면 시작
-                    logging.debug("Samba 서비스를 시작합니다.")
-                    subprocess.run(['sudo', 'systemctl', 'start', 'smbd'], check=True)
-                    subprocess.run(['sudo', 'systemctl', 'start', 'nmbd'], check=True)
-            except subprocess.CalledProcessError as e:
-                logging.error(f"Samba 서비스 제어 중 오류 발생: {e}")
-                raise
-            
-            logging.info(f"SMB 공유 활성화 성공: {self.config.SMB_COMMENT}")
-            return True
         except Exception as e:
             logging.error(f"SMB 공유 활성화 실패: {e}")
             return False
@@ -707,8 +661,7 @@ class FolderMonitor:
                 f.writelines(new_lines)
             
             # Samba 서비스 중지
-            subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=True)
-            subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=True)
+            self._stop_samba_service()
             
             logging.info(f"SMB 공유 비활성화 성공")
             return True
@@ -719,8 +672,7 @@ class FolderMonitor:
     def cleanup_resources(self):
         try:
             # Samba 서비스 중지
-            subprocess.run(['sudo', 'systemctl', 'stop', 'smbd'], check=True, timeout=30)
-            subprocess.run(['sudo', 'systemctl', 'stop', 'nmbd'], check=True, timeout=30)
+            self._stop_samba_service(timeout=30)
             
             # 심볼릭 링크 제거
             if os.path.exists(self.links_dir):
@@ -736,12 +688,93 @@ class FolderMonitor:
     def _check_smb_status(self) -> bool:
         """SMB 서비스의 실행 상태를 확인"""
         try:
-            smbd_status = subprocess.run(['systemctl', 'is-active', 'smbd'], capture_output=True, text=True).stdout.strip()
-            nmbd_status = subprocess.run(['systemctl', 'is-active', 'nmbd'], capture_output=True, text=True).stdout.strip()
-            return smbd_status == 'active' and nmbd_status == 'active'
+            # pgrep 명령어로 smbd와 nmbd 프로세스가 실행 중인지 확인
+            smbd_running = subprocess.run(['pgrep', 'smbd'], capture_output=True).returncode == 0
+            nmbd_running = subprocess.run(['pgrep', 'nmbd'], capture_output=True).returncode == 0
+            
+            return smbd_running and nmbd_running
         except Exception as e:
             logging.error(f"SMB 서비스 상태 확인 실패: {e}")
             return False
+            
+    def _start_samba_service(self) -> None:
+        """Samba 서비스 시작"""
+        try:
+            # Docker 환경에서는 직접 데몬 실행
+            subprocess.run(['smbd', '--daemon'], check=False)
+            subprocess.run(['nmbd', '--daemon'], check=False)
+        except Exception as e:
+            logging.error(f"Samba 서비스 시작 실패: {e}")
+            raise
+            
+    def _stop_samba_service(self, timeout=None) -> None:
+        """Samba 서비스 중지"""
+        try:
+            # 프로세스 종료
+            subprocess.run(['pkill', 'smbd'], check=False)
+            subprocess.run(['pkill', 'nmbd'], check=False)
+        except Exception as e:
+            logging.error(f"Samba 서비스 중지 실패: {e}")
+            
+    def _restart_samba_service(self) -> None:
+        """Samba 서비스 재시작"""
+        try:
+            self._stop_samba_service()
+            time.sleep(1)  # 잠시 대기
+            self._start_samba_service()
+        except Exception as e:
+            logging.error(f"Samba 서비스 재시작 실패: {e}")
+            raise
+
+    def _update_smb_config(self) -> None:
+        """SMB 설정 파일 업데이트"""
+        try:
+            # 먼저 SMB 사용자의 UID/GID 설정을 업데이트
+            self._set_smb_user_ownership(start_service=False)
+            
+            share_name = self.config.SMB_SHARE_NAME
+            
+            # 공유 설정 생성
+            share_config = f"""
+[{share_name}]
+   path = {self.links_dir}
+   comment = {self.config.SMB_COMMENT}
+   browseable = yes
+   guest ok = {'yes' if self.config.SMB_GUEST_OK else 'no'}
+   read only = yes
+   create mask = 0644
+   directory mask = 0755
+   force user = {self.config.SMB_USERNAME}
+   force group = {self.config.SMB_USERNAME}
+   veto files = /@*
+   hide dot files = yes
+   delete veto files = no
+   follow symlinks = yes
+   wide links = yes
+   unix extensions = no
+"""
+            # 설정 파일 읽기
+            with open('/etc/samba/smb.conf', 'r') as f:
+                lines = f.readlines()
+
+            # [global] 섹션만 유지
+            new_lines = []
+            for line in lines:
+                if line.strip().startswith('[') and not line.strip() == '[global]':
+                    break
+                new_lines.append(line)
+            
+            # 새로운 공유 설정 추가
+            new_lines.append(share_config)
+            
+            # 설정 파일 저장
+            with open('/etc/samba/smb.conf', 'w') as f:
+                f.writelines(new_lines)
+                
+            logging.info(f"SMB 설정 파일이 업데이트 되었습니다: {share_name}")
+        except Exception as e:
+            logging.error(f"SMB 설정 파일 업데이트 실패: {e}")
+            raise
 
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
