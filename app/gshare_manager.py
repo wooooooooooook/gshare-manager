@@ -118,7 +118,13 @@ class FolderMonitor:
         self.proxmox_api = proxmox_api
         self.previous_mtimes = {}  # 각 서브폴더별 이전 수정 시간을 저장
         self.active_links = set()  # 현재 활성화된 심볼릭 링크 목록
-        self.last_shutdown_time = self._load_last_shutdown_time()  # VM 마지막 종료 시간
+        self.last_shutdown_time = 0  # 초기화
+        
+        try:
+            self.last_shutdown_time = self._load_last_shutdown_time()  # VM 마지막 종료 시간
+        except Exception as e:
+            logging.error(f"마지막 종료 시간 로드 실패: {e}")
+            self.last_shutdown_time = time.time()  # 현재 시간으로 설정
         
         # 공유용 링크 디렉토리 생성
         self.links_dir = "/mnt/gshare_links"
@@ -144,9 +150,10 @@ class FolderMonitor:
         self._ensure_smb_installed()
         self._init_smb_config()
         
-        # NFS 마운트 경로의 UID/GID 확인
+        # NFS 마운트 경로의 UID/GID 확인 (중요: 이 작업은 실패하면 안 됨)
+        logging.info("NFS 마운트 경로의 UID/GID 확인 중...")
         self.nfs_uid, self.nfs_gid = self._get_nfs_ownership()
-        logging.debug(f"NFS 마운트 경로의 UID/GID: {self.nfs_uid}/{self.nfs_gid}")
+        logging.info(f"NFS 마운트 경로의 UID/GID 확인 완료: {self.nfs_uid}/{self.nfs_gid}")
         
         # SMB 사용자의 UID/GID 설정 (서비스는 시작하지 않음)
         self._set_smb_user_ownership(start_service=False)
@@ -662,25 +669,62 @@ class FolderMonitor:
 
     def _get_nfs_ownership(self) -> tuple[int, int]:
         """NFS 마운트 경로의 UID/GID를 반환"""
+        # 마운트 경로가 존재하는지 확인
+        if not os.path.exists(self.config.MOUNT_PATH):
+            error_msg = f"NFS 마운트 경로가 존재하지 않습니다: {self.config.MOUNT_PATH}"
+            logging.error(error_msg)
+            raise FileNotFoundError(error_msg)
+            
+        # 마운트 경로가 디렉토리인지 확인
+        if not os.path.isdir(self.config.MOUNT_PATH):
+            error_msg = f"NFS 마운트 경로가 디렉토리가 아닙니다: {self.config.MOUNT_PATH}"
+            logging.error(error_msg)
+            raise NotADirectoryError(error_msg)
+            
+        # 마운트 경로에 접근 권한이 있는지 확인
+        if not os.access(self.config.MOUNT_PATH, os.R_OK):
+            error_msg = f"NFS 마운트 경로에 읽기 권한이 없습니다: {self.config.MOUNT_PATH}"
+            logging.error(error_msg)
+            raise PermissionError(error_msg)
+        
         try:
-            # ls -n 명령어로 마운트 경로의 첫 번째 항목의 UID/GID 확인
-            result = subprocess.run(['ls', '-n', self.config.MOUNT_PATH], capture_output=True, text=True, check=True)
-            # 출력 결과를 줄 단위로 분리
-            lines = result.stdout.strip().split('\n')
-            # 첫 번째 파일/디렉토리 정보가 있는 줄 찾기 (total 제외)
-            for line in lines:
-                if line.startswith('total'):
-                    continue
-                # 공백으로 분리하여 UID(3번째 필드)와 GID(4번째 필드) 추출
-                parts = line.split()
-                if len(parts) >= 4:
-                    uid = int(parts[2])
-                    gid = int(parts[3])
-                    return uid, gid
-            raise Exception("마운트 경로에서 파일/디렉토리를 찾을 수 없습니다.")
+            # 마운트 경로의 소유자 정보 직접 확인 (stat 사용)
+            stat_info = os.stat(self.config.MOUNT_PATH)
+            uid = stat_info.st_uid
+            gid = stat_info.st_gid
+            logging.info(f"NFS 마운트 경로의 UID/GID: {uid}/{gid} (소유자: {uid}, 그룹: {gid})")
+            return uid, gid
         except Exception as e:
-            logging.error(f"NFS 마운트 경로의 소유자 정보 확인 실패: {e}")
-            return 0, 0
+            # ls -n 명령어로 마운트 경로의 첫 번째 항목의 UID/GID 확인 (대체 방법)
+            try:
+                result = subprocess.run(['ls', '-n', self.config.MOUNT_PATH], capture_output=True, text=True, check=True)
+                # 출력 결과를 줄 단위로 분리
+                lines = result.stdout.strip().split('\n')
+                # 첫 번째 파일/디렉토리 정보가 있는 줄 찾기 (total 제외)
+                for line in lines:
+                    if line.startswith('total'):
+                        continue
+                    # 공백으로 분리하여 UID(3번째 필드)와 GID(4번째 필드) 추출
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        uid = int(parts[2])
+                        gid = int(parts[3])
+                        logging.info(f"NFS 마운트 경로의 UID/GID: {uid}/{gid} (ls -n 명령으로 확인)")
+                        return uid, gid
+                
+                # 디렉토리가 비어있는 경우
+                error_msg = "마운트 경로가 비어있거나 파일/디렉토리 정보를 읽을 수 없습니다"
+                logging.error(error_msg)
+                raise FileNotFoundError(error_msg)
+            except subprocess.CalledProcessError as e:
+                error_msg = f"ls 명령 실행 실패: {e}"
+                logging.error(error_msg)
+                raise RuntimeError(error_msg)
+            
+        # 이 코드에 도달하면 오류가 발생한 것
+        error_msg = "NFS 마운트 경로의 UID/GID를 확인할 수 없습니다"
+        logging.error(error_msg)
+        raise RuntimeError(error_msg)
 
     def _deactivate_smb_share(self) -> bool:
         """모든 SMB 공유와 심볼릭 링크를 비활성화"""
