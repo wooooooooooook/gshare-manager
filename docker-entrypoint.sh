@@ -10,13 +10,16 @@ mkdir -p /mnt/gshare /mnt/gshare_links /config /logs
 CONFIG_FILE="/config/config.yaml"
 TEMPLATE_FILE="/config/config.yaml.template"
 
-# 설정 파일이 없으면 랜딩 페이지 모드로 실행
+# 설정 파일이 없으면 먼저 사용자가 제공한 설정 파일 확인
 if [ ! -f "$CONFIG_FILE" ]; then
-    echo "설정 파일이 존재하지 않습니다. 랜딩 페이지로 진입합니다."
+    echo "설정 파일이 존재하지 않습니다."
     
-    # 템플릿 파일이 존재하는지 확인하고 복사
+    # 템플릿 파일이 존재하는지 확인
     if [ -f "$TEMPLATE_FILE" ]; then
-        echo "템플릿 설정 파일을 발견했습니다."
+        echo "템플릿 파일(config.yaml.template)을 발견했습니다."
+        echo "템플릿 파일을 사용하려면 'config.yaml.template'을 'config.yaml'로 이름을 변경하여 /config 볼륨에 저장해주세요."
+        echo "예: cp config.yaml.template config/config.yaml"
+        echo "랜딩 페이지로 진입합니다."
     else
         echo "템플릿 파일이 없습니다. 기본 템플릿을 생성합니다."
         cat > "$TEMPLATE_FILE" << EOL
@@ -58,26 +61,23 @@ credentials:
 # 시스템 설정
 timezone: "Asia/Seoul"  # 시간대
 EOL
+        echo "템플릿 파일을 생성했습니다. 이 파일을 기반으로 설정을 구성하세요."
+        echo "랜딩 페이지로 진입합니다."
     fi
-else
-    echo "설정 파일이 존재합니다."
     
-    # 설정 파일에서 NFS 마운트 정보 추출
-    if [ -n "$(grep -A 2 'nfs:' $CONFIG_FILE)" ] && [ -n "$(grep 'path:' $CONFIG_FILE)" ]; then
-        NFS_PATH=$(grep -A 1 'nfs:' $CONFIG_FILE | grep 'path:' | gawk '{print $2}' | tr -d '"')
-        MOUNT_PATH=$(grep -A 2 'mount:' $CONFIG_FILE | grep 'path:' | gawk '{print $2}' | tr -d '"')
-        
-        if [ -n "$NFS_PATH" ] && [ -n "$MOUNT_PATH" ]; then
-            echo "NFS 마운트 시도: $NFS_PATH -> $MOUNT_PATH"
-            mkdir -p "$MOUNT_PATH"
-            mount -t nfs "$NFS_PATH" "$MOUNT_PATH" || echo "NFS 마운트 실패: $NFS_PATH -> $MOUNT_PATH"
-        fi
-    fi
-fi
-
-# 작업 디렉토리로 이동
-cd /app
-
-# 서비스 시작
-echo "GShare 애플리케이션 시작 중..."
-exec "$@" 
+    # 설정 파일이 없는 경우 랜딩 페이지(웹 서버)만 실행
+    echo "설정이 완료되지 않았습니다. 랜딩 페이지 모드로 실행합니다."
+    cd /app
+    exec python -m web_server --landing-only
+else
+    echo "설정 파일(config.yaml)이 존재합니다. 전체 애플리케이션을 실행합니다."
+    
+    # NFS 마운트는 gshare_manager.py에서 처리하도록 함
+    echo "GShare 매니저 시작 중..."
+    
+    # 작업 디렉토리로 이동
+    cd /app
+    
+    # 전체 애플리케이션 실행
+    exec "$@" 
+fi 

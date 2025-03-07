@@ -59,9 +59,15 @@
             <p>앱을 사용하기 위한 필수 설정을 구성해주세요.</p>
         </div>
         
+        {% if has_config %}
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle"></i> 기존 설정 파일이 감지되었습니다. 설정 값이 미리 채워져 있습니다. 필요에 따라 수정한 후 저장하세요.
+        </div>
+        {% endif %}
+        
         {% if error %}
         <div class="alert alert-danger">
-            <strong>오류:</strong> {{ error }}
+            <i class="fas fa-exclamation-triangle"></i> {{ error }}
         </div>
         {% endif %}
         
@@ -112,39 +118,61 @@
                             <label for="secret">API 토큰 시크릿</label>
                             <input type="password" class="form-control" id="secret" name="SECRET" required value="{{ form_data.get('SECRET', '') }}">
                         </div>
+                        <div class="form-group">
+                            <button type="button" class="btn btn-info" onclick="testProxmoxAPI()">
+                                <span id="test-proxmox-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                                API 연결 테스트
+                            </button>
+                            <div id="proxmox-test-result" class="mt-2" style="display: none;"></div>
+                        </div>
                         <button type="button" class="btn btn-primary btn-next" onclick="nextTab('nfs-tab')">다음</button>
                     </div>
                 </div>
                 
                 <!-- NFS 설정 -->
                 <div class="tab-pane fade" id="nfs" role="tabpanel" aria-labelledby="nfs-tab">
-                    <div class="form-section">
-                        <h3>NFS 설정</h3>
-                        <div class="alert alert-info">
-                            <h5>NAS에서 NFS 설정하는 방법</h5>
-                            <ol>
-                                <li>NAS 관리 페이지에서 "공유 폴더" 섹션으로 이동</li>
-                                <li>공유할 폴더를 선택하고 "NFS 권한" 설정</li>
-                                <li>액세스 권한을 설정하고 IP 주소 기반으로 접근 제한 설정</li>
-                                <li>아래 필드에 NAS의 NFS 공유 경로를 입력 (예: 192.168.1.100:/volume1/shared)</li>
-                            </ol>
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0">NFS 설정</h5>
                         </div>
-                        <div class="form-group">
-                            <label for="mount_path">로컬 마운트 경로</label>
-                            <input type="text" class="form-control" id="mount_path" name="MOUNT_PATH" required placeholder="/mnt/gshare" value="{{ form_data.get('MOUNT_PATH', '/mnt/gshare') }}">
-                            <small class="form-text text-muted">NFS 공유를 마운트할 로컬 경로를 입력하세요.</small>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle"></i>
+                                현재 도커 컨테이너의 IP 주소: <strong>{{ container_ip }}</strong><br>
+                                <small class="text-muted">※ NFS 서버 설정 시 도커 호스트의 IP 주소를 사용해야 할 수 있습니다.</small><br>
+                                NFS 서버 설정 시 이 IP 주소를 사용하여 NFS 클라이언트를 설정할 수 있습니다.<br>
+                                예시: <code>{{ container_ip }}:/mnt/gshare *(rw,sync,no_subtree_check)</code>
+                            </div>
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <strong>주의:</strong> NFS 서버 설정 시 보안을 위해 특정 IP 주소나 서브넷으로 접근을 제한하는 것을 권장합니다.
+                            </div>
+                            <div class="form-group">
+                                <label for="mount_path">로컬 마운트 경로</label>
+                                <input type="text" class="form-control" id="mount_path" name="MOUNT_PATH" required placeholder="/mnt/gshare" value="{{ form_data.get('MOUNT_PATH', '/mnt/gshare') }}">
+                                <small class="form-text text-muted">NFS 공유를 마운트할 로컬 경로를 입력하세요.</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="NFS_PATH">NFS 경로</label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="NFS_PATH" name="NFS_PATH" value="{{ form_data.get('NFS_PATH', '') }}" placeholder="예: 192.168.1.100:/volume1/gshare">
+                                    <div class="input-group-append">
+                                        <button type="button" class="btn btn-info" onclick="testNFS()">
+                                            <span id="test-nfs-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                                            테스트
+                                        </button>
+                                    </div>
+                                </div>
+                                <small class="form-text text-muted">NFS 서버의 공유 경로를 입력하세요. (예: 192.168.1.100:/volume1/gshare)</small>
+                                <div id="nfs-test-result" class="mt-2" style="display: none;"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="folder_size_timeout">폴더 용량 확인 시간 초과(초)</label>
+                                <input type="number" class="form-control" id="folder_size_timeout" name="GET_FOLDER_SIZE_TIMEOUT" required value="{{ form_data.get('GET_FOLDER_SIZE_TIMEOUT', 30) }}">
+                            </div>
+                            <button type="button" class="btn btn-secondary" onclick="prevTab('proxmox-tab')">이전</button>
+                            <button type="button" class="btn btn-primary btn-next" onclick="nextTab('vm-tab')">다음</button>
                         </div>
-                        <div class="form-group">
-                            <label for="nfs_path">NFS 공유 경로</label>
-                            <input type="text" class="form-control" id="nfs_path" name="NFS_PATH" required placeholder="192.168.1.100:/volume1/shared" value="{{ form_data.get('NFS_PATH', '') }}">
-                            <small class="form-text text-muted">NAS의 IP 주소와 공유 경로를 입력하세요.</small>
-                        </div>
-                        <div class="form-group">
-                            <label for="folder_size_timeout">폴더 용량 확인 시간 초과(초)</label>
-                            <input type="number" class="form-control" id="folder_size_timeout" name="GET_FOLDER_SIZE_TIMEOUT" required value="{{ form_data.get('GET_FOLDER_SIZE_TIMEOUT', 30) }}">
-                        </div>
-                        <button type="button" class="btn btn-secondary" onclick="prevTab('proxmox-tab')">이전</button>
-                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('vm-tab')">다음</button>
                     </div>
                 </div>
                 
@@ -231,7 +259,7 @@
         </form>
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
     <script>
@@ -274,6 +302,117 @@
                 alert('모든 필수 항목을 입력해주세요.');
             }
         });
+        
+        async function testProxmoxAPI() {
+            // 필요한 폼 데이터 가져오기
+            const proxmoxHost = document.getElementById('proxmox_host').value;
+            const nodeName = document.getElementById('node_name').value;
+            const vmId = document.getElementById('vm_id').value;
+            const tokenId = document.getElementById('token_id').value;
+            const secret = document.getElementById('secret').value;
+            
+            // 값 검증
+            if (!proxmoxHost || !nodeName || !vmId || !tokenId || !secret) {
+                alert('모든 Proxmox API 필드를 입력해주세요.');
+                return;
+            }
+            
+            // UI 업데이트
+            const spinner = document.getElementById('test-proxmox-spinner');
+            const resultDiv = document.getElementById('proxmox-test-result');
+            spinner.classList.remove('d-none');
+            resultDiv.style.display = 'none';
+            
+            try {
+                const formData = new FormData();
+                formData.append('proxmox_host', proxmoxHost);
+                formData.append('node_name', nodeName);
+                formData.append('vm_id', vmId);
+                formData.append('token_id', tokenId);
+                formData.append('secret', secret);
+                
+                const response = await fetch('/test_proxmox_api', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                // 결과 표시
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'mt-2 alert';
+                
+                switch (result.status) {
+                    case 'success':
+                        resultDiv.classList.add('alert-success');
+                        break;
+                    case 'warning':
+                        resultDiv.classList.add('alert-warning');
+                        break;
+                    case 'error':
+                        resultDiv.classList.add('alert-danger');
+                        break;
+                }
+                
+                resultDiv.textContent = result.message;
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'mt-2 alert alert-danger';
+                resultDiv.textContent = '테스트 중 오류가 발생했습니다: ' + error.message;
+            } finally {
+                spinner.classList.add('d-none');
+            }
+        }
+        
+        async function testNFS() {
+            const nfsPath = document.getElementById('NFS_PATH').value;
+            if (!nfsPath) {
+                alert('NFS 경로를 입력해주세요.');
+                return;
+            }
+            
+            // UI 업데이트
+            const spinner = document.getElementById('test-nfs-spinner');
+            const resultDiv = document.getElementById('nfs-test-result');
+            spinner.classList.remove('d-none');
+            resultDiv.style.display = 'none';
+            
+            try {
+                const formData = new FormData();
+                formData.append('nfs_path', nfsPath);
+                
+                const response = await fetch('/test_nfs', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                // 결과 표시
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'mt-2 alert';
+                
+                switch (result.status) {
+                    case 'success':
+                        resultDiv.classList.add('alert-success');
+                        break;
+                    case 'warning':
+                        resultDiv.classList.add('alert-warning');
+                        break;
+                    case 'error':
+                        resultDiv.classList.add('alert-danger');
+                        break;
+                }
+                
+                resultDiv.textContent = result.message;
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'mt-2 alert alert-danger';
+                resultDiv.textContent = '테스트 중 오류가 발생했습니다: ' + error.message;
+            } finally {
+                spinner.classList.add('d-none');
+            }
+        }
     </script>
 </body>
 </html> 

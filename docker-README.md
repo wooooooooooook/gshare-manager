@@ -24,6 +24,31 @@ http://localhost:5000
 
 3. 첫 실행 시 설정 페이지가 표시됩니다. 필요한 정보를 입력하세요.
 
+## 설정 파일 사용하기
+
+### 방법 1: 웹 인터페이스로 설정하기
+처음 실행 시 랜딩 페이지가 나타나며, 여기에서 설정을 완료할 수 있습니다. 이 설정은 `/config/config.yaml` 파일에 저장됩니다.
+
+### 방법 2: 사전 설정된 config.yaml 파일 사용하기
+사전에 설정 파일을 준비하고 싶다면:
+
+1. 템플릿 파일을 복사하고 이름을 변경합니다:
+```bash
+cp config.yaml.template config/config.yaml
+```
+
+2. 복사한 파일을 원하는 설정으로 수정합니다:
+```bash
+nano config/config.yaml
+```
+
+3. Docker 컨테이너를 시작합니다:
+```bash
+docker-compose up -d
+```
+
+애플리케이션은 `config/config.yaml` 파일이 이미 존재하면 자동으로 해당 설정을 사용합니다.
+
 ## 볼륨 설명
 
 Docker Compose 파일에는 다음의 볼륨들이 정의되어 있습니다:

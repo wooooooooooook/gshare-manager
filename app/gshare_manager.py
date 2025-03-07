@@ -713,7 +713,43 @@ class GShareManager:
         self.folder_monitor = FolderMonitor(config, proxmox_api)
         self.proxmox_api.set_folder_monitor(self.folder_monitor)  # FolderMonitor 인스턴스 설정
         self.last_shutdown_time = datetime.fromtimestamp(self.folder_monitor.last_shutdown_time).strftime('%Y-%m-%d %H:%M:%S')
-        self._update_state()
+        self.restart_required = False
+        
+        # NFS 마운트 시도
+        self._mount_nfs()
+    
+    def _mount_nfs(self):
+        """NFS 마운트 시도"""
+        try:
+            if not self.config.NFS_PATH:
+                logging.warning("NFS 경로가 설정되지 않았습니다.")
+                return
+                
+            mount_path = self.config.MOUNT_PATH
+            nfs_path = self.config.NFS_PATH
+            
+            # 마운트 디렉토리가 없으면 생성
+            if not os.path.exists(mount_path):
+                os.makedirs(mount_path, exist_ok=True)
+                logging.info(f"마운트 디렉토리 생성: {mount_path}")
+            
+            # 이미 마운트되어 있는지 확인
+            mount_check = subprocess.run(['mount', '-t', 'nfs'], capture_output=True, text=True)
+            if nfs_path in mount_check.stdout and mount_path in mount_check.stdout:
+                logging.info(f"NFS가 이미 마운트되어 있습니다: {nfs_path} -> {mount_path}")
+                return
+                
+            # NFS 마운트 시도
+            logging.info(f"NFS 마운트 시도: {nfs_path} -> {mount_path}")
+            mount_cmd = ['mount', '-t', 'nfs', '-o', 'nolock,vers=3,soft,timeo=100', nfs_path, mount_path]
+            result = subprocess.run(mount_cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                logging.info(f"NFS 마운트 성공: {nfs_path} -> {mount_path}")
+            else:
+                logging.error(f"NFS 마운트 실패: {result.stderr}")
+        except Exception as e:
+            logging.error(f"NFS 마운트 중 오류 발생: {e}")
 
     def _format_uptime(self, seconds: float) -> str:
         hours = int(seconds // 3600)
@@ -893,14 +929,19 @@ def check_config_complete():
     """설정이 완료되었는지 확인"""
     try:
         # 모든 실행이 Docker 환경에서 이루어진다고 가정
-        # 첫 실행 시 (설정 파일이 없는 경우) 무조건 랜딩 페이지로 이동
-        if not os.path.exists('/config/config.yaml'):
+        config_path = '/config/config.yaml'
+        init_flag_path = '/config/.init_complete'
+        
+        # 설정 파일이 없으면 무조건 랜딩 페이지로 이동
+        if not os.path.exists(config_path):
             logging.info("설정 파일이 없습니다. 랜딩 페이지로 이동합니다.")
             return False
             
-        # YAML 설정 파일 확인
-        config_path = '/config/config.yaml'
-        
+        # 초기화 완료 플래그가 없으면 랜딩 페이지로 이동
+        if not os.path.exists(init_flag_path):
+            logging.info("초기 설정이 필요합니다. 랜딩 페이지로 이동합니다.")
+            return False
+            
         # 설정 파일이 존재하면 기본 설정이 있는지 확인
         with open(config_path, 'r', encoding='utf-8') as f:
             yaml_config = yaml.safe_load(f)
@@ -908,7 +949,8 @@ def check_config_complete():
         if not yaml_config:
             logging.warning("설정 파일이 비어있습니다.")
             return False
-            
+        
+        # 모든 필수 필드가 있는지 확인
         # 필수 섹션과 필드 확인
         if 'credentials' not in yaml_config:
             logging.warning("인증 정보가 설정되지 않았습니다.")
@@ -920,11 +962,16 @@ def check_config_complete():
             'shutdown_webhook_url', 'smb_username', 'smb_password'
         ]
         
+        # 필수 값들이 누락되었는지 확인
+        missing_credentials = []
         for cred in required_credentials:
             if cred not in yaml_config['credentials'] or not yaml_config['credentials'][cred]:
-                logging.warning(f"{cred} 정보가 설정되지 않았습니다.")
-                return False
-        
+                missing_credentials.append(cred)
+                
+        if missing_credentials:
+            logging.warning(f"다음 설정이 누락되었습니다: {', '.join(missing_credentials)}")
+            return False
+            
         return True
     except Exception as e:
         logging.error(f"설정 확인 중 오류 발생: {e}")
@@ -937,18 +984,11 @@ if __name__ == "__main__":
     try:
         # 모든 환경을 Docker로 간주
         
-        # 템플릿 파일이 있고 설정 파일이 없으면 복사
-        if os.path.exists('/config/config.yaml.template') and not os.path.exists('/config/config.yaml'):
-            try:
-                import shutil
-                shutil.copy('/config/config.yaml.template', '/config/config.yaml')
-                logging.info("템플릿 파일을 설정 파일로 복사했습니다.")
-            except Exception as e:
-                logging.error(f"템플릿 파일 복사 실패: {e}")
-        
         # 설정 완료 여부 확인
-        if not check_config_complete():
-            logging.info("필수 설정이 완료되지 않았습니다. 랜딩 페이지 실행 중...")
+        setup_completed = check_config_complete()
+        
+        if not setup_completed:
+            logging.info("랜딩 페이지 진입이 필요합니다.")
             # 랜딩 페이지 실행
             run_landing_page()
             sys.exit(0)

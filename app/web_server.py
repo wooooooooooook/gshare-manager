@@ -4,6 +4,7 @@ import threading
 import subprocess
 import os
 import sys
+import argparse
 from dataclasses import asdict
 import requests
 from datetime import datetime
@@ -11,6 +12,15 @@ import pytz
 from dotenv import load_dotenv, set_key
 import yaml
 import json
+import socket
+import tempfile
+from config import Config
+
+
+# 명령행 인수 파싱
+parser = argparse.ArgumentParser(description='GShare 웹서버')
+parser.add_argument('--landing-only', action='store_true', help='랜딩 페이지 전용 모드로 실행')
+args = parser.parse_args()
 
 # Flask 로그 비활성화
 cli = sys.modules['flask.cli']
@@ -25,6 +35,7 @@ current_state = None
 gshare_manager = None
 config = None
 is_setup_complete = False
+is_landing_only_mode = args.landing_only
 
 def init_server(state, manager, app_config):
     """웹서버 초기화"""
@@ -69,6 +80,17 @@ def get_default_state():
         check_interval=60  # 기본값 60초
     )
 
+def get_container_ip():
+    """도커 컨테이너의 IP 주소를 가져옵니다."""
+    try:
+        # 호스트 이름으로 IP 주소 가져오기
+        hostname = socket.gethostname()
+        ip_address = socket.gethostbyname(hostname)
+        return ip_address
+    except Exception as e:
+        logging.error(f"IP 주소 가져오기 실패: {e}")
+        return "알 수 없음"
+
 @app.route('/')
 def show_log():
     """로그 페이지 표시"""
@@ -87,6 +109,47 @@ def show_log():
 @app.route('/setup')
 def setup():
     """초기 설정 페이지"""
+    # 도커 컨테이너의 IP 주소 가져오기
+    container_ip = get_container_ip()
+    
+    # 이미 설정 파일이 있는 경우, 값을 불러와 미리 채움
+    config_path = '/config/config.yaml'
+    if os.path.exists(config_path):
+        try:
+            # 기존 설정 파일 로드
+            with open(config_path, 'r', encoding='utf-8') as f:
+                yaml_config = yaml.safe_load(f)
+                
+            # 폼 초기 데이터 준비
+            form_data = {
+                'PROXMOX_HOST': yaml_config.get('credentials', {}).get('proxmox_host', ''),
+                'TOKEN_ID': yaml_config.get('credentials', {}).get('token_id', ''),
+                'SECRET': yaml_config.get('credentials', {}).get('secret', ''),
+                'NODE_NAME': yaml_config.get('proxmox', {}).get('node_name', ''),
+                'VM_ID': yaml_config.get('proxmox', {}).get('vm_id', ''),
+                'CPU_THRESHOLD': yaml_config.get('proxmox', {}).get('cpu', {}).get('threshold', 10),
+                'CHECK_INTERVAL': yaml_config.get('proxmox', {}).get('cpu', {}).get('check_interval', 60),
+                'THRESHOLD_COUNT': yaml_config.get('proxmox', {}).get('cpu', {}).get('threshold_count', 3),
+                'MOUNT_PATH': yaml_config.get('mount', {}).get('path', '/mnt/gshare'),
+                'GET_FOLDER_SIZE_TIMEOUT': yaml_config.get('mount', {}).get('folder_size_timeout', 30),
+                'NFS_PATH': yaml_config.get('nfs', {}).get('path', ''),
+                'SHUTDOWN_WEBHOOK_URL': yaml_config.get('credentials', {}).get('shutdown_webhook_url', ''),
+                'SMB_USERNAME': yaml_config.get('credentials', {}).get('smb_username', ''),
+                'SMB_PASSWORD': yaml_config.get('credentials', {}).get('smb_password', ''),
+                'SMB_SHARE_NAME': yaml_config.get('smb', {}).get('share_name', 'gshare'),
+                'SMB_COMMENT': yaml_config.get('smb', {}).get('comment', 'GShare SMB 공유'),
+                'SMB_GUEST_OK': 'yes' if yaml_config.get('smb', {}).get('guest_ok', False) else 'no',
+                'SMB_READ_ONLY': 'yes' if yaml_config.get('smb', {}).get('read_only', True) else 'no',
+                'SMB_LINKS_DIR': yaml_config.get('smb', {}).get('links_dir', '/mnt/gshare_links'),
+                'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul')
+            }
+            
+            logging.info("기존 설정 파일에서 값을 불러왔습니다. 랜딩 페이지에 미리 채웁니다.")
+            return render_template('landing.html', form_data=form_data, has_config=True, container_ip=container_ip)
+            
+        except Exception as e:
+            logging.error(f"설정 파일 로드 실패: {e}")
+    
     # 템플릿 설정 파일에서 초기값 로드
     template_config = Config.load_template_config()
     
@@ -114,7 +177,7 @@ def setup():
         'TIMEZONE': template_config.get('timezone', 'Asia/Seoul')
     }
     
-    return render_template('landing.html', form_data=form_data)
+    return render_template('landing.html', form_data=form_data, has_config=False, container_ip=container_ip)
 
 @app.route('/save-config', methods=['POST'])
 def save_config():
@@ -161,27 +224,40 @@ def save_config():
         # 설정 파일 업데이트
         Config.update_yaml_config(config_dict)
         
+        # 초기화 완료 플래그 생성
+        init_flag_path = '/config/.init_complete'
+        try:
+            with open(init_flag_path, 'w') as f:
+                f.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        except Exception as e:
+            logging.error(f"초기화 완료 플래그 생성 실패: {e}")
+        
         # 설정이 완료되었으므로 플래그 설정
         is_setup_complete = True
         
-        # NFS 마운트 시도
-        try:
-            mount_path = form_data.get('MOUNT_PATH', '')
-            nfs_path = form_data.get('NFS_PATH', '')
-            
-            # 마운트 디렉토리가 없으면 생성
-            if mount_path and nfs_path and not os.path.exists(mount_path):
-                os.makedirs(mount_path, exist_ok=True)
+        # 랜딩 페이지 전용 모드에서는 NFS 마운트 및 재시작을 하지 않음
+        if not is_landing_only_mode:
+            # NFS 마운트 시도
+            try:
+                mount_path = form_data.get('MOUNT_PATH', '')
+                nfs_path = form_data.get('NFS_PATH', '')
                 
-                # NFS 마운트 시도
-                mount_cmd = f"mount -t nfs {nfs_path} {mount_path}"
-                subprocess.run(mount_cmd, shell=True, check=True)
-        except Exception as e:
-            logging.error(f"NFS 마운트 실패: {e}")
-        
-        # 앱 재시작을 위한 메시지 전달
-        if gshare_manager:
-            gshare_manager.restart_required = True
+                # 마운트 디렉토리가 없으면 생성
+                if mount_path and nfs_path and not os.path.exists(mount_path):
+                    os.makedirs(mount_path, exist_ok=True)
+                    
+                    # NFS 마운트 시도 (여러 옵션 추가)
+                    mount_cmd = f"mount -t nfs -o nolock,vers=3,soft,timeo=100 {nfs_path} {mount_path}"
+                    subprocess.run(mount_cmd, shell=True, check=True)
+            except Exception as e:
+                logging.error(f"NFS 마운트 실패: {e}")
+            
+            # 앱 재시작을 위한 메시지 전달
+            if gshare_manager:
+                gshare_manager.restart_required = True
+        else:
+            # 랜딩 페이지 전용 모드인 경우 설정이 저장되었음을 알리고 컨테이너 재시작 안내
+            return render_template('setup_complete.html')
         
         return redirect(url_for('show_log'))
     
@@ -419,14 +495,176 @@ def update_config():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/test_proxmox_api', methods=['POST'])
+def test_proxmox_api():
+    """Proxmox API 연결 테스트"""
+    try:
+        # POST 데이터에서 필요한 정보 추출
+        proxmox_host = request.form.get('proxmox_host')
+        node_name = request.form.get('node_name')
+        vm_id = request.form.get('vm_id')
+        token_id = request.form.get('token_id')
+        secret = request.form.get('secret')
+        
+        if not all([proxmox_host, node_name, vm_id, token_id, secret]):
+            return jsonify({
+                "status": "error",
+                "message": "필수 항목이 누락되었습니다."
+            }), 400
+        
+        # 임시 세션 생성
+        session = requests.Session()
+        session.verify = False
+        session.headers.update({
+            "Authorization": f"PVEAPIToken={token_id}={secret}"
+        })
+        session.timeout = (5, 10)  # (연결 타임아웃, 읽기 타임아웃)
+        
+        try:
+            # API 버전 정보 가져오기 (기본 연결 테스트)
+            version_response = session.get(f"{proxmox_host}/version")
+            version_response.raise_for_status()
+            
+            # 노드 정보 가져오기 (노드 존재 테스트)
+            node_response = session.get(f"{proxmox_host}/nodes/{node_name}")
+            node_response.raise_for_status()
+            
+            # VM 상태 확인 (VM 접근 테스트)
+            vm_response = session.get(f"{proxmox_host}/nodes/{node_name}/qemu/{vm_id}/status/current")
+            vm_response.raise_for_status()
+            
+            vm_status = vm_response.json()["data"]["status"]
+            
+            return jsonify({
+                "status": "success",
+                "message": f"Proxmox API 연결 성공! VM 상태: {vm_status}",
+                "detail": {
+                    "api_version": version_response.json()["data"]["version"],
+                    "vm_status": vm_status
+                }
+            })
+        except requests.exceptions.SSLError:
+            return jsonify({
+                "status": "error",
+                "message": "SSL 인증서 오류. HTTPS URL이 올바른지 확인하세요."
+            })
+        except requests.exceptions.ConnectionError:
+            return jsonify({
+                "status": "error", 
+                "message": "서버 연결 실패. 호스트 주소가 올바른지 확인하세요."
+            })
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                return jsonify({
+                    "status": "error",
+                    "message": "인증 실패. API 토큰 ID와 시크릿이 올바른지 확인하세요."
+                })
+            elif e.response.status_code == 404:
+                url_path = e.response.url.split(proxmox_host)[1]
+                if '/nodes/' in url_path:
+                    if f'/qemu/{vm_id}' in url_path:
+                        return jsonify({
+                            "status": "error",
+                            "message": f"VM ID가 올바르지 않습니다. VM ID '{vm_id}'를 찾을 수 없습니다."
+                        })
+                    else:
+                        return jsonify({
+                            "status": "error",
+                            "message": f"노드 이름이 올바르지 않습니다. 노드 '{node_name}'을 찾을 수 없습니다."
+                        })
+                return jsonify({
+                    "status": "error",
+                    "message": f"API 요청 실패: {str(e)}"
+                })
+            else:
+                return jsonify({
+                    "status": "error",
+                    "message": f"API 요청 실패: {str(e)}"
+                })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Proxmox API 테스트 실패: {str(e)}"
+        }), 500
+
+@app.route('/test_nfs', methods=['POST'])
+def test_nfs():
+    """NFS 연결 테스트"""
+    try:
+        nfs_path = request.form.get('nfs_path')
+        if not nfs_path:
+            return jsonify({
+                "status": "error",
+                "message": "NFS 경로가 제공되지 않았습니다."
+            }), 400
+        
+        # 임시 마운트 포인트 생성
+        with tempfile.TemporaryDirectory() as temp_mount:
+            try:
+                # NFS 마운트 시도 (여러 옵션 추가)
+                mount_cmd = f"mount -t nfs -o nolock,vers=3,soft,timeo=100 {nfs_path} {temp_mount}"
+                result = subprocess.run(mount_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                
+                if result.returncode == 0:
+                    # 마운트 성공 - 읽기 테스트
+                    try:
+                        # 읽기 테스트
+                        ls_result = subprocess.run(f"ls {temp_mount}", shell=True, check=True, capture_output=True, text=True)
+                        message = "NFS 연결 테스트 성공: 읽기 권한이 정상입니다."
+                        status = "success"
+                    except Exception as e:
+                        message = f"NFS 마운트는 성공했으나 읽기 권한이 없습니다: {str(e)}"
+                        status = "warning"
+                else:
+                    error_msg = result.stderr.strip()
+                    message = f"NFS 마운트 실패: {error_msg}"
+                    status = "error"
+            except subprocess.TimeoutExpired:
+                message = "NFS 마운트 시도 시간 초과"
+                status = "error"
+            except Exception as e:
+                message = f"NFS 테스트 중 오류 발생: {str(e)}"
+                status = "error"
+            finally:
+                # 마운트 해제 시도
+                try:
+                    subprocess.run(f"umount {temp_mount}", shell=True, check=False)
+                except:
+                    pass
+        
+        return jsonify({
+            "status": status,
+            "message": message
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"NFS 테스트 실패: {str(e)}"
+        }), 500
+
 def run_landing_page():
     """랜딩 페이지만 실행하는 함수"""
     global is_setup_complete
     is_setup_complete = False
     
-    # 랜딩 페이지 실행
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # 환경 변수에서 포트 읽기 (기본값: 5000)
+    port = int(os.environ.get('FLASK_PORT', 5000))
+    
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 def run_flask_app():
-    """Flask 앱 실행"""
-    app.run(host='0.0.0.0', port=5000, debug=False) 
+    """Flask 앱 실행 함수"""
+    # 환경 변수에서 포트 읽기 (기본값: 5000)
+    port = int(os.environ.get('FLASK_PORT', 5000))
+    
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+if __name__ == "__main__":
+    # 랜딩 페이지 전용 모드인 경우
+    if args.landing_only:
+        logging.info("랜딩 페이지 전용 모드로 실행 중...")
+        is_setup_complete = False
+        run_flask_app()
+    else:
+        # 일반 모드에서는 gshare_manager.py에서 호출하는 방식으로 작동
+        pass 

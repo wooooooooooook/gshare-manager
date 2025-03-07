@@ -8,4 +8,5 @@ __pycache__
 *.log.*.*.*.*
 *.log.*.*.*.*.*
 .vscode/
+config.yaml
 config.yaml.secret
