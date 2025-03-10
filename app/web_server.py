@@ -15,6 +15,8 @@ import json
 import socket
 import tempfile
 from config import Config
+import time
+import traceback
 
 
 # 명령행 인수 파싱
@@ -35,30 +37,118 @@ current_state = None
 gshare_manager = None
 config = None
 is_setup_complete = False
-is_landing_only_mode = args.landing_only
+
+log_file = os.path.join('/logs', 'gshare_manager.log')
+
+
+# 환경 변수에서 랜딩 전용 모드 설정을 확인하고, 명령행 인수와 결합
+landing_only_env = os.environ.get('LANDING_ONLY', '').lower() in ('true', '1', 't')
+is_landing_only_mode = args.landing_only or landing_only_env
+
+# 명시적으로 일반 모드로 설정된 경우 체크
+is_normal_mode = os.environ.get('LANDING_ONLY', '').lower() in ('false', '0', 'f')
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+logging.info(f"웹 서버 초기화 - 랜딩 전용 모드: {is_landing_only_mode}, 명시적 일반 모드: {is_normal_mode}")
+
+def check_setup_complete():
+    """설정 완료 여부 확인"""
+    try:
+        # 모든 실행이 Docker 환경에서 이루어진다고 가정
+        config_path = '/config/config.yaml'
+        init_flag_path = '/config/.init_complete'
+        
+        # 초기화 완료 플래그 확인
+        init_flag_exists = os.path.exists(init_flag_path)
+        logging.info(f"초기화 완료 플래그 확인: {init_flag_exists} (경로: {init_flag_path})")
+        
+        # 설정 파일 존재 확인
+        config_exists = os.path.exists(config_path)
+        logging.info(f"설정 파일 확인: {config_exists} (경로: {config_path})")
+        
+        # 두 파일 중 하나라도 없으면 설정이 완료되지 않은 것으로 판단
+        if not config_exists or not init_flag_exists:
+            logging.info("설정 파일 또는 초기화 플래그가 없습니다. 설정이 완료되지 않았습니다.")
+            return False
+            
+        # 파일 수정 시간 비교
+        try:
+            # config.yaml 파일의 수정 시간
+            config_mtime = os.path.getmtime(config_path)
+            config_mtime_str = datetime.fromtimestamp(config_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            
+            # init_flag 파일의 내용에서 시간 읽기
+            with open(init_flag_path, 'r') as f:
+                init_flag_time_str = f.read().strip()
+                
+            # init_flag 파일이 비어있거나 형식이 잘못된 경우
+            if not init_flag_time_str:
+                logging.warning("초기화 플래그 파일이 비어있습니다.")
+                return False
+                
+            try:
+                # 문자열을 datetime 객체로 변환
+                init_flag_time = datetime.strptime(init_flag_time_str, '%Y-%m-%d %H:%M:%S')
+                config_time = datetime.fromtimestamp(config_mtime)
+                
+                # 초기화 플래그 시간이 config 파일 수정 시간보다 이후인지 확인
+                is_valid = init_flag_time >= config_time
+                
+                logging.info(f"설정 파일 수정 시간: {config_mtime_str}")
+                logging.info(f"초기화 플래그 시간: {init_flag_time_str}")
+                logging.info(f"초기화 플래그 시간이 설정 파일 수정 시간보다 이후임: {is_valid}")
+                
+                if not is_valid:
+                    logging.warning("설정 파일이 초기화 완료 이후에 수정되었습니다. 재설정이 필요합니다.")
+                    return False
+                    
+            except ValueError as e:
+                logging.error(f"초기화 플래그 시간 형식 오류: {e}")
+                # 시간 형식 오류의 경우, 플래그 파일을 업데이트
+                with open(init_flag_path, 'w') as f:
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    f.write(current_time)
+                logging.info(f"초기화 플래그 시간을 현재 시간({current_time})으로 업데이트했습니다.")
+                return True
+                
+        except Exception as e:
+            logging.error(f"파일 시간 비교 중 오류 발생: {e}")
+            return False
+            
+        # 모든 조건을 통과하면 설정 완료로 판단
+        logging.info("모든 설정 검증을 통과했습니다. 설정이 완료되었습니다.")
+        return True
+        
+    except Exception as e:
+        logging.error(f"설정 완료 여부 확인 중 오류 발생: {e}")
+        return False
 
 def init_server(state, manager, app_config):
     """웹서버 초기화"""
-    global current_state, gshare_manager, config, is_setup_complete
-    current_state = state
-    gshare_manager = manager
-    config = app_config
-    
-    # 설정 파일이 존재하고 필수 환경 변수가 설정되어 있는지 확인
     try:
-        with open('config.yaml', 'r') as f:
-            yaml_config = yaml.safe_load(f)
+        logging.info("웹 서버 상태 초기화 시작")
+        global current_state, gshare_manager, config, is_setup_complete
+        current_state = state
+        gshare_manager = manager
+        config = app_config
         
-        # 필수 환경 변수 확인
-        required_env_vars = ['PROXMOX_HOST', 'TOKEN_ID', 'SECRET', 'SHUTDOWN_WEBHOOK_URL', 'SMB_USERNAME', 'SMB_PASSWORD']
-        for var in required_env_vars:
-            if not os.getenv(var):
-                is_setup_complete = False
-                return
+        # 설정 완료 여부 확인
+        is_setup_complete = check_setup_complete()
         
-        is_setup_complete = True
-    except Exception:
-        is_setup_complete = False
+        if is_setup_complete:
+            logging.info("설정 완료 상태가 감지되었습니다. 일반 모드로 실행합니다.")
+        else:
+            logging.warning("설정이 완료되지 않았습니다. 설정이 필요합니다.")
+            
+        logging.info("웹 서버 상태 초기화 완료")
+    except Exception as e:
+        logging.error(f"웹 서버 초기화 중 오류 발생: {e}")
+        logging.error(f"상세 오류: {traceback.format_exc()}")
+        # 오류가 발생해도 진행 시도
 
 def get_default_state():
     """State가 초기화되지 않았을 때 사용할 기본값을 반환"""
@@ -92,15 +182,32 @@ def get_container_ip():
         return "알 수 없음"
 
 @app.route('/')
-def show_log():
-    """로그 페이지 표시"""
-    global is_setup_complete
+def main_page():
+    """메인 페이지 표시"""
+    global is_setup_complete, is_landing_only_mode
     
-    # 설정이 완료되지 않았으면 설정 페이지로 리다이렉트
-    if not is_setup_complete:
-        return redirect(url_for('setup'))
+    # 명시적으로 일반 모드로 설정된 경우
+    if is_normal_mode:
+        # 설정이 완료되었는지 다시 확인
+        is_setup_complete = check_setup_complete()
         
-    # 기존 로직은 그대로 유지
+        if is_setup_complete:
+            logging.info("명시적 일반 모드 + 설정 완료: 대시보드로 이동")
+            if current_state:
+                return render_template('index.html', state=current_state, config=config)
+            else:
+                return render_template('index.html', state=get_default_state(), config=None)
+    
+    # 설정 완료 여부 확인
+    is_setup_complete = check_setup_complete()
+    
+    # 설정이 완료되지 않았거나 명시적으로 랜딩 모드인 경우 설정 페이지로 리다이렉션
+    if not is_setup_complete or is_landing_only_mode:
+        logging.info(f"'/' 경로 접근: 설정 페이지로 리디렉션 (is_setup_complete: {is_setup_complete}, is_landing_only_mode: {is_landing_only_mode})")
+        return redirect(url_for('setup'))
+    
+    # 기본 대시보드 표시
+    logging.info("'/' 경로 접근: 설정 완료됨. 대시보드 표시.")
     if current_state:
         return render_template('index.html', state=current_state, config=config)
     else:
@@ -109,16 +216,42 @@ def show_log():
 @app.route('/setup')
 def setup():
     """초기 설정 페이지"""
+    global is_landing_only_mode, is_setup_complete
+    
+    # 명시적으로 일반 모드로 설정된 경우
+    if is_normal_mode:
+        # 설정이 완료되었는지 다시 확인
+        is_setup_complete = check_setup_complete()
+        
+        if is_setup_complete:
+            logging.info("명시적 일반 모드 + 설정 완료: 메인 페이지로 리디렉션")
+            return redirect(url_for('show_log'))
+    
+    # 설정 완료 여부 다시 확인
+    is_setup_complete = check_setup_complete()
+    
+    # 설정이 완료되었고 랜딩 모드가 아니면 메인 페이지로 리디렉션
+    if is_setup_complete and not is_landing_only_mode:
+        logging.info("'/setup' 경로 접근: 설정이 이미 완료됨. 메인 페이지로 리디렉션.")
+        return redirect(url_for('show_log'))
+    
     # 도커 컨테이너의 IP 주소 가져오기
     container_ip = get_container_ip()
     
+    # 랜딩 페이지 전용 모드 설정
+    logging.info(f"현재 랜딩 페이지 모드 상태: {is_landing_only_mode}")
+    
     # 이미 설정 파일이 있는 경우, 값을 불러와 미리 채움
     config_path = '/config/config.yaml'
+    form_data = {}
+    has_config = False
+    
     if os.path.exists(config_path):
         try:
             # 기존 설정 파일 로드
             with open(config_path, 'r', encoding='utf-8') as f:
                 yaml_config = yaml.safe_load(f)
+                has_config = True
                 
             # 폼 초기 데이터 준비
             form_data = {
@@ -138,51 +271,32 @@ def setup():
                 'SMB_PASSWORD': yaml_config.get('credentials', {}).get('smb_password', ''),
                 'SMB_SHARE_NAME': yaml_config.get('smb', {}).get('share_name', 'gshare'),
                 'SMB_COMMENT': yaml_config.get('smb', {}).get('comment', 'GShare SMB 공유'),
-                'SMB_GUEST_OK': 'yes' if yaml_config.get('smb', {}).get('guest_ok', False) else 'no',
-                'SMB_READ_ONLY': 'yes' if yaml_config.get('smb', {}).get('read_only', True) else 'no',
+                'SMB_GUEST_OK': yaml_config.get('smb', {}).get('guest_ok', 'no'),
+                'SMB_READ_ONLY': yaml_config.get('smb', {}).get('read_only', 'yes'),
                 'SMB_LINKS_DIR': yaml_config.get('smb', {}).get('links_dir', '/mnt/gshare_links'),
                 'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul')
             }
-            
-            logging.info("기존 설정 파일에서 값을 불러왔습니다. 랜딩 페이지에 미리 채웁니다.")
-            return render_template('landing.html', form_data=form_data, has_config=True, container_ip=container_ip)
-            
+            logging.info("기존 설정 파일 로드 성공")
         except Exception as e:
-            logging.error(f"설정 파일 로드 실패: {e}")
+            logging.error(f"설정 파일 로드 중 오류 발생: {e}")
     
-    # 템플릿 설정 파일에서 초기값 로드
-    template_config = Config.load_template_config()
-    
-    # 폼 초기 데이터 준비
-    form_data = {
-        'PROXMOX_HOST': template_config['credentials'].get('proxmox_host', ''),
-        'TOKEN_ID': template_config['credentials'].get('token_id', ''),
-        'SECRET': template_config['credentials'].get('secret', ''),
-        'NODE_NAME': template_config['proxmox'].get('node_name', ''),
-        'VM_ID': template_config['proxmox'].get('vm_id', ''),
-        'CPU_THRESHOLD': template_config['proxmox']['cpu'].get('threshold', 10),
-        'CHECK_INTERVAL': template_config['proxmox']['cpu'].get('check_interval', 60),
-        'THRESHOLD_COUNT': template_config['proxmox']['cpu'].get('threshold_count', 3),
-        'MOUNT_PATH': template_config['mount'].get('path', '/mnt/gshare'),
-        'GET_FOLDER_SIZE_TIMEOUT': template_config['mount'].get('folder_size_timeout', 30),
-        'NFS_PATH': template_config['nfs'].get('path', ''),
-        'SHUTDOWN_WEBHOOK_URL': template_config['credentials'].get('shutdown_webhook_url', ''),
-        'SMB_USERNAME': template_config['credentials'].get('smb_username', ''),
-        'SMB_PASSWORD': template_config['credentials'].get('smb_password', ''),
-        'SMB_SHARE_NAME': template_config['smb'].get('share_name', 'gshare'),
-        'SMB_COMMENT': template_config['smb'].get('comment', 'GShare SMB 공유'),
-        'SMB_GUEST_OK': 'yes' if template_config['smb'].get('guest_ok', False) else 'no',
-        'SMB_READ_ONLY': 'yes' if template_config['smb'].get('read_only', True) else 'no',
-        'SMB_LINKS_DIR': template_config['smb'].get('links_dir', '/mnt/gshare_links'),
-        'TIMEZONE': template_config.get('timezone', 'Asia/Seoul')
-    }
-    
-    return render_template('landing.html', form_data=form_data, has_config=False, container_ip=container_ip)
+    logging.info("랜딩 페이지 표시")
+    return render_template('landing.html', form_data=form_data, has_config=has_config, container_ip=container_ip)
 
 @app.route('/save-config', methods=['POST'])
 def save_config():
     """설정 저장"""
     global is_setup_complete
+    global is_landing_only_mode
+    
+    # 설정 파일 경로 정의
+    config_path = '/config/config.yaml'
+    init_flag_path = '/config/.init_complete'
+    
+    # 저장 모드 기록
+    original_landing_mode = is_landing_only_mode
+    
+    logging.info(f"설정 저장 시작 - 원래 랜딩 모드: {original_landing_mode}")
     
     try:
         # 폼 데이터 가져오기
@@ -218,48 +332,55 @@ def save_config():
             'SMB_LINKS_DIR': form_data.get('SMB_LINKS_DIR', '/mnt/gshare_links'),
             
             # 기타 설정
-            'TIMEZONE': form_data.get('TIMEZONE', 'Asia/Seoul')
+            'TIMEZONE': form_data.get('TIMEZONE', 'Asia/Seoul'),
+            
+            # 저장 시간
+            'SAVE_TIME': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
         # 설정 파일 업데이트
         Config.update_yaml_config(config_dict)
         
-        # 초기화 완료 플래그 생성
-        init_flag_path = '/config/.init_complete'
+        # config.yaml 파일의 수정 시간 확인
         try:
+            config_mtime = os.path.getmtime(config_path)
+            config_time = datetime.fromtimestamp(config_mtime)
+            logging.info(f"설정 파일 업데이트 시간: {config_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # config.yaml 파일이 수정된 후 1초 대기하여 타임스탬프 차이 보장
+            time.sleep(1)
+            
+            # 초기화 완료 플래그 생성 (설정 파일보다 나중 시간으로)
+            current_time = datetime.now()
+            with open(init_flag_path, 'w') as f:
+                time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
+                f.write(time_str)
+            logging.info(f"초기화 완료 플래그 생성 시간: {time_str}")
+            
+            # 두 파일의 시간 차이 확인 및 로깅
+            time_diff = (current_time - config_time).total_seconds()
+            logging.info(f"설정 파일과 초기화 플래그 사이 시간 차이: {time_diff:.2f}초")
+            
+            if time_diff < 0:
+                logging.warning("초기화 플래그가 설정 파일보다 이른 시간으로 설정되었습니다. 문제가 발생할 수 있습니다.")
+        except Exception as e:
+            logging.error(f"파일 시간 설정 중 오류 발생: {e}")
+            # 오류가 발생해도 기본 동작은 계속 진행
             with open(init_flag_path, 'w') as f:
                 f.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        except Exception as e:
-            logging.error(f"초기화 완료 플래그 생성 실패: {e}")
         
         # 설정이 완료되었으므로 플래그 설정
         is_setup_complete = True
         
-        # 랜딩 페이지 전용 모드에서는 NFS 마운트 및 재시작을 하지 않음
-        if not is_landing_only_mode:
-            # NFS 마운트 시도
-            try:
-                mount_path = form_data.get('MOUNT_PATH', '')
-                nfs_path = form_data.get('NFS_PATH', '')
-                
-                # 마운트 디렉토리가 없으면 생성
-                if mount_path and nfs_path and not os.path.exists(mount_path):
-                    os.makedirs(mount_path, exist_ok=True)
-                    
-                    # NFS 마운트 시도 (여러 옵션 추가)
-                    mount_cmd = f"mount -t nfs -o nolock,vers=3,soft,timeo=100 {nfs_path} {mount_path}"
-                    subprocess.run(mount_cmd, shell=True, check=True)
-            except Exception as e:
-                logging.error(f"NFS 마운트 실패: {e}")
-            
-            # 앱 재시작을 위한 메시지 전달
-            if gshare_manager:
-                gshare_manager.restart_required = True
-        else:
-            # 랜딩 페이지 전용 모드인 경우 설정이 저장되었음을 알리고 컨테이너 재시작 안내
-            return render_template('setup_complete.html')
+        logging.info(f"설정 저장 완료 - 설정 완료 페이지로 이동합니다.")
         
-        return redirect(url_for('show_log'))
+        # 설정 완료 상태 다시 확인
+        is_setup_complete = check_setup_complete()
+        logging.info(f"설정 완료 상태 재확인: {is_setup_complete}")
+        
+        # 항상 설정 완료 페이지로 이동
+        # 설정 완료 페이지에서 자동 재시작 후 원래 모드로 돌아가도록 함
+        return render_template('setup_complete.html')
     
     except Exception as e:
         logging.error(f"설정 저장 중 오류 발생: {e}")
@@ -276,8 +397,8 @@ def update_state():
 
 @app.route('/update_log')
 def update_log():
-    if os.path.exists('gshare_manager.log'):
-        with open('gshare_manager.log', 'r') as file:
+    if os.path.exists(log_file):
+        with open(log_file, 'r') as file:
             log_content = file.read()
             return log_content
     else:
@@ -286,20 +407,31 @@ def update_log():
 @app.route('/restart_service')
 def restart_service():
     try:
-        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager.service'], check=True)
-        subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager_log_server.service'], check=True)
+        # 도커 환경에서는 systemctl 대신 직접 프로세스 재시작
+        logging.info("서비스 재시작 요청 - 도커 환경에서는 앱 재시작 함수 호출")
+        
+        # 프로세스 재시작
+        restart_thread = threading.Thread(target=delayed_restart)
+        restart_thread.daemon = True
+        restart_thread.start()
+        
         return jsonify({"status": "success", "message": "서비스가 재시작되었습니다."})
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         return jsonify({"status": "error", "message": f"서비스 재시작 실패: {str(e)}"}), 500
 
 @app.route('/retry_mount')
 def retry_mount():
     try:
-        # 설정을 다시 로드
+        # 도커 환경에서는 마운트 시도 후 앱 재시작
         try:
-            subprocess.run(['sudo', 'mount', config.MOUNT_PATH], check=True)
-            subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager.service'], check=True)
-            subprocess.run(['sudo', 'systemctl', 'restart', 'gshare_manager_log_server.service'], check=True)
+            # NFS 마운트 시도 (sudo 없이)
+            subprocess.run(['mount', config.MOUNT_PATH], check=True)
+            
+            # 서비스 재시작 (systemctl 대신 직접 재시작)
+            restart_thread = threading.Thread(target=delayed_restart)
+            restart_thread.daemon = True
+            restart_thread.start()
+            
             return jsonify({"status": "success", "message": "마운트 재시도 및 서비스를 재시작했습니다."})
         except Exception as e:
             return jsonify({"status": "error", "message": f"설정 로드 또는 마운트 재시도 실패: {str(e)}"}), 500
@@ -309,7 +441,8 @@ def retry_mount():
 @app.route('/clear_log')
 def clear_log():
     try:
-        open('gshare_manager.log', 'w').close()
+        with open(log_file, 'w') as file:
+            file.truncate(0)
         return jsonify({"status": "success", "message": "로그가 성공적으로 삭제되었습니다."})
     except Exception as e:
         return jsonify({"status": "error", "message": f"로그 삭제 실패: {str(e)}"}), 500
@@ -317,12 +450,12 @@ def clear_log():
 @app.route('/trim_log/<int:lines>')
 def trim_log(lines):
     try:
-        with open('gshare_manager.log', 'r') as file:
+        with open(log_file, 'r') as file:
             log_lines = file.readlines()
         
         trimmed_lines = log_lines[-lines:] if len(log_lines) > lines else log_lines
         
-        with open('gshare_manager.log', 'w') as file:
+        with open(log_file, 'w') as file:
             file.writelines(trimmed_lines)
             
         return jsonify({
@@ -576,11 +709,6 @@ def test_proxmox_api():
                     "status": "error",
                     "message": f"API 요청 실패: {str(e)}"
                 })
-            else:
-                return jsonify({
-                    "status": "error",
-                    "message": f"API 요청 실패: {str(e)}"
-                })
     except Exception as e:
         return jsonify({
             "status": "error",
@@ -642,29 +770,533 @@ def test_nfs():
             "message": f"NFS 테스트 실패: {str(e)}"
         }), 500
 
+@app.route('/import-config', methods=['POST'])
+def import_config():
+    """업로드된 설정 파일 가져오기"""
+    try:
+        logging.info("설정 파일 업로드 요청 처리 중...")
+        
+        # 파일이 업로드되었는지 확인
+        if 'config_file' not in request.files:
+            logging.warning("업로드된 파일이 없습니다.")
+            return jsonify({
+                "status": "error",
+                "message": "업로드된 파일이 없습니다."
+            }), 400
+        
+        file = request.files['config_file']
+        
+        # 파일명 확인
+        if file.filename == '':
+            logging.warning("선택된 파일이 없습니다.")
+            return jsonify({
+                "status": "error",
+                "message": "선택된 파일이 없습니다."
+            }), 400
+        
+        # 확장자 확인
+        if not (file.filename.endswith('.yaml') or file.filename.endswith('.yml')):
+            logging.warning(f"잘못된 파일 형식: {file.filename}")
+            return jsonify({
+                "status": "error",
+                "message": "YAML 파일(.yaml 또는 .yml)만 업로드 가능합니다."
+            }), 400
+        
+        # 파일 내용 읽기
+        try:
+            file_content = file.read().decode('utf-8')
+            yaml_config = yaml.safe_load(file_content)
+            
+            if not yaml_config:
+                logging.warning("빈 YAML 파일이 업로드되었습니다.")
+                return jsonify({
+                    "status": "error",
+                    "message": "업로드된 파일이 비어있거나 유효한 YAML 형식이 아닙니다."
+                }), 400
+            
+            # 기본 구조 확인
+            required_sections = ['credentials', 'proxmox']
+            missing_sections = [section for section in required_sections if section not in yaml_config]
+            
+            if missing_sections:
+                logging.warning(f"필수 섹션 누락: {missing_sections}")
+                return jsonify({
+                    "status": "warning",
+                    "message": f"설정 파일에 필수 섹션이 누락되었습니다: {', '.join(missing_sections)}"
+                }), 200
+            
+            # 필수 자격 증명 확인
+            required_credentials = ['proxmox_host', 'token_id', 'secret']
+            missing_credentials = []
+            
+            for cred in required_credentials:
+                if cred not in yaml_config['credentials'] or not yaml_config['credentials'][cred]:
+                    missing_credentials.append(cred)
+            
+            if missing_credentials:
+                logging.warning(f"필수 자격 증명이 누락되었습니다: {missing_credentials}")
+                return jsonify({
+                    "status": "warning",
+                    "message": f"필수 자격 증명이 누락되었습니다: {', '.join(missing_credentials)}"
+                }), 200
+            
+            # Form 데이터 구성
+            form_data = {
+                'PROXMOX_HOST': yaml_config.get('credentials', {}).get('proxmox_host', ''),
+                'NODE_NAME': yaml_config.get('proxmox', {}).get('node_name', ''),
+                'VM_ID': yaml_config.get('proxmox', {}).get('vm_id', ''),
+                'TOKEN_ID': yaml_config.get('credentials', {}).get('token_id', ''),
+                'SECRET': yaml_config.get('credentials', {}).get('secret', ''),
+                'CPU_THRESHOLD': yaml_config.get('proxmox', {}).get('cpu', {}).get('threshold', 10),
+                'CHECK_INTERVAL': yaml_config.get('proxmox', {}).get('cpu', {}).get('check_interval', 60),
+                'THRESHOLD_COUNT': yaml_config.get('proxmox', {}).get('cpu', {}).get('threshold_count', 3),
+                'MOUNT_PATH': yaml_config.get('mount', {}).get('path', '/mnt/gshare'),
+                'GET_FOLDER_SIZE_TIMEOUT': yaml_config.get('mount', {}).get('folder_size_timeout', 30),
+                'NFS_PATH': yaml_config.get('nfs', {}).get('path', ''),
+                'SHUTDOWN_WEBHOOK_URL': yaml_config.get('credentials', {}).get('shutdown_webhook_url', ''),
+                'SMB_USERNAME': yaml_config.get('credentials', {}).get('smb_username', ''),
+                'SMB_PASSWORD': yaml_config.get('credentials', {}).get('smb_password', ''),
+                'SMB_SHARE_NAME': yaml_config.get('smb', {}).get('share_name', 'gshare'),
+                'SMB_COMMENT': yaml_config.get('smb', {}).get('comment', 'GShare SMB 공유'),
+                'SMB_GUEST_OK': 'yes' if yaml_config.get('smb', {}).get('guest_ok', False) else 'no',
+                'SMB_READ_ONLY': 'yes' if yaml_config.get('smb', {}).get('read_only', True) else 'no',
+                'SMB_LINKS_DIR': yaml_config.get('smb', {}).get('links_dir', '/mnt/gshare_links'),
+                'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul')
+            }
+            
+            # 설정 파일을 임시로 저장 (옵션)
+            temp_config_path = '/tmp/imported_config.yaml'
+            try:
+                with open(temp_config_path, 'w') as f:
+                    yaml.dump(yaml_config, f, allow_unicode=True, default_flow_style=False)
+                logging.info(f"가져온 설정을 임시 파일에 저장했습니다: {temp_config_path}")
+            except Exception as e:
+                logging.error(f"임시 설정 파일 저장 실패: {e}")
+            
+            logging.info("설정 파일 가져오기 성공")
+            return jsonify({
+                "status": "success",
+                "message": "설정 파일을 성공적으로 가져왔습니다. 폼에 값이 자동으로 채워졌습니다.",
+                "data": form_data
+            })
+            
+        except yaml.YAMLError as e:
+            logging.error(f"YAML 파싱 오류: {e}")
+            return jsonify({
+                "status": "error",
+                "message": f"YAML 파싱 오류: {str(e)}"
+            }), 400
+            
+    except Exception as e:
+        logging.error(f"설정 파일 가져오기 중 오류 발생: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"설정 파일 가져오기 중 오류 발생: {str(e)}"
+        }), 500
+
+@app.route('/export-config')
+def export_config():
+    """현재 설정 파일 내보내기"""
+    try:
+        config_path = '/config/config.yaml'
+        
+        # 설정 파일이 존재하는지 확인
+        if not os.path.exists(config_path):
+            logging.warning("내보낼 설정 파일이 없습니다.")
+            return jsonify({
+                "status": "error",
+                "message": "설정 파일이 없습니다."
+            }), 404
+        
+        # 설정 파일 읽기
+        with open(config_path, 'r', encoding='utf-8') as f:
+            yaml_config = yaml.safe_load(f)
+            
+        if not yaml_config:
+            logging.warning("설정 파일이 비어있습니다.")
+            return jsonify({
+                "status": "error",
+                "message": "설정 파일이 비어있습니다."
+            }), 400
+        
+        # 설정 파일 내용을 YAML 형식으로 변환
+        yaml_content = yaml.dump(yaml_config, allow_unicode=True, default_flow_style=False)
+        
+        # 날짜를 포함한 파일명 생성
+        current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"gshare_config_{current_time}.yaml"
+        
+        # 응답 생성
+        response = app.response_class(
+            response=yaml_content,
+            status=200,
+            mimetype='application/x-yaml'
+        )
+        response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+        
+        logging.info("설정 파일 내보내기 성공")
+        return response
+        
+    except Exception as e:
+        logging.error(f"설정 파일 내보내기 중 오류 발생: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"설정 파일 내보내기 중 오류 발생: {str(e)}"
+        }), 500
+
+@app.route('/restart_app', methods=['POST'])
+def restart_app():
+    """앱 재시작 엔드포인트"""
+    try:
+        logging.info("──────────────────────────────────────────────────")
+        logging.info("앱 재시작 요청 받음")
+        logging.info("──────────────────────────────────────────────────")
+        
+        # config.yaml 파일의 존재 여부와 수정 시간 확인
+        config_path = '/config/config.yaml'
+        init_flag_path = '/config/.init_complete'
+        
+        if not os.path.exists(config_path):
+            logging.warning("설정 파일이 존재하지 않습니다. 재시작할 수 없습니다.")
+            return jsonify({"status": "error", "message": "설정 파일이 존재하지 않습니다."}), 400
+        
+        # 설정 파일의 수정 시간 확인
+        try:
+            config_mtime = os.path.getmtime(config_path)
+            config_time = datetime.fromtimestamp(config_mtime)
+            logging.info(f"설정 파일 수정 시간: {config_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # 초기화 완료 플래그 확인 및 업데이트
+            if not os.path.exists(init_flag_path):
+                logging.info("초기화 완료 플래그가 없습니다. 새로 생성합니다.")
+                # 1초 지연을 통해 설정 파일보다 나중 시간으로 생성
+                time.sleep(1)
+            else:
+                # 기존 플래그의 시간 확인
+                try:
+                    with open(init_flag_path, 'r') as f:
+                        init_time_str = f.read().strip()
+                    init_time = datetime.strptime(init_time_str, '%Y-%m-%d %H:%M:%S')
+                    
+                    # 플래그 시간이 설정 파일보다 이전이면 업데이트 필요
+                    if init_time <= config_time:
+                        logging.info("초기화 플래그 시간이 설정 파일보다 이전입니다. 업데이트합니다.")
+                        time.sleep(1)  # 1초 지연
+                    else:
+                        logging.info("초기화 플래그 시간이 이미 최신입니다.")
+                        # 업데이트 없이 진행
+                        pass
+                except Exception as e:
+                    logging.error(f"초기화 플래그 시간 확인 중 오류: {e}")
+                    # 오류 발생 시 안전하게 업데이트
+                    time.sleep(1)
+            
+            # 초기화 완료 플래그 생성 또는 업데이트
+            current_time = datetime.now()
+            with open(init_flag_path, 'w') as f:
+                time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
+                f.write(time_str)
+            logging.info(f"초기화 완료 플래그 업데이트 시간: {time_str}")
+            
+            # 시간 차이 확인
+            time_diff = (current_time - config_time).total_seconds()
+            logging.info(f"설정 파일과 초기화 플래그 사이 시간 차이: {time_diff:.2f}초")
+            
+            if time_diff < 0:
+                logging.warning("초기화 플래그가 설정 파일보다 이른 시간으로 설정되었습니다. 문제가 발생할 수 있습니다.")
+                # 다시 시도
+                time.sleep(2)
+                current_time = datetime.now()
+                with open(init_flag_path, 'w') as f:
+                    time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
+                    f.write(time_str)
+                logging.info(f"초기화 완료 플래그 재업데이트 시간: {time_str}")
+        except Exception as e:
+            logging.error(f"초기화 완료 플래그 업데이트 중 오류: {e}")
+            # 오류 발생 시에도 기본 동작 진행
+            with open(init_flag_path, 'w') as f:
+                f.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        
+        # 설정 완료 여부 확인 로직 제거 - 재시작 시 자동으로 설정 상태 확인
+        logging.info("앱 재시작을 진행합니다. 재시작 후 애플리케이션이 자체적으로 설정 상태 확인")
+        
+        # delayed_restart 함수를 사용하여 앱 재시작
+        restart_thread = threading.Thread(target=delayed_restart)
+        restart_thread.daemon = True
+        restart_thread.start()
+        
+        logging.info("앱 재시작 요청 처리 완료")
+        return jsonify({"status": "success", "message": "앱이 재시작됩니다."})
+    except Exception as e:
+        logging.error(f"앱 재시작 중 오류 발생: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 def run_landing_page():
-    """랜딩 페이지만 실행하는 함수"""
-    global is_setup_complete
-    is_setup_complete = False
-    
-    # 환경 변수에서 포트 읽기 (기본값: 5000)
-    port = int(os.environ.get('FLASK_PORT', 5000))
-    
-    app.run(host='0.0.0.0', port=port, debug=False)
+    """랜딩 페이지 전용 웹서버 실행"""
+    try:
+        logging.info("──────────────────────────────────────────────────")
+        logging.info("랜딩 페이지 모드로 웹 서버 시작")
+        logging.info("──────────────────────────────────────────────────")
+        run_flask_app()
+    except Exception as e:
+        logging.error(f"랜딩 페이지 웹 서버 실행 중 오류 발생: {e}")
+        logging.error(f"상세 오류: {traceback.format_exc()}")
+        sys.exit(1)
 
 def run_flask_app():
-    """Flask 앱 실행 함수"""
-    # 환경 변수에서 포트 읽기 (기본값: 5000)
-    port = int(os.environ.get('FLASK_PORT', 5000))
+    """Flask 웹 애플리케이션 실행"""
+    try:
+        logging.info("Flask 웹 서버 시작 중...")
+        host = '0.0.0.0'
+        # 환경 변수에서 포트 설정 확인 (기본값: 5000)
+        port = int(os.environ.get('FLASK_PORT', 5000))
+        logging.info(f"웹 서버 바인딩: {host}:{port}")
+        
+        # 소켓 설정 - 포트 재사용 허용으로 수정
+        from werkzeug.serving import make_server, BaseWSGIServer
+        import socket
+        
+        # 소켓 옵션 설정을 위한 원래 메서드 백업
+        original_server_bind = BaseWSGIServer.server_bind
+        
+        # 소켓 옵션을 설정하는 메서드 오버라이드
+        def custom_server_bind(self):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            return original_server_bind(self)
+        
+        # 메서드 교체
+        BaseWSGIServer.server_bind = custom_server_bind
+        
+        # 서버 실행
+        app.run(host=host, port=port, debug=False, use_reloader=False)
+    except OSError as e:
+        if e.errno == 98:  # 주소 이미 사용 중
+            logging.warning(f"포트 {port} 이미 사용 중: 다른 포트로 시도합니다.")
+            # 다른 포트로 시도
+            os.environ['FLASK_PORT'] = str(port + 1)
+            return run_flask_app()  # 재시도
+        else:
+            logging.error(f"Flask 웹 서버 실행 중 오류 발생: {e}")
+            logging.error(f"상세 오류: {traceback.format_exc()}")
+            time.sleep(10)  # 10초 대기 후 재시도
+            return run_flask_app()  # 재시도
+    except Exception as e:
+        logging.error(f"Flask 웹 서버 실행 중 오류 발생: {e}")
+        logging.error(f"상세 오류: {traceback.format_exc()}")
+        # 에러가 발생하더라도 전체 애플리케이션 종료는 방지
+        time.sleep(10)  # 10초 대기 후 재시도
+        logging.info("Flask 웹 서버 재시작 시도...")
+        return run_flask_app()  # 재귀적으로 다시 시도
+
+# 앱 재시작을 위한 함수 (모든 systemctl 호출 대체)
+def delayed_restart():
+    time.sleep(2)  # 응답을 보낼 시간을 주기 위해 잠시 대기
+    logging.info("──────────────────────────────────────────────────")
+    logging.info("앱 재시작 실행 중...")
+    logging.info("──────────────────────────────────────────────────")
     
-    app.run(host='0.0.0.0', port=port, debug=False)
+    try:
+        # 포트 5000을 사용 중인 프로세스 확인 및 종료 시도
+        try:
+            # 도커 환경에서 포트 5000을 사용하는 프로세스 찾기
+            logging.info("포트 5000 사용중인 프로세스 확인...")
+            
+            # lsof 명령이 있는지 확인
+            lsof_exists = subprocess.run(
+                ["which", "lsof"], 
+                capture_output=True,
+                check=False
+            ).returncode == 0
+            
+            if lsof_exists:
+                # lsof로 포트 사용 프로세스 찾기
+                result = subprocess.run(
+                    ["lsof", "-i", ":5000"],
+                    capture_output=True, 
+                    text=True,
+                    check=False
+                )
+                if result.stdout:
+                    processes = result.stdout.strip().split('\n')[1:]  # 헤더 제외
+                    for process in processes:
+                        parts = process.split()
+                        if len(parts) > 1:
+                            pid = parts[1]
+                            try:
+                                logging.info(f"포트 5000 사용 프로세스(PID: {pid}) 종료 시도...")
+                                subprocess.run(["kill", pid], check=False)
+                            except Exception as e:
+                                logging.warning(f"프로세스 종료 중 오류: {e}")
+            else:
+                # lsof가 없는 경우 대체 명령 사용
+                logging.info("lsof 명령이 없습니다. 대체 명령 사용...")
+                try:
+                    # ss 또는 netstat으로 시도
+                    ss_exists = subprocess.run(
+                        ["which", "ss"], 
+                        capture_output=True,
+                        check=False
+                    ).returncode == 0
+                    
+                    if ss_exists:
+                        # ss 명령 사용
+                        result = subprocess.run(
+                            ["ss", "-tunlp", "sport = :5000"],
+                            capture_output=True,
+                            text=True,
+                            check=False
+                        )
+                        if "pid=" in result.stdout:
+                            # pid 추출 (형식: pid=12345,...)
+                            import re
+                            pid_matches = re.findall(r'pid=(\d+)', result.stdout)
+                            for pid in pid_matches:
+                                logging.info(f"ss로 찾은 포트 5000 사용 프로세스(PID: {pid}) 종료 시도...")
+                                subprocess.run(["kill", pid], check=False)
+                    else:
+                        # netstat 시도
+                        netstat_exists = subprocess.run(
+                            ["which", "netstat"], 
+                            capture_output=True,
+                            check=False
+                        ).returncode == 0
+                        
+                        if netstat_exists:
+                            result = subprocess.run(
+                                ["netstat", "-tunlp"],
+                                capture_output=True,
+                                text=True,
+                                check=False
+                            )
+                            for line in result.stdout.split('\n'):
+                                if ":5000" in line and "LISTEN" in line:
+                                    # PID 추출 (형식: PID/프로그램명)
+                                    parts = line.split()
+                                    for part in parts:
+                                        if '/' in part:
+                                            pid = part.split('/')[0]
+                                            logging.info(f"netstat으로 찾은 포트 5000 사용 프로세스(PID: {pid}) 종료 시도...")
+                                            subprocess.run(["kill", pid], check=False)
+                except Exception as e:
+                    logging.warning(f"대체 명령 사용 중 오류: {e}")
+                    
+            # Python 기반 방식으로 포트 사용 여부 확인
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(('127.0.0.1', 5000))
+                sock.close()
+                
+                if result == 0:  # 포트가 열려 있음
+                    logging.warning("포트 5000이 여전히 사용 중입니다. python 프로세스 종료 시도...")
+                    # 현재 PID 제외한 모든 Python 프로세스 종료 시도
+                    current_pid = os.getpid()
+                    try:
+                        result = subprocess.run(
+                            ["ps", "-ef"], 
+                            capture_output=True,
+                            text=True,
+                            check=False
+                        )
+                        for line in result.stdout.split('\n'):
+                            if 'python' in line and 'gshare_manager.py' in line:
+                                parts = line.split()
+                                if len(parts) > 1:
+                                    pid = parts[1]
+                                    if pid and pid.isdigit() and int(pid) != current_pid:
+                                        logging.info(f"다른 Python 프로세스(PID: {pid}) 종료 시도...")
+                                        subprocess.run(["kill", pid], check=False)
+                    except Exception as e:
+                        logging.warning(f"Python 프로세스 종료 시도 중 오류: {e}")
+            except Exception as e:
+                logging.warning(f"소켓 확인 중 오류: {e}")
+                
+            # 프로세스가 종료될 때까지 잠시 대기
+            time.sleep(3)
+        except Exception as e:
+            logging.warning(f"프로세스 확인/종료 중 오류: {e}")
+        
+        # 현재 실행 경로 확인
+        current_path = os.path.abspath(os.path.dirname(sys.argv[0]))
+        logging.info(f"현재 실행 경로: {current_path}")
+        
+        main_script = os.path.join(current_path, 'gshare_manager.py')
+        
+        # 파일이 발견되지 않은 경우
+        if not os.path.exists(main_script):
+            logging.error("메인 스크립트를 찾을 수 없음!")
+            # 현재 디렉토리와 앱 디렉토리 목록 출력
+            logging.info(f"현재 디렉토리: {current_path}")
+            logging.info(f"현재 디렉토리 파일 목록: {os.listdir('.')}")
+            if os.path.exists('app'):
+                logging.info(f"app 디렉토리 파일 목록: {os.listdir('app')}")
+            
+            # 기본값으로 시도
+            main_script = 'app/gshare_manager.py'
+            logging.info(f"기본 경로로 시도: {main_script}")
+        
+        logging.info(f"앱 재시작 실행 명령: {sys.executable} {main_script}")
+        
+        # Python 인터프리터로 메인 스크립트 실행 - 환경 변수 설정 제거
+        env = os.environ.copy()
+        
+        # 재시작 전에 잠시 대기하여 포트가 해제될 수 있도록 함
+        time.sleep(3)
+        
+        # 추가 안전장치: 포트가 여전히 사용 중인지 확인
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('0.0.0.0', 5000))
+            sock.close()
+            if result == 0:  # 포트가 열려 있음 (사용 중)
+                logging.warning("포트 5000이 여전히 사용 중입니다. 추가 대기...")
+                time.sleep(5)  # 추가 대기
+                
+                # 비상 수단: 포트가 계속 사용 중이면 강제로 다른 포트 사용
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(('0.0.0.0', 5000))
+                sock.close()
+                
+                if result == 0:  # 여전히 사용 중
+                    logging.warning("포트 5000이 계속 사용 중입니다. 환경 변수로 다른 포트 설정...")
+                    env['FLASK_PORT'] = '5001'  # 다른 포트로 설정
+        except Exception as e:
+            logging.warning(f"포트 확인 중 오류: {e}")
+        
+        # -u 옵션을 추가하여 버퍼링 없이 로그 출력
+        subprocess.Popen(
+            [sys.executable, "-u", main_script], 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE,
+            env=env,
+            bufsize=0  # 버퍼링 없음
+        )
+        
+        # 현재 프로세스는 잠시 후 종료
+        def exit_current_process():
+            # 종료 전에 더 오래 대기 (포트 해제를 위해)
+            time.sleep(5)  # 5초로 증가
+            logging.info("──────────────────────────────────────────────────")
+            logging.info("현재 프로세스를 종료합니다...")
+            logging.info("──────────────────────────────────────────────────")
+            os._exit(0)
+        
+        exit_thread = threading.Thread(target=exit_current_process)
+        exit_thread.daemon = True
+        exit_thread.start()
+        
+    except Exception as e:
+        logging.error(f"앱 재시작 중 오류 발생: {e}")
 
 if __name__ == "__main__":
     # 랜딩 페이지 전용 모드인 경우
-    if args.landing_only:
+    if is_landing_only_mode:
         logging.info("랜딩 페이지 전용 모드로 실행 중...")
         is_setup_complete = False
         run_flask_app()
     else:
         # 일반 모드에서는 gshare_manager.py에서 호출하는 방식으로 작동
+        logging.info("일반 모드에서는 gshare_manager.py에서 호출됩니다.")
         pass 

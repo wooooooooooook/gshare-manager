@@ -16,6 +16,7 @@ import atexit
 from web_server import init_server, run_flask_app, run_landing_page
 import urllib3
 import yaml
+import traceback
 
 # 전역 변수로 상태와 관리자 객체 선언
 current_state = None
@@ -381,7 +382,7 @@ class FolderMonitor:
         
         return monitored_folders
 
-    def _ensure_links_directory(self):
+    def _ensure_links_directory(self) -> None:
         """공유용 링크 디렉토리 생성"""
         try:
             if not os.path.exists(self.links_dir):
@@ -962,10 +963,17 @@ class GShareManager:
                 logging.error(f"모니터링 루프에서 예상치 못한 오류 발생: {e}")
                 time.sleep(self.config.CHECK_INTERVAL)  # 오류 발생시에도 대기 후 계속 실행
 
-def setup_logging(log_file: str = 'gshare_manager.log'):
+def setup_logging():
+    """기본 로깅 설정을 초기화"""
     load_dotenv()
     log_level = os.getenv('LOG_LEVEL', 'INFO')
     
+    # 로그 디렉토리 확인 및 생성
+    log_dir = '/logs'
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, 'gshare_manager.log')
+    
+    # 로거 및 포맷터 설정
     formatter = logging.Formatter(
         fmt='%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
@@ -973,27 +981,31 @@ def setup_logging(log_file: str = 'gshare_manager.log'):
     # 기본 시간대를 'Asia/Seoul'로 설정
     formatter.converter = lambda *args: datetime.now(tz=pytz.timezone('Asia/Seoul')).timetuple()
 
-    # 로그 로테이션 설정
-    file_handler = RotatingFileHandler(
-        log_file,
-        maxBytes=5*1024*1024,  # 5MB
-        backupCount=1,
-        encoding='utf-8'
-    )
-    file_handler.setFormatter(formatter)
-    
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(formatter)
-    
+    # 루트 로거 설정
     logger = logging.getLogger()
     logger.setLevel(getattr(logging, log_level))
-
+    
     # 기존 핸들러 제거
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
-        
-    logger.addHandler(file_handler)
+    
+    # 콘솔 출력용 핸들러
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
+    
+    # 파일 로깅 핸들러
+    try:
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=5*1024*1024,  # 5MB
+            backupCount=3,
+            encoding='utf-8'
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except Exception as e:
+        logger.error(f"로그 파일 설정 중 오류 발생: {e}")
     
     return logger
 
@@ -1003,6 +1015,17 @@ def update_log_level():
     log_level = os.getenv('LOG_LEVEL', 'INFO')
     logging.getLogger().setLevel(getattr(logging, log_level))
 
+def update_timezone(timezone='Asia/Seoul'):
+    """로깅 시간대 설정 업데이트"""
+    try:
+        # 모든 핸들러의 포맷터 업데이트
+        for handler in logging.getLogger().handlers:
+            if handler.formatter:
+                handler.formatter.converter = lambda *args: datetime.now(tz=pytz.timezone(timezone)).timetuple()
+        logging.info(f"로깅 시간대가 '{timezone}'으로 업데이트되었습니다.")
+    except Exception as e:
+        logging.error(f"로깅 시간대 업데이트 중 오류 발생: {e}")
+
 def check_config_complete():
     """설정이 완료되었는지 확인"""
     try:
@@ -1010,112 +1033,233 @@ def check_config_complete():
         config_path = '/config/config.yaml'
         init_flag_path = '/config/.init_complete'
         
-        # 설정 파일이 없으면 무조건 랜딩 페이지로 이동
-        if not os.path.exists(config_path):
-            logging.info("설정 파일이 없습니다. 랜딩 페이지로 이동합니다.")
-            return False
-            
-        # 초기화 완료 플래그가 없으면 랜딩 페이지로 이동
-        if not os.path.exists(init_flag_path):
-            logging.info("초기 설정이 필요합니다. 랜딩 페이지로 이동합니다.")
-            return False
-            
-        # 설정 파일이 존재하면 기본 설정이 있는지 확인
-        with open(config_path, 'r', encoding='utf-8') as f:
-            yaml_config = yaml.safe_load(f)
-            
-        if not yaml_config:
-            logging.warning("설정 파일이 비어있습니다.")
-            return False
+        # 초기화 완료 플래그 확인
+        init_flag_exists = os.path.exists(init_flag_path)
+        logging.info(f"초기화 완료 플래그 확인: {init_flag_exists} (경로: {init_flag_path})")
         
-        # 모든 필수 필드가 있는지 확인
-        # 필수 섹션과 필드 확인
-        if 'credentials' not in yaml_config:
-            logging.warning("인증 정보가 설정되지 않았습니다.")
+        # 설정 파일 존재 확인
+        config_exists = os.path.exists(config_path)
+        logging.info(f"설정 파일 확인: {config_exists} (경로: {config_path})")
+        
+        # 두 파일 중 하나라도 없으면 설정이 완료되지 않은 것으로 판단
+        if not config_exists or not init_flag_exists:
+            logging.info("설정 파일 또는 초기화 플래그가 없습니다. 설정이 완료되지 않았습니다.")
             return False
             
-        # 필수 인증 정보 확인
-        required_credentials = [
-            'proxmox_host', 'token_id', 'secret', 
-            'shutdown_webhook_url', 'smb_username', 'smb_password'
-        ]
-        
-        # 필수 값들이 누락되었는지 확인
-        missing_credentials = []
-        for cred in required_credentials:
-            if cred not in yaml_config['credentials'] or not yaml_config['credentials'][cred]:
-                missing_credentials.append(cred)
+        # 파일 수정 시간 비교
+        try:
+            # config.yaml 파일의 수정 시간
+            config_mtime = os.path.getmtime(config_path)
+            config_mtime_str = datetime.fromtimestamp(config_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            
+            # init_flag 파일의 내용에서 시간 읽기
+            with open(init_flag_path, 'r') as f:
+                init_flag_time_str = f.read().strip()
                 
-        if missing_credentials:
-            logging.warning(f"다음 설정이 누락되었습니다: {', '.join(missing_credentials)}")
+            # init_flag 파일이 비어있거나 형식이 잘못된 경우
+            if not init_flag_time_str:
+                logging.warning("초기화 플래그 파일이 비어있습니다.")
+                return False
+                
+            try:
+                # 문자열을 datetime 객체로 변환
+                init_flag_time = datetime.strptime(init_flag_time_str, '%Y-%m-%d %H:%M:%S')
+                config_time = datetime.fromtimestamp(config_mtime)
+                
+                # 초기화 플래그 시간이 config 파일 수정 시간보다 이후인지 확인
+                is_valid = init_flag_time >= config_time
+                
+                logging.info(f"설정 파일 수정 시간: {config_mtime_str}")
+                logging.info(f"초기화 플래그 시간: {init_flag_time_str}")
+                logging.info(f"초기화 플래그 시간이 설정 파일 수정 시간보다 이후임: {is_valid}")
+                
+                if not is_valid:
+                    logging.warning("설정 파일이 초기화 완료 이후에 수정되었습니다. 재설정이 필요합니다.")
+                    return False
+                    
+            except ValueError as e:
+                logging.error(f"초기화 플래그 시간 형식 오류: {e}")
+                # 시간 형식 오류의 경우, 플래그 파일을 업데이트
+                with open(init_flag_path, 'w') as f:
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    f.write(current_time)
+                logging.info(f"초기화 플래그 시간을 현재 시간({current_time})으로 업데이트했습니다.")
+                return True
+                
+        except Exception as e:
+            logging.error(f"파일 시간 비교 중 오류 발생: {e}")
             return False
             
+        # 모든 조건을 통과하면 설정 완료로 판단
+        logging.info("모든 설정 검증을 통과했습니다. 설정이 완료되었습니다.")
         return True
+        
     except Exception as e:
-        logging.error(f"설정 확인 중 오류 발생: {e}")
+        logging.error(f"설정 완료 여부 확인 중 오류 발생: {e}")
         return False
 
 if __name__ == "__main__":
+    # 초기 로깅 설정
     setup_logging()
-    logging.info("GShare 매니저 시작")
+    logging.info("──────────────────────────────────────────────────")
+    logging.info("GShare 애플리케이션 시작")
+    logging.info("──────────────────────────────────────────────────")
     
     try:
-        # 모든 환경을 Docker로 간주
+        # 스크립트 실행 경로 출력
+        script_path = os.path.realpath(__file__)
+        logging.info(f"스크립트 실행 경로: {script_path}")
+        
+        # 초기화 완료 플래그 경로
+        init_flag_path = '/config/.init_complete'
+        
+        # 환경 변수에서 랜딩 전용 모드 설정을 확인
+        landing_only_env = os.environ.get('LANDING_ONLY', '')
+        
+        # 명시적인 문자열 비교로 환경 변수 값 해석
+        is_landing_mode = landing_only_env.lower() in ('true', '1', 't')
+        is_normal_mode = landing_only_env.lower() in ('false', '0', 'f')
+        
+        # 실제 환경 변수 값과 해석 결과 기록
+        logging.info(f"LANDING_ONLY 환경 변수 원본 값: '{landing_only_env}'")
+        logging.info(f"랜딩 페이지 전용 모드: {is_landing_mode}")
+        logging.info(f"명시적 일반 모드: {is_normal_mode}")
+        
+        # 일반 모드로 명시적으로 설정된 경우 처리
+        if is_normal_mode:
+            logging.info("환경 변수에서 명시적으로 일반 모드로 설정되었습니다.")
+            
+            # 초기화 완료 플래그가 없는 경우에도 일반 모드로 강제 진행
+            if not os.path.exists(init_flag_path):
+                try:
+                    with open(init_flag_path, 'w') as f:
+                        f.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                    logging.info(f"초기화 완료 플래그를 자동 생성했습니다: {init_flag_path}")
+                except Exception as e:
+                    logging.error(f"초기화 완료 플래그 생성 실패: {e}")
+            
+            # 일반 모드에서는 더 진행 (설정 완료 여부 확인 후 진행)
+        # 랜딩 페이지 전용 모드로 명시적으로 설정된 경우
+        elif is_landing_mode:
+            logging.info("랜딩 페이지 전용 모드로 시작합니다.")
+            run_landing_page()
+            sys.exit(0)
+        # 환경 변수 값이 없거나 유효하지 않은 경우 - 설정 완료 플래그 확인 후 결정
+        else:
+            logging.info("랜딩 모드가 명시적으로 설정되지 않았습니다. 설정 완료 여부에 따라 결정합니다.")
         
         # 설정 완료 여부 확인
         setup_completed = check_config_complete()
         
-        if not setup_completed:
+        # 설정이 완료되지 않았고 명시적으로 일반 모드가 아니면 랜딩 페이지로
+        if not setup_completed and not is_normal_mode:
             logging.info("랜딩 페이지 진입이 필요합니다.")
             # 랜딩 페이지 실행
             run_landing_page()
             sys.exit(0)
         
-        # 설정이 완료된 경우 애플리케이션 실행
+        # 설정이 완료된 경우 또는 명시적 일반 모드인 경우 애플리케이션 실행
         logging.info("설정이 완료되었습니다. 애플리케이션 실행 중...")
         
-        # 설정 로드
-        config = Config.load_config()
-        
-        # 시간대 설정
-        os.environ['TZ'] = config.TIMEZONE
         try:
-            time.tzset()
-        except AttributeError:
-            # Windows에서는 tzset()을 지원하지 않음
-            pass
-        
-        # Proxmox API 경고 비활성화
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
-        # 로그 파일 경로 설정 (항상 Docker 환경)
-        log_dir = '/logs'
-        os.makedirs(log_dir, exist_ok=True)
-        
-        log_file = os.path.join(log_dir, 'gshare_manager.log')
-        setup_logging(log_file)
-        
-        # 객체 초기화
-        proxmox_api = ProxmoxAPI(config)
-        gshare_manager = GShareManager(config, proxmox_api)
-        logging.info(f"VM is_running - {gshare_manager.proxmox_api.is_vm_running()}")
-        logging.info("GShare 관리 시작")
-        
-        # Flask 앱 초기화 및 상태 전달
-        current_state = gshare_manager._update_state()
-        init_server(current_state, gshare_manager, config)
-        
-        # Flask 스레드 시작
-        flask_thread = threading.Thread(target=run_flask_app)
-        flask_thread.daemon = True
-        flask_thread.start()
-        
-        gshare_manager.monitor()
+            # 설정 로드
+            logging.info("설정 파일 로드 중...")
+            config = Config.load_config()
+            logging.info("설정 파일 로드 완료")
+            
+            # 시간대 설정
+            logging.info(f"시간대 설정: {config.TIMEZONE}")
+            os.environ['TZ'] = config.TIMEZONE
+            try:
+                time.tzset()
+            except AttributeError:
+                # Windows에서는 tzset()을 지원하지 않음
+                logging.info("Windows 환경에서는 tzset()이 지원되지 않습니다.")
+                pass
+            
+            # 로깅 시간대 업데이트
+            update_timezone(config.TIMEZONE)
+            
+            # Proxmox API 경고 비활성화
+            logging.info("Proxmox API 경고 비활성화")
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
+            # 객체 초기화
+            logging.info("Proxmox API 객체 초기화 중...")
+            try:
+                proxmox_api = ProxmoxAPI(config)
+                logging.info("Proxmox API 객체 초기화 완료")
+            except Exception as api_error:
+                logging.error(f"Proxmox API 객체 초기화 중 오류 발생: {api_error}")
+                logging.error(f"상세 오류: {traceback.format_exc()}")
+                raise
+            
+            logging.info("GShareManager 객체 초기화 중...")
+            try:
+                gshare_manager = GShareManager(config, proxmox_api)
+                logging.info("GShareManager 객체 초기화 완료")
+            except Exception as manager_error:
+                logging.error(f"GShareManager 객체 초기화 중 오류 발생: {manager_error}")
+                logging.error(f"상세 오류: {traceback.format_exc()}")
+                raise
+                
+            # VM 상태 확인
+            try:
+                vm_running = gshare_manager.proxmox_api.is_vm_running()
+                logging.info(f"VM 실행 상태: {vm_running}")
+            except Exception as vm_error:
+                logging.error(f"VM 상태 확인 중 오류 발생: {vm_error}")
+                logging.error(f"상세 오류: {traceback.format_exc()}")
+                # VM 상태 확인 오류는 치명적이지 않을 수 있으므로 계속 진행
+            
+            # 명확한 시작 로그 메시지 추가
+            logging.info("──────────────────────────────────────────────────")
+            logging.info("GShare 관리 시작")
+            logging.info("──────────────────────────────────────────────────")
+            
+            # Flask 앱 초기화 및 상태 전달
+            logging.info("웹 서버 초기화 중...")
+            try:
+                current_state = gshare_manager._update_state()
+                init_server(current_state, gshare_manager, config)
+                logging.info("웹 서버 초기화 완료")
+            except Exception as server_error:
+                logging.error(f"웹 서버 초기화 중 오류 발생: {server_error}")
+                logging.error(f"상세 오류: {traceback.format_exc()}")
+                raise
+            
+            # Flask 스레드 시작
+            logging.info("Flask 웹 서버 시작 중...")
+            try:
+                flask_thread = threading.Thread(target=run_flask_app)
+                flask_thread.daemon = True
+                flask_thread.start()
+                logging.info("Flask 웹 서버 시작 완료")
+            except Exception as flask_error:
+                logging.error(f"Flask 웹 서버 시작 중 오류 발생: {flask_error}")
+                logging.error(f"상세 오류: {traceback.format_exc()}")
+                raise
+            
+            # 모니터링 시작
+            logging.info("모니터링 시작...")
+            gshare_manager.monitor()
+            
+        except Exception as e:
+            logging.error(f"애플리케이션 초기화 중 심각한 오류 발생: {e}")
+            logging.error(f"상세 오류: {traceback.format_exc()}")
+            logging.error("──────────────────────────────────────────────────")
+            logging.error("앱이 오류로 인해 정상적으로 시작되지 못했습니다. 로그를 확인하세요.")
+            logging.error("──────────────────────────────────────────────────")
+            # 오류가 발생해도 Flask 서버는 계속 실행
+            while True:
+                time.sleep(60)  # 1분마다 체크
+                
     except KeyboardInterrupt:
         logging.info("프로그램 종료")
         logging.info("───────────────────────────────────────────────")
     except Exception as e:
         logging.error(f"예상치 못한 오류 발생: {e}")
+        logging.error(f"상세 오류: {traceback.format_exc()}")
         logging.info("───────────────────────────────────────────────")
         # 오류가 발생해도 Flask 서버는 계속 실행
         while True:

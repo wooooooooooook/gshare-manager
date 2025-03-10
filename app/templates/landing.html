@@ -50,6 +50,9 @@
         .alert-danger {
             margin-bottom: 20px;
         }
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -75,6 +78,49 @@
             <div class="progress-bar" role="progressbar" style="width: 25%;" aria-valuenow="25" aria-valuemin="0" aria-valuemax="100">1/4</div>
         </div>
         
+        <!-- 설정 파일 업로드 -->
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">설정 파일 불러오기/내보내기</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <form id="import-config-form" action="/import-config" method="post" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label for="config-file">YAML 설정 파일 업로드</label>
+                                <div class="input-group">
+                                    <div class="custom-file">
+                                        <input type="file" class="custom-file-input" id="config-file" name="config_file" accept=".yaml,.yml">
+                                        <label class="custom-file-label" for="config-file">파일 선택...</label>
+                                    </div>
+                                    <div class="input-group-append">
+                                        <button class="btn btn-outline-primary" type="submit">
+                                            <span id="upload-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                                            업로드
+                                        </button>
+                                    </div>
+                                </div>
+                                <small class="form-text text-muted">기존 config.yaml 파일을 업로드하여 설정을 불러올 수 있습니다.</small>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <div class="form-group w-100 text-right">
+                            <label>&nbsp;</label>
+                            <div>
+                                <a href="/export-config" class="btn btn-outline-success" id="export-config-btn">
+                                    <i class="fas fa-download"></i> 설정 파일 내보내기
+                                </a>
+                            </div>
+                            <small class="form-text text-muted">현재 설정을 YAML 파일로 내보냅니다.</small>
+                        </div>
+                    </div>
+                </div>
+                <div id="import-result" class="mt-2" style="display: none;"></div>
+            </div>
+        </div>
+        
         <form id="setup-form" action="/save-config" method="post">
             <ul class="nav nav-tabs" id="setupTabs" role="tablist">
                 <li class="nav-item">
@@ -97,9 +143,9 @@
                     <div class="form-section">
                         <h3>Proxmox API 설정</h3>
                         <div class="form-group">
-                            <label for="proxmox_host">Proxmox 호스트 주소</label>
+                            <label for="proxmox_host">Proxmox 호스트 API 주소</label>
                             <input type="text" class="form-control" id="proxmox_host" name="PROXMOX_HOST" required placeholder="https://proxmox.example.com:8006" value="{{ form_data.get('PROXMOX_HOST', '') }}">
-                            <small class="form-text text-muted">https://를 포함한 전체 URL을 입력하세요.</small>
+                            <small class="form-text text-muted">https://로 시작하여 /api2/json로 끝나는 전체 URL을 입력하세요.</small>
                         </div>
                         <div class="form-group">
                             <label for="node_name">Proxmox 노드 이름</label>
@@ -147,7 +193,7 @@
                                 <i class="fas fa-exclamation-triangle"></i>
                                 <strong>주의:</strong> NFS 서버 설정 시 보안을 위해 특정 IP 주소나 서브넷으로 접근을 제한하는 것을 권장합니다.
                             </div>
-                            <div class="form-group">
+                            <div class="form-group hidden">
                                 <label for="mount_path">로컬 마운트 경로</label>
                                 <input type="text" class="form-control" id="mount_path" name="MOUNT_PATH" required placeholder="/mnt/gshare" value="{{ form_data.get('MOUNT_PATH', '/mnt/gshare') }}">
                                 <small class="form-text text-muted">NFS 공유를 마운트할 로컬 경로를 입력하세요.</small>
@@ -263,7 +309,23 @@
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
     <script>
+        // 테스트 상태 추적 변수
+        let proxmoxApiTestPassed = false;
+        let nfsTestPassed = false;
+        
         function nextTab(tabId) {
+            // Proxmox API 테스트가 통과되지 않았으면 NFS 탭으로 진행 불가
+            if (tabId === 'nfs-tab' && !proxmoxApiTestPassed) {
+                alert('Proxmox API 연결 테스트를 먼저 통과해야 합니다.');
+                return;
+            }
+            
+            // NFS 테스트가 통과되지 않았으면 VM 탭으로 진행 불가
+            if (tabId === 'vm-tab' && !nfsTestPassed) {
+                alert('NFS 테스트를 먼저 통과해야 합니다.');
+                return;
+            }
+            
             $('#setupTabs a[href="#' + tabId.split('-')[0] + '"]').tab('show');
             updateProgressBar(tabId);
         }
@@ -300,7 +362,103 @@
             if (!allValid) {
                 e.preventDefault();
                 alert('모든 필수 항목을 입력해주세요.');
+                return;
             }
+            
+            // Proxmox API와 NFS 테스트가 통과되었는지 확인
+            if (!proxmoxApiTestPassed || !nfsTestPassed) {
+                e.preventDefault();
+                alert('Proxmox API 및 NFS 테스트를 모두 통과해야 설정을 완료할 수 있습니다.');
+            }
+        });
+        
+        // 설정 파일 업로드 처리
+        document.getElementById('import-config-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('config-file');
+            const spinner = document.getElementById('upload-spinner');
+            const resultDiv = document.getElementById('import-result');
+            
+            if (!fileInput.files || fileInput.files.length === 0) {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'mt-2 alert alert-warning';
+                resultDiv.textContent = '업로드할 파일을 선택해주세요.';
+                return;
+            }
+            
+            const formData = new FormData(this);
+            
+            // UI 업데이트
+            spinner.classList.remove('d-none');
+            resultDiv.style.display = 'none';
+            
+            try {
+                const response = await fetch('/import-config', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                // 결과 표시
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'mt-2 alert';
+                
+                switch (result.status) {
+                    case 'success':
+                        resultDiv.classList.add('alert-success');
+                        
+                        // 폼 필드 업데이트
+                        if (result.data) {
+                            for (const [key, value] of Object.entries(result.data)) {
+                                const field = document.querySelector(`[name="${key}"]`);
+                                if (field) {
+                                    if (field.type === 'checkbox') {
+                                        field.checked = value === 'yes' || value === true;
+                                    } else {
+                                        field.value = value;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // 테스트 버튼도 활성화
+                        setTimeout(() => {
+                            // 자동으로 API 및 NFS 테스트 진행
+                            testProxmoxAPI();
+                            testNFS();
+                        }, 1000);
+                        
+                        break;
+                    case 'warning':
+                        resultDiv.classList.add('alert-warning');
+                        break;
+                    case 'error':
+                        resultDiv.classList.add('alert-danger');
+                        break;
+                }
+                
+                resultDiv.textContent = result.message;
+                
+                // 파일 입력 초기화
+                fileInput.value = '';
+                document.querySelector('.custom-file-label').textContent = '파일 선택...';
+                
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'mt-2 alert alert-danger';
+                resultDiv.textContent = '설정 파일 업로드 중 오류가 발생했습니다: ' + error.message;
+            } finally {
+                spinner.classList.add('d-none');
+            }
+        });
+        
+        // 파일 선택 시 파일명 표시
+        document.getElementById('config-file').addEventListener('change', function(e) {
+            const fileName = e.target.files[0] ? e.target.files[0].name : '파일 선택...';
+            const label = document.querySelector('.custom-file-label');
+            label.textContent = fileName;
         });
         
         async function testProxmoxAPI() {
@@ -342,6 +500,12 @@
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'mt-2 alert';
                 
+                // 테스트 상태 업데이트
+                proxmoxApiTestPassed = (result.status === 'success');
+                
+                // 다음 버튼 상태 업데이트
+                updateNextButtonState('proxmox');
+                
                 switch (result.status) {
                     case 'success':
                         resultDiv.classList.add('alert-success');
@@ -359,6 +523,8 @@
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'mt-2 alert alert-danger';
                 resultDiv.textContent = '테스트 중 오류가 발생했습니다: ' + error.message;
+                proxmoxApiTestPassed = false;
+                updateNextButtonState('proxmox');
             } finally {
                 spinner.classList.add('d-none');
             }
@@ -392,6 +558,12 @@
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'mt-2 alert';
                 
+                // 테스트 상태 업데이트
+                nfsTestPassed = (result.status === 'success');
+                
+                // 다음 버튼 상태 업데이트
+                updateNextButtonState('nfs');
+                
                 switch (result.status) {
                     case 'success':
                         resultDiv.classList.add('alert-success');
@@ -409,10 +581,41 @@
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'mt-2 alert alert-danger';
                 resultDiv.textContent = '테스트 중 오류가 발생했습니다: ' + error.message;
+                nfsTestPassed = false;
+                updateNextButtonState('nfs');
             } finally {
                 spinner.classList.add('d-none');
             }
         }
+        
+        // 탭별 다음 버튼 상태 업데이트
+        function updateNextButtonState(tabName) {
+            if (tabName === 'proxmox') {
+                const nextButton = document.querySelector('#proxmox .btn-next');
+                if (proxmoxApiTestPassed) {
+                    nextButton.classList.remove('disabled');
+                    nextButton.removeAttribute('disabled');
+                } else {
+                    nextButton.classList.add('disabled');
+                    nextButton.setAttribute('disabled', 'disabled');
+                }
+            } else if (tabName === 'nfs') {
+                const nextButton = document.querySelector('#nfs .btn-next');
+                if (nfsTestPassed) {
+                    nextButton.classList.remove('disabled');
+                    nextButton.removeAttribute('disabled');
+                } else {
+                    nextButton.classList.add('disabled');
+                    nextButton.setAttribute('disabled', 'disabled');
+                }
+            }
+        }
+        
+        // 페이지 로드 시 초기 버튼 상태 설정
+        document.addEventListener('DOMContentLoaded', function() {
+            updateNextButtonState('proxmox');
+            updateNextButtonState('nfs');
+        });
     </script>
 </body>
 </html> 

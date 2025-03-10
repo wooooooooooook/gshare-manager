@@ -155,6 +155,7 @@
                 
                 if (data.status === 'success') {
                     const config = data.config;
+                    console.log(config);
                     Object.keys(config).forEach(key => {
                         const element = document.getElementById(key);
                         if (element) {

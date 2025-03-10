@@ -11,3 +11,4 @@ __pycache__
 config.yaml
 config.yaml.secret
 .init_complete
+.cursor/rules/custom-rule.mdc
