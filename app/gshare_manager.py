@@ -33,11 +33,15 @@ class State:
     monitored_folders: dict
     smb_running: bool
     check_interval: int
+    nfs_mounted: bool = False
     
     def to_dict(self):
+        global cpu_threshold
         data = asdict(self)
         data['vm_status'] = 'ON' if self.vm_running else 'OFF'
         data['smb_status'] = 'ON' if self.smb_running else 'OFF'
+        data['nfs_status'] = 'ON' if self.nfs_mounted else 'OFF'
+        data['cpu_threshold'] = cpu_threshold if 'cpu_threshold' in globals() else 0.0
         return data
 
 class ProxmoxAPI:
@@ -631,9 +635,9 @@ class FolderMonitor:
                     return uid, gid
             
             # 디렉토리가 비어있는 경우
-            error_msg = "마운트 경로가 비어있거나 파일/디렉토리 정보를 읽을 수 없습니다"
+            error_msg = "마운트 경로가 비어있거나 파일/디렉토리 정보를 읽을 수 없습니다. UID/GID를 0/0으로 반환합니다."
             logging.error(error_msg)
-            raise FileNotFoundError(error_msg)
+            return 0, 0
         except subprocess.CalledProcessError as e:
             error_msg = f"ls 명령 실행 실패: {e}"
             logging.error(error_msg)
@@ -691,7 +695,7 @@ class FolderMonitor:
             logging.error(f"리소스 정리 중 오류 발생: {e}")
 
     def _check_smb_status(self) -> bool:
-        """SMB 서비스의 실행 상태를 확인"""
+        """SMB 서비스가 실행 중인지 확인"""
         try:
             # pgrep 명령어로 smbd와 nmbd 프로세스가 실행 중인지 확인
             smbd_running = subprocess.run(['pgrep', 'smbd'], capture_output=True).returncode == 0
@@ -699,9 +703,9 @@ class FolderMonitor:
             
             return smbd_running and nmbd_running
         except Exception as e:
-            logging.error(f"SMB 서비스 상태 확인 실패: {e}")
+            logging.error(f"SMB 상태 확인 중 오류: {e}")
             return False
-            
+
     def _start_samba_service(self) -> None:
         """Samba 서비스 시작"""
         try:
@@ -800,7 +804,9 @@ class GShareManager:
         self.proxmox_api.set_folder_monitor(self.folder_monitor)  # FolderMonitor 인스턴스 설정
         self.last_shutdown_time = datetime.fromtimestamp(self.folder_monitor.last_shutdown_time).strftime('%Y-%m-%d %H:%M:%S')
         logging.info("FolderMonitor 초기화 완료")
-    
+        global cpu_threshold
+        cpu_threshold = config.CPU_THRESHOLD
+        
     def _mount_nfs(self):
         """NFS 마운트 시도"""
         try:
@@ -893,7 +899,8 @@ class GShareManager:
                 last_shutdown_time=self.last_shutdown_time,
                 monitored_folders=self.folder_monitor.get_monitored_folders(),
                 smb_running=self.folder_monitor._check_smb_status(),
-                check_interval=self.config.CHECK_INTERVAL
+                check_interval=self.config.CHECK_INTERVAL,
+                nfs_mounted=self.folder_monitor._check_nfs_status()
             )
             return current_state
         except Exception as e:

@@ -281,41 +281,6 @@ def update_log():
     else:
         return "Log file not found.", 404
 
-@app.route('/restart_service')
-def restart_service():
-    return jsonify({"status": "success", "message": "기능 제거 예정"})
-    try:
-        # 도커 환경에서는 systemctl 대신 직접 프로세스 재시작
-        logging.info("서비스 재시작 요청 - 도커 환경에서는 앱 재시작 함수 호출")
-        
-        # 프로세스 재시작
-        restart_thread = threading.Thread(target=delayed_restart)
-        restart_thread.daemon = True
-        restart_thread.start()
-        
-        return jsonify({"status": "success", "message": "서비스가 재시작되었습니다."})
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"서비스 재시작 실패: {str(e)}"}), 500
-
-@app.route('/retry_mount')
-def retry_mount():
-    return jsonify({"status": "success", "message": "기능 제거 예정"})
-    try:
-        # 도커 환경에서는 마운트 시도 후 앱 재시작
-        try:
-            subprocess.run(['mount', config.MOUNT_PATH], check=True)
-            
-            # 서비스 재시작 (systemctl 대신 직접 재시작)
-            restart_thread = threading.Thread(target=delayed_restart)
-            restart_thread.daemon = True
-            restart_thread.start()
-            
-            return jsonify({"status": "success", "message": "마운트 재시도 및 서비스를 재시작했습니다."})
-        except Exception as e:
-            return jsonify({"status": "error", "message": f"설정 로드 또는 마운트 재시도 실패: {str(e)}"}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"마운트 재시도 실패: {str(e)}"}), 500
-
 @app.route('/clear_log')
 def clear_log():
     try:
