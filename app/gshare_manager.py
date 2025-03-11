@@ -202,7 +202,7 @@ class FolderMonitor:
         try:
             # smb.conf 파일 백업
             if not os.path.exists('/etc/samba/smb.conf.backup'):
-                subprocess.run(['sudo', 'cp', '/etc/samba/smb.conf', '/etc/samba/smb.conf.backup'], check=True)
+                subprocess.run(['cp', '/etc/samba/smb.conf', '/etc/samba/smb.conf.backup'], check=True)
 
             # 기본 설정 생성
             base_config = """[global]
@@ -227,7 +227,7 @@ class FolderMonitor:
 
             # Samba 사용자 추가
             try:
-                subprocess.run(['sudo', 'smbpasswd', '-a', self.config.SMB_USERNAME],
+                subprocess.run(['smbpasswd', '-a', self.config.SMB_USERNAME],
                              input=f"{self.config.SMB_PASSWORD}\n{self.config.SMB_PASSWORD}\n".encode(),
                              capture_output=True)
             except subprocess.CalledProcessError:
@@ -371,7 +371,20 @@ class FolderMonitor:
                 self._set_smb_user_ownership(start_service=False)
             
             try:
-                subprocess.run(['sudo', 'chown', f"{self.config.SMB_USERNAME}:{self.config.SMB_USERNAME}", self.links_dir], check=True)
+                # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
+                existing_group = None
+                try:
+                    group_info = subprocess.run(['getent', 'group', str(self.nfs_gid)], capture_output=True, text=True)
+                    if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
+                        existing_group = group_info.stdout.strip().split(':')[0]
+                except Exception as e:
+                    logging.error(f"그룹 확인 중 오류: {e}")
+                
+                # 적절한 그룹 이름 결정
+                group_name = existing_group if existing_group else self.config.SMB_USERNAME
+                
+                # 디렉토리 소유권 설정
+                subprocess.run(['chown', f"{self.config.SMB_USERNAME}:{group_name}", self.links_dir], check=True)
                 logging.info("공유용 링크 디렉토리 권한 설정 완료")
             except subprocess.CalledProcessError as e:
                 logging.error(f"디렉토리 소유권 변경 실패: {e}")
@@ -406,17 +419,36 @@ class FolderMonitor:
             except Exception as e:
                 logging.error(f"사용자 확인 중 오류: {e}")
             
-            # 사용자 처리 로직 (세 가지 경우)
+            # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
+            existing_group = None
+            try:
+                group_info = subprocess.run(['getent', 'group', str(self.nfs_gid)], capture_output=True, text=True)
+                if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
+                    existing_group = group_info.stdout.strip().split(':')[0]
+                    logging.info(f"GID {self.nfs_gid}를 가진 기존 그룹 발견: {existing_group}")
+            except Exception as e:
+                logging.error(f"그룹 확인 중 오류: {e}")
+            
+            # 사용자 처리 로직
             if not user_exists:
-                # 1. 사용자가 없음 - 새 사용자 생성 (지정된 UID/GID 사용)
+                # 1. 사용자가 없음 - 새 사용자 생성
                 logging.info(f"사용자 '{smb_username}'가 존재하지 않습니다. NFS UID/GID로 사용자를 생성합니다.")
                 try:
-                    # 그룹 생성
-                    group_result = subprocess.run(['groupadd', '-r', '-g', str(self.nfs_gid), smb_username], capture_output=True, text=True, check=False)
-                    logging.info(f"그룹 생성 결과: {group_result.returncode}, 오류: {group_result.stderr.strip() if group_result.stderr else '없음'}")
+                    if existing_group:
+                        # 이미 해당 GID를 가진 그룹이 있으면 그룹 생성 건너뜀
+                        logging.info(f"GID {self.nfs_gid}를 가진 그룹 '{existing_group}'이(가) 이미 존재합니다. 이 그룹을 사용합니다.")
+                    else:
+                        # 그룹이 존재하지 않으면 새로 생성
+                        group_result = subprocess.run(['groupadd', '-r', '-g', str(self.nfs_gid), smb_username], capture_output=True, text=True, check=False)
+                        if group_result.returncode != 0:
+                            logging.warning(f"그룹 생성 실패: {group_result.stderr.strip()}")
+                        else:
+                            existing_group = smb_username
+                            logging.info(f"그룹 '{smb_username}' 생성 완료 (GID={self.nfs_gid})")
                     
-                    # 사용자 생성 (지정된 UID/GID 사용)
-                    user_result = subprocess.run(['useradd', '-r', '-u', str(self.nfs_uid), '-g', str(self.nfs_gid), smb_username], capture_output=True, text=True, check=False)
+                    # 사용자 생성 (지정된 UID와 찾은 또는 생성된 그룹 사용)
+                    group_to_use = existing_group if existing_group else str(self.nfs_gid)
+                    user_result = subprocess.run(['useradd', '-r', '-u', str(self.nfs_uid), '-g', group_to_use, smb_username], capture_output=True, text=True, check=False)
                     logging.info(f"사용자 생성 결과: {user_result.returncode}, 오류: {user_result.stderr.strip() if user_result.stderr else '없음'}")
                     
                     # SMB 패스워드 설정
@@ -437,12 +469,18 @@ class FolderMonitor:
                     logging.debug("Samba 서비스 중지...")
                     self._stop_samba_service()
                     
-                    # 사용자 UID/GID 수정
-                    usermod_result = subprocess.run(['usermod', '-u', str(self.nfs_uid), '-g', str(self.nfs_gid), smb_username], capture_output=True, text=True, check=False)
-                    logging.info(f"사용자 UID/GID 수정 결과: {usermod_result.returncode}, 오류: {usermod_result.stderr.strip() if usermod_result.stderr else '없음'}")
+                    # 사용자 UID 수정
+                    usermod_result = subprocess.run(['usermod', '-u', str(self.nfs_uid), smb_username], capture_output=True, text=True, check=False)
+                    logging.info(f"사용자 UID 수정 결과: {usermod_result.returncode}, 오류: {usermod_result.stderr.strip() if usermod_result.stderr else '없음'}")
+                    
+                    # 사용자 GID 수정 (기존 그룹 사용)
+                    group_to_use = existing_group if existing_group else str(self.nfs_gid)
+                    groupmod_result = subprocess.run(['usermod', '-g', group_to_use, smb_username], capture_output=True, text=True, check=False)
+                    logging.info(f"사용자 GID 수정 결과: {groupmod_result.returncode}, 오류: {groupmod_result.stderr.strip() if groupmod_result.stderr else '없음'}")
                     
                     # 필요한 파일의 소유권 변경
-                    subprocess.run(['chown', '-R', f"{smb_username}:{smb_username}", self.links_dir], check=False)
+                    group_name = existing_group if existing_group else smb_username
+                    subprocess.run(['chown', '-R', f"{smb_username}:{group_name}", self.links_dir], check=False)
                     logging.info(f"사용자 '{smb_username}'의 UID/GID 수정 완료 (UID={self.nfs_uid}, GID={self.nfs_gid})")
                 except Exception as e:
                     logging.error(f"사용자 UID/GID 수정 중 오류 발생: {e}")

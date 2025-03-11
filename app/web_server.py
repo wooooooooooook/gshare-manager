@@ -303,7 +303,6 @@ def retry_mount():
     try:
         # 도커 환경에서는 마운트 시도 후 앱 재시작
         try:
-            # NFS 마운트 시도 (sudo 없이)
             subprocess.run(['mount', config.MOUNT_PATH], check=True)
             
             # 서비스 재시작 (systemctl 대신 직접 재시작)
