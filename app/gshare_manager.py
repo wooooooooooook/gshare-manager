@@ -13,7 +13,6 @@ import threading
 import sys
 import atexit
 from web_server import init_server, run_flask_app, run_landing_page
-import urllib3
 import yaml
 import traceback
 
@@ -1160,10 +1159,6 @@ if __name__ == "__main__":
             
             # 로깅 시간대 업데이트
             update_timezone(config.TIMEZONE)
-            
-            # Proxmox API 경고 비활성화
-            logging.info("Proxmox API 경고 비활성화")
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
             # 객체 초기화
             logging.info("Proxmox API 객체 초기화 중...")

@@ -91,6 +91,9 @@ window.onload = function () {
         });
     });
 
+    // 페이지 로드 시 즉시 폴더 상태 업데이트
+    updateFolderState();
+
     // 프로그레스 바 업데이트 시작
     setInterval(updateProgressBar, 1000);  // 1000ms마다 업데이트
 
@@ -482,57 +485,113 @@ function generateFolderListHtml(sortedFolders) {
 
 // toggleMount 함수 내부 수정
 function toggleMount(folder) {
+    // 사용자에게 작업 중임을 시각적으로 표시
+    const toggleButtons = document.querySelectorAll(`button[onclick="toggleMount('${folder}')"]`);
+    toggleButtons.forEach(btn => {
+        btn.disabled = true;
+        btn.innerText = '처리 중...';
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+    });
+    
+    // 비동기 요청으로 처리
     fetch(`/toggle_mount/${encodeURIComponent(folder)}`)
         .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
-                // 상태 업데이트를 위해 즉시 새로고침
-                fetch('/update_state')
-                    .then(response => response.json())
-                    .then(data => {
-                        // VM과 SMB 상태 업데이트
-                        const vmStatusSpan = document.querySelector('.vm-status span');
-                        if (vmStatusSpan) {
-                            vmStatusSpan.innerText = data.vm_status;
-                            updateVMStatus(data.vm_status);
-                        }
-                        const smbStatusSpan = document.querySelector('.smb-status span');
-                        if (smbStatusSpan) {
-                            smbStatusSpan.innerText = data.smb_status;
-                            updateSMBStatus(data.smb_status);
-                        }
-
-                        // 폴더 목록 업데이트
-                        const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
-                        if (monitoredFoldersContainer) {
-                            const sortedFolders = Object.entries(data.monitored_folders)
-                                .sort((a, b) => {
-                                    // 먼저 마운트 상태로 정렬
-                                    if (a[1].is_mounted !== b[1].is_mounted) {
-                                        return b[1].is_mounted ? 1 : -1; // 마운트된 것이 위로
-                                    }
-                                    // 마운트 상태가 같다면 수정 시간으로 정렬
-                                    const timeA = new Date(a[1].mtime);
-                                    const timeB = new Date(b[1].mtime);
-                                    return timeB - timeA; // 최신순 정렬
-                                });
-                            monitoredFoldersContainer.innerHTML = generateFolderListHtml(sortedFolders);
-
-                            // 토글 이벤트 리스너 다시 추가
-                            monitoredFoldersContainer.querySelectorAll('.toggle-text').forEach(el => {
-                                el.addEventListener('click', () => {
-                                    el.querySelector('.time-string').classList.toggle('hidden');
-                                    el.querySelector('.readable-time').classList.toggle('hidden');
-                                });
-                            });
-                        }
-                    });
+                // 별도 함수로 분리하여 상태 업데이트 - 블록 방지
+                updateFolderState();
             } else {
                 alert('오류: ' + data.message);
+                // 버튼 상태 복원
+                resetToggleButtons();
             }
         })
         .catch(error => {
             console.error('Error:', error);
             alert('마운트 상태 변경 중 오류가 발생했습니다.');
+            // 버튼 상태 복원
+            resetToggleButtons();
         });
+        
+    // 버튼 상태를 복원하는 함수
+    function resetToggleButtons() {
+        toggleButtons.forEach(btn => {
+            btn.disabled = false;
+            btn.innerText = document.querySelector(`.monitored-folders-grid [onclick="toggleMount('${folder}')"]`).innerText;
+            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        });
+    }
+}
+
+// 상태 업데이트를 위한 별도 함수
+function updateFolderState() {
+    // 상태 표시기 추가 - 선택 사항
+    const statusIndicator = document.querySelector('.status-update-indicator');
+    if (statusIndicator) {
+        statusIndicator.classList.remove('hidden');
+    }
+    
+    fetch('/update_state')
+        .then(response => response.json())
+        .then(data => {
+            // VM과 SMB 상태 업데이트 - 중요한 UI 업데이트 먼저 처리
+            const vmStatusSpan = document.querySelector('.vm-status span');
+            if (vmStatusSpan) {
+                vmStatusSpan.innerText = data.vm_status;
+                updateVMStatus(data.vm_status);
+            }
+            const smbStatusSpan = document.querySelector('.smb-status span');
+            if (smbStatusSpan) {
+                smbStatusSpan.innerText = data.smb_status;
+                updateSMBStatus(data.smb_status);
+            }
+
+            // 백그라운드로 폴더 목록 처리를 위해 requestAnimationFrame 사용
+            window.requestAnimationFrame(() => {
+                updateFolderList(data.monitored_folders);
+            });
+        })
+        .catch(error => {
+            console.error('상태 업데이트 오류:', error);
+            if (statusIndicator) {
+                statusIndicator.classList.add('hidden');
+            }
+        });
+}
+
+// 폴더 목록만 업데이트하는 함수로 분리
+function updateFolderList(folders) {
+    const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
+    if (!monitoredFoldersContainer) return;
+    
+    try {
+        // 정렬 작업 최적화
+        const sortedFolders = Object.entries(folders)
+            .sort((a, b) => {
+                // 간소화된 정렬 로직
+                if (a[1].is_mounted !== b[1].is_mounted) {
+                    return b[1].is_mounted ? 1 : -1;
+                }
+                return new Date(b[1].mtime) - new Date(a[1].mtime);
+            });
+        
+        // HTML 생성
+        monitoredFoldersContainer.innerHTML = generateFolderListHtml(sortedFolders);
+        
+        // 필요한 이벤트 리스너 추가
+        monitoredFoldersContainer.querySelectorAll('.toggle-text').forEach(el => {
+            el.addEventListener('click', () => {
+                el.querySelector('.time-string').classList.toggle('hidden');
+                el.querySelector('.readable-time').classList.toggle('hidden');
+            });
+        });
+        
+        // 상태 표시기 숨기기
+        const statusIndicator = document.querySelector('.status-update-indicator');
+        if (statusIndicator) {
+            statusIndicator.classList.add('hidden');
+        }
+    } catch (e) {
+        console.error('폴더 목록 업데이트 오류:', e);
+    }
 }
