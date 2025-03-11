@@ -53,6 +53,10 @@ async function setLogLevel() {
 }
 
 let checkInterval = 120; // 기본값
+// 로그 자동 업데이트 상태 변수 추가
+let autoUpdateLog = true;
+let logHovered = false;
+let autoScrollLog = true; // 자동 스크롤 상태 변수 추가
 
 // 프로그레스 바 업데이트
 function updateProgressBar() {
@@ -67,11 +71,66 @@ function updateProgressBar() {
     progressBar.style.width = `${progress}%`;
 }
 
+// 로그 자동 업데이트 토글 함수
+function toggleLogAutoUpdate() {
+    autoUpdateLog = !autoUpdateLog;
+    const toggleBtn = document.getElementById('toggleLogUpdate');
+    if (toggleBtn) {
+        toggleBtn.innerText = autoUpdateLog ? '자동 업데이트 중지' : '자동 업데이트 시작';
+        toggleBtn.classList.toggle('bg-gray-50');
+        toggleBtn.classList.toggle('bg-yellow-50');
+    }
+}
+
+// 로그 자동 스크롤 토글 함수
+function toggleLogAutoScroll() {
+    autoScrollLog = !autoScrollLog;
+    const toggleBtn = document.getElementById('toggleLogScroll');
+    if (toggleBtn) {
+        toggleBtn.innerText = autoScrollLog ? '자동 스크롤 중지' : '자동 스크롤 시작';
+        toggleBtn.classList.toggle('bg-gray-50');
+        toggleBtn.classList.toggle('bg-yellow-50');
+    }
+}
+
 // 페이지 로드 시 로그를 맨 아래로 스크롤
 window.onload = function () {
     getCurrentLogLevel();
     const logContent = document.getElementById('logContent');
     logContent.scrollTop = logContent.scrollHeight;
+
+    // 로그 영역에 마우스 진입/이탈 이벤트 리스너 추가
+    logContent.addEventListener('mouseenter', function() {
+        logHovered = true;
+    });
+    
+    logContent.addEventListener('mouseleave', function() {
+        logHovered = false;
+    });
+
+    // 로그 영역 스크롤 이벤트 감지
+    let userScrolled = false;
+    let scrollTimeout;
+    
+    logContent.addEventListener('scroll', function() {
+        // 사용자가 맨 아래까지 스크롤했는지 확인
+        const isAtBottom = logContent.scrollHeight - logContent.clientHeight <= logContent.scrollTop + 5;
+        
+        // 맨 아래가 아니면 사용자가 스크롤했다고 표시
+        if (!isAtBottom) {
+            userScrolled = true;
+            clearTimeout(scrollTimeout);
+            
+            // 5초 후 사용자 스크롤 상태 초기화
+            scrollTimeout = setTimeout(() => {
+                userScrolled = false;
+            }, 5000);
+        } else {
+            // 맨 아래로 스크롤한 경우 사용자 스크롤 상태 초기화
+            userScrolled = false;
+            clearTimeout(scrollTimeout);
+        }
+    });
 
     let lastCheckTimeData = '';
 
@@ -203,12 +262,19 @@ window.onload = function () {
                 }
             });
 
-        // update_log 부분 수정
-        fetch('/update_log')
-            .then(response => response.text())
-            .then(logContent => {
-                document.querySelector('#logContent').innerText = logContent;
-            });
+        // update_log 부분 수정 - 마우스가 로그 영역에 있거나 자동 업데이트가 비활성화된 경우 업데이트 중지
+        if (autoUpdateLog && !logHovered) {
+            fetch('/update_log')
+                .then(response => response.text())
+                .then(logContent => {
+                    const logElement = document.querySelector('#logContent');
+                    logElement.innerText = logContent;
+                    // 자동 스크롤이 활성화되고 사용자가 직접 스크롤하지 않은 경우에만 맨 아래로 스크롤
+                    if (autoScrollLog && !userScrolled) {
+                        logElement.scrollTop = logElement.scrollHeight;
+                    }
+                });
+        }
     }, 1000);
 };
 

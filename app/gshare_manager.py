@@ -697,13 +697,26 @@ class FolderMonitor:
     def _check_smb_status(self) -> bool:
         """SMB 서비스가 실행 중인지 확인"""
         try:
-            # pgrep 명령어로 smbd와 nmbd 프로세스가 실행 중인지 확인
             smbd_running = subprocess.run(['pgrep', 'smbd'], capture_output=True).returncode == 0
             nmbd_running = subprocess.run(['pgrep', 'nmbd'], capture_output=True).returncode == 0
-            
             return smbd_running and nmbd_running
         except Exception as e:
             logging.error(f"SMB 상태 확인 중 오류: {e}")
+            return False
+
+    def _check_nfs_status(self) -> bool:
+        """NFS 마운트가 되어 있는지 확인"""
+        try:
+            if not self.config.NFS_PATH or not self.config.MOUNT_PATH:
+                return False
+                
+            # mount 명령어로 현재 마운트된 NFS 리스트 확인
+            mount_check = subprocess.run(['mount', '-t', 'nfs'], capture_output=True, text=True)
+            
+            # NFS_PATH와 MOUNT_PATH가 모두 출력에 있으면 마운트된 것으로 판단
+            return self.config.NFS_PATH in mount_check.stdout and self.config.MOUNT_PATH in mount_check.stdout
+        except Exception as e:
+            logging.error(f"NFS 마운트 상태 확인 중 오류: {e}")
             return False
 
     def _start_samba_service(self) -> None:
@@ -784,6 +797,21 @@ class FolderMonitor:
         except Exception as e:
             logging.error(f"SMB 설정 파일 업데이트 실패: {e}")
             raise
+
+    def _check_nfs_status(self) -> bool:
+        """NFS 마운트가 되어 있는지 확인"""
+        try:
+            if not hasattr(self.config, 'NFS_PATH') or not self.config.NFS_PATH or not hasattr(self.config, 'MOUNT_PATH') or not self.config.MOUNT_PATH:
+                return False
+                
+            # mount 명령어로 현재 마운트된 NFS 리스트 확인
+            mount_check = subprocess.run(['mount', '-t', 'nfs'], capture_output=True, text=True)
+            
+            # NFS_PATH와 MOUNT_PATH가 모두 출력에 있으면 마운트된 것으로 판단
+            return self.config.NFS_PATH in mount_check.stdout and self.config.MOUNT_PATH in mount_check.stdout
+        except Exception as e:
+            logging.error(f"NFS 마운트 상태 확인 중 오류: {e}")
+            return False
 
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
