@@ -35,3 +35,4 @@ credentials:
 
 # 시스템 설정
 timezone: "Asia/Seoul"  # 시간대 
+log_level: "INFO"

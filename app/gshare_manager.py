@@ -8,7 +8,6 @@ import subprocess
 from datetime import datetime
 import pytz
 from config import Config
-from dotenv import load_dotenv, set_key
 import os
 import threading
 import sys
@@ -130,9 +129,6 @@ class FolderMonitor:
         # 공유용 링크 디렉토리 경로 설정
         self.links_dir = "/mnt/gshare_links"
         
-        # SMB 관련 초기 설정
-        logging.debug("SMB 설치 확인 중...")
-        self._ensure_smb_installed()
         self._init_smb_config()
         
         # NFS 마운트 경로의 UID/GID 확인
@@ -201,21 +197,6 @@ class FolderMonitor:
         except Exception as e:
             logging.error(f"VM 종료 시간 저장 실패: {e}")
 
-    def _ensure_smb_installed(self):
-        """Samba가 설치되어 있는지 확인하고 설치"""
-        try:
-            subprocess.run(['which', 'smbd'], check=True, capture_output=True)
-            logging.info("Samba가 이미 설치되어 있습니다.")
-        except subprocess.CalledProcessError:
-            logging.info("Samba가 설치되어 있지 않습니다. 설치를 시도합니다.")
-            try:
-                subprocess.run(['sudo', 'apt-get', 'update'], check=True)
-                subprocess.run(['sudo', 'apt-get', 'install', '-y', 'samba'], check=True)
-                logging.info("Samba 설치 완료")
-            except subprocess.CalledProcessError as e:
-                logging.error(f"Samba 설치 실패: {e}")
-                raise
-
     def _init_smb_config(self):
         """기본 SMB 설정 초기화"""
         try:
@@ -259,6 +240,7 @@ class FolderMonitor:
 
     def _get_subfolders(self) -> list[str]:
         """마운트 경로의 모든 서브폴더를 재귀적으로 반환"""
+        start_time = time.time()
         try:
             if not os.path.exists(self.config.MOUNT_PATH):
                 logging.error(f"마운트 경로가 존재하지 않음: {self.config.MOUNT_PATH}")
@@ -278,70 +260,65 @@ class FolderMonitor:
                             # 마운트 경로로부터의 상대 경로 계산
                             rel_path = os.path.relpath(full_path, self.config.MOUNT_PATH)
                             
-                            # 숨김 폴더 제외
-                            if not any(part.startswith('.') for part in rel_path.split(os.sep)):
-                                # 폴더 접근 권한 확인
-                                if os.access(full_path, os.R_OK):
-                                    subfolders.append(rel_path)
-                                    logging.debug(f"폴더 감지됨: {rel_path}")
-                                else:
-                                    logging.warning(f"폴더 접근 권한 없음: {rel_path}")
+                            # 마운트 경로와 같은 경우 또는 숨김 폴더인 경우 제외
+                            if rel_path == '.' or rel_path.startswith('.') or '/..' in rel_path:
+                                continue
+                                
+                            # 중복 방지
+                            if rel_path not in subfolders:
+                                subfolders.append(rel_path)
                         except Exception as e:
-                            logging.error(f"개별 폴더 처리 중 오류 발생 ({dir_name}): {e}")
-                            continue
+                            logging.error(f"서브폴더 처리 중 오류 발생 ({dir_name}): {e}")
             except Exception as e:
-                logging.error(f"폴더 순회 중 오류 발생: {e}")
-                return []
-
-            logging.debug(f"감지된 전체 폴더 수: {len(subfolders)}")
-            return subfolders
+                logging.error(f"마운트 경로 스캔 중 오류 발생: {e}")
             
+            elapsed_time = time.time() - start_time
+            logging.debug(f"마운트 경로 스캔 완료 - 걸린 시간: {elapsed_time:.3f}초, 서브폴더 수: {len(subfolders)}개")
+            return subfolders
         except Exception as e:
-            logging.error(f"서브폴더 목록 가져오기 실패: {e}")
+            logging.error(f"서브폴더 목록 가져오기 중 오류 발생: {e}")
+            elapsed_time = time.time() - start_time
+            logging.debug(f"마운트 경로 스캔 실패 - 걸린 시간: {elapsed_time:.3f}초")
             return []
 
     def _get_folder_mtime(self, path: str) -> float:
         """지정된 경로의 폴더 수정 시간을 반환 (UTC 기준)"""
         try:
             full_path = os.path.join(self.config.MOUNT_PATH, path)
-            return os.path.getmtime(full_path)
+            mtime = os.path.getmtime(full_path)
+            return mtime
         except Exception as e:
             logging.error(f"폴더 수정 시간 확인 중 오류 발생 ({path}): {e}")
             return self.previous_mtimes.get(path, 0)
 
     def _update_subfolder_mtimes(self) -> None:
         """모든 서브폴더의 수정 시간을 업데이트하고 삭제된 폴더 제거"""
+        start_time = time.time()
         current_subfolders = set(self._get_subfolders())
         previous_subfolders = set(self.previous_mtimes.keys())
         
         # 새로 생성된 폴더 처리
         new_folders = current_subfolders - previous_subfolders
         for folder in new_folders:
-            mtime = self._get_folder_mtime(folder)
-            self.previous_mtimes[folder] = mtime
+            self.previous_mtimes[folder] = self._get_folder_mtime(folder)
+            logging.debug(f"새 폴더 감지: {folder}")
         
         # 삭제된 폴더 처리
         deleted_folders = previous_subfolders - current_subfolders
         for folder in deleted_folders:
-            del self.previous_mtimes[folder]
-            # SMB 공유도 비활성화
-            if folder in self.active_links:
-                self._remove_symlink(folder)
-        
-        # 기존 폴더 업데이트 (삭제되지 않은 폴더만)
-        for folder in current_subfolders & previous_subfolders:
-            try:
-                full_path = os.path.join(self.config.MOUNT_PATH, folder)
-                if os.path.exists(full_path):
-                    if not os.access(full_path, os.R_OK):
-                        logging.warning(f"폴더 접근 권한 없음: {folder}")
-                        continue
-            except Exception as e:
-                logging.error(f"폴더 상태 확인 중 오류 발생 ({folder}): {e}")
-                continue
+            logging.info(f"폴더 삭제 감지: {folder}")
+            # 심볼릭 링크 제거
+            self._remove_symlink(folder)
+            # 이전 수정 시간 기록에서 삭제
+            if folder in self.previous_mtimes:
+                del self.previous_mtimes[folder]
+                
+        elapsed_time = time.time() - start_time
+        logging.debug(f"폴더 구조 업데이트 완료 - 걸린 시간: {elapsed_time:.3f}초, 총 폴더: {len(current_subfolders)}개, 새 폴더: {len(new_folders)}개, 삭제된 폴더: {len(deleted_folders)}개")
 
     def check_modifications(self) -> tuple[list[str], bool]:
         """수정 시간이 변경된 서브폴더 목록과 VM 시작 필요 여부를 반환"""
+        start_time = time.time()
         changed_folders = []
         should_start_vm = False
         self._update_subfolder_mtimes()
@@ -361,6 +338,9 @@ class FolderMonitor:
                 if current_mtime > self.last_shutdown_time:
                     should_start_vm = True
                     logging.info(f"VM 시작 조건 충족 - 수정 시간: {last_modified}")
+        
+        elapsed_time = time.time() - start_time
+        logging.debug(f"폴더 수정 시간 확인 완료 - 걸린 시간: {elapsed_time:.3f}초, 변경된 폴더: {len(changed_folders)}개")
         
         return changed_folders, should_start_vm
 
@@ -596,44 +576,31 @@ class FolderMonitor:
             logging.error(error_msg)
             raise PermissionError(error_msg)
         
+        # ls -n 명령어로 마운트 경로의 첫 번째 항목의 UID/GID 확인
         try:
-            # 마운트 경로의 소유자 정보 직접 확인 (stat 사용)
-            stat_info = os.stat(self.config.MOUNT_PATH)
-            uid = stat_info.st_uid
-            gid = stat_info.st_gid
-            logging.info(f"NFS 마운트 경로의 UID/GID: {uid}/{gid} (소유자: {uid}, 그룹: {gid})")
-            return uid, gid
-        except Exception as e:
-            # ls -n 명령어로 마운트 경로의 첫 번째 항목의 UID/GID 확인 (대체 방법)
-            try:
-                result = subprocess.run(['ls', '-n', self.config.MOUNT_PATH], capture_output=True, text=True, check=True)
-                # 출력 결과를 줄 단위로 분리
-                lines = result.stdout.strip().split('\n')
-                # 첫 번째 파일/디렉토리 정보가 있는 줄 찾기 (total 제외)
-                for line in lines:
-                    if line.startswith('total'):
-                        continue
-                    # 공백으로 분리하여 UID(3번째 필드)와 GID(4번째 필드) 추출
-                    parts = line.split()
-                    if len(parts) >= 4:
-                        uid = int(parts[2])
-                        gid = int(parts[3])
-                        logging.info(f"NFS 마운트 경로의 UID/GID: {uid}/{gid} (ls -n 명령으로 확인)")
-                        return uid, gid
-                
-                # 디렉토리가 비어있는 경우
-                error_msg = "마운트 경로가 비어있거나 파일/디렉토리 정보를 읽을 수 없습니다"
-                logging.error(error_msg)
-                raise FileNotFoundError(error_msg)
-            except subprocess.CalledProcessError as e:
-                error_msg = f"ls 명령 실행 실패: {e}"
-                logging.error(error_msg)
-                raise RuntimeError(error_msg)
+            result = subprocess.run(['ls', '-n', self.config.MOUNT_PATH], capture_output=True, text=True, check=True)
+            # 출력 결과를 줄 단위로 분리
+            lines = result.stdout.strip().split('\n')
+            # 첫 번째 파일/디렉토리 정보가 있는 줄 찾기 (total 제외)
+            for line in lines:
+                if line.startswith('total'):
+                    continue
+                # 공백으로 분리하여 UID(3번째 필드)와 GID(4번째 필드) 추출
+                parts = line.split()
+                if len(parts) >= 4:
+                    uid = int(parts[2])
+                    gid = int(parts[3])
+                    logging.info(f"NFS 마운트 경로의 UID/GID: {uid}/{gid}")
+                    return uid, gid
             
-        # 이 코드에 도달하면 오류가 발생한 것
-        error_msg = "NFS 마운트 경로의 UID/GID를 확인할 수 없습니다"
-        logging.error(error_msg)
-        raise RuntimeError(error_msg)
+            # 디렉토리가 비어있는 경우
+            error_msg = "마운트 경로가 비어있거나 파일/디렉토리 정보를 읽을 수 없습니다"
+            logging.error(error_msg)
+            raise FileNotFoundError(error_msg)
+        except subprocess.CalledProcessError as e:
+            error_msg = f"ls 명령 실행 실패: {e}"
+            logging.error(error_msg)
+            raise RuntimeError(error_msg)
 
     def _deactivate_smb_share(self) -> bool:
         """모든 SMB 공유와 심볼릭 링크를 비활성화"""
@@ -965,8 +932,25 @@ class GShareManager:
 
 def setup_logging():
     """기본 로깅 설정을 초기화"""
-    load_dotenv()
-    log_level = os.getenv('LOG_LEVEL', 'INFO')
+    # config.yaml에서 로그 레벨 확인
+    yaml_path = '/config/config.yaml'
+    log_level = 'INFO'  # 기본값
+    
+    try:
+        if os.path.exists(yaml_path):
+            with open(yaml_path, 'r', encoding='utf-8') as f:
+                yaml_config = yaml.safe_load(f)
+            if yaml_config and 'log_level' in yaml_config:
+                log_level = yaml_config['log_level']
+        else:
+            # 없으면 환경 변수에서 가져옴
+            log_level = os.getenv('LOG_LEVEL', 'INFO')
+    except Exception as e:
+        print(f"로그 레벨 로드 실패: {e}")
+        log_level = os.getenv('LOG_LEVEL', 'INFO')
+    
+    # 환경 변수 설정 (다른 모듈에서 참조할 수 있도록)
+    os.environ['LOG_LEVEL'] = log_level
     
     # 로그 디렉토리 확인 및 생성
     log_dir = '/logs'
@@ -1011,9 +995,15 @@ def setup_logging():
 
 def update_log_level():
     """로그 레벨을 동적으로 업데이트"""
-    load_dotenv()
+    
     log_level = os.getenv('LOG_LEVEL', 'INFO')
+    
+    # 로거 레벨 설정
     logging.getLogger().setLevel(getattr(logging, log_level))
+    
+    # 모든 로거에 동일한 레벨 적용 (추가)
+    for logger_name in logging.root.manager.loggerDict:
+        logging.getLogger(logger_name).setLevel(getattr(logging, log_level))
 
 def update_timezone(timezone='Asia/Seoul'):
     """로깅 시간대 설정 업데이트"""
@@ -1028,6 +1018,7 @@ def update_timezone(timezone='Asia/Seoul'):
 
 def check_config_complete():
     """설정이 완료되었는지 확인"""
+    logging.debug("설정 완료 여부 확인 시작")
     try:
         # 모든 실행이 Docker 환경에서 이루어진다고 가정
         config_path = '/config/config.yaml'
@@ -1035,11 +1026,9 @@ def check_config_complete():
         
         # 초기화 완료 플래그 확인
         init_flag_exists = os.path.exists(init_flag_path)
-        logging.info(f"초기화 완료 플래그 확인: {init_flag_exists} (경로: {init_flag_path})")
         
         # 설정 파일 존재 확인
         config_exists = os.path.exists(config_path)
-        logging.info(f"설정 파일 확인: {config_exists} (경로: {config_path})")
         
         # 두 파일 중 하나라도 없으면 설정이 완료되지 않은 것으로 판단
         if not config_exists or not init_flag_exists:
@@ -1069,12 +1058,8 @@ def check_config_complete():
                 # 초기화 플래그 시간이 config 파일 수정 시간보다 이후인지 확인
                 is_valid = init_flag_time >= config_time
                 
-                logging.info(f"설정 파일 수정 시간: {config_mtime_str}")
-                logging.info(f"초기화 플래그 시간: {init_flag_time_str}")
-                logging.info(f"초기화 플래그 시간이 설정 파일 수정 시간보다 이후임: {is_valid}")
-                
                 if not is_valid:
-                    logging.warning("설정 파일이 초기화 완료 이후에 수정되었습니다. 재설정이 필요합니다.")
+                    logging.debug("설정 파일이 초기화 완료 이후에 수정되었습니다. 재설정이 필요합니다.")
                     return False
                     
             except ValueError as e:
@@ -1083,7 +1068,7 @@ def check_config_complete():
                 with open(init_flag_path, 'w') as f:
                     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     f.write(current_time)
-                logging.info(f"초기화 플래그 시간을 현재 시간({current_time})으로 업데이트했습니다.")
+                logging.debug(f"초기화 플래그 시간을 현재 시간({current_time})으로 업데이트했습니다.")
                 return True
                 
         except Exception as e:
@@ -1091,7 +1076,7 @@ def check_config_complete():
             return False
             
         # 모든 조건을 통과하면 설정 완료로 판단
-        logging.info("모든 설정 검증을 통과했습니다. 설정이 완료되었습니다.")
+        logging.debug("설정 완료 여부 확인 완료")
         return True
         
     except Exception as e:
@@ -1106,61 +1091,19 @@ if __name__ == "__main__":
     logging.info("──────────────────────────────────────────────────")
     
     try:
-        # 스크립트 실행 경로 출력
-        script_path = os.path.realpath(__file__)
-        logging.info(f"스크립트 실행 경로: {script_path}")
-        
         # 초기화 완료 플래그 경로
         init_flag_path = '/config/.init_complete'
-        
-        # 환경 변수에서 랜딩 전용 모드 설정을 확인
-        landing_only_env = os.environ.get('LANDING_ONLY', '')
-        
-        # 명시적인 문자열 비교로 환경 변수 값 해석
-        is_landing_mode = landing_only_env.lower() in ('true', '1', 't')
-        is_normal_mode = landing_only_env.lower() in ('false', '0', 'f')
-        
-        # 실제 환경 변수 값과 해석 결과 기록
-        logging.info(f"LANDING_ONLY 환경 변수 원본 값: '{landing_only_env}'")
-        logging.info(f"랜딩 페이지 전용 모드: {is_landing_mode}")
-        logging.info(f"명시적 일반 모드: {is_normal_mode}")
-        
-        # 일반 모드로 명시적으로 설정된 경우 처리
-        if is_normal_mode:
-            logging.info("환경 변수에서 명시적으로 일반 모드로 설정되었습니다.")
-            
-            # 초기화 완료 플래그가 없는 경우에도 일반 모드로 강제 진행
-            if not os.path.exists(init_flag_path):
-                try:
-                    with open(init_flag_path, 'w') as f:
-                        f.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                    logging.info(f"초기화 완료 플래그를 자동 생성했습니다: {init_flag_path}")
-                except Exception as e:
-                    logging.error(f"초기화 완료 플래그 생성 실패: {e}")
-            
-            # 일반 모드에서는 더 진행 (설정 완료 여부 확인 후 진행)
-        # 랜딩 페이지 전용 모드로 명시적으로 설정된 경우
-        elif is_landing_mode:
-            logging.info("랜딩 페이지 전용 모드로 시작합니다.")
-            run_landing_page()
-            sys.exit(0)
-        # 환경 변수 값이 없거나 유효하지 않은 경우 - 설정 완료 플래그 확인 후 결정
-        else:
-            logging.info("랜딩 모드가 명시적으로 설정되지 않았습니다. 설정 완료 여부에 따라 결정합니다.")
         
         # 설정 완료 여부 확인
         setup_completed = check_config_complete()
         
-        # 설정이 완료되지 않았고 명시적으로 일반 모드가 아니면 랜딩 페이지로
-        if not setup_completed and not is_normal_mode:
-            logging.info("랜딩 페이지 진입이 필요합니다.")
+        # 설정이 완료되지 않았으면 랜딩 페이지로
+        if not setup_completed:
+            logging.info("랜딩 페이지 진입")
             # 랜딩 페이지 실행
             run_landing_page()
             sys.exit(0)
-        
-        # 설정이 완료된 경우 또는 명시적 일반 모드인 경우 애플리케이션 실행
-        logging.info("설정이 완료되었습니다. 애플리케이션 실행 중...")
-        
+                
         try:
             # 설정 로드
             logging.info("설정 파일 로드 중...")

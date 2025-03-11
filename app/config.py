@@ -49,6 +49,9 @@ class Config:
     
     # 로그 시간대
     TIMEZONE: str
+    
+    # 로그 레벨 설정
+    LOG_LEVEL: str = 'INFO'
 
     # NFS 설정
     ## NFS 공유 경로
@@ -107,12 +110,17 @@ class Config:
             'SMB_GUEST_OK': yaml_config['smb'].get('guest_ok', False),
             'SMB_READ_ONLY': yaml_config['smb'].get('read_only', True),
             'SMB_LINKS_DIR': yaml_config['smb'].get('links_dir', '/mnt/gshare_links'),
-            'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul')
+            'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
+            'LOG_LEVEL': yaml_config.get('log_level', 'INFO')
         }
 
         # NFS 설정 추가
         if 'nfs' in yaml_config and 'path' in yaml_config['nfs']:
             config_dict['NFS_PATH'] = yaml_config['nfs']['path']
+            
+        # 로그 레벨 로드 및 환경 변수 설정
+        log_level = yaml_config.get('log_level', 'INFO')
+        os.environ['LOG_LEVEL'] = log_level
 
         return cls(**config_dict)
 
@@ -136,7 +144,8 @@ class Config:
                     'smb': {},
                     'credentials': {},
                     'nfs': {},
-                    'timezone': 'Asia/Seoul'
+                    'timezone': 'Asia/Seoul',
+                    'log_level': 'INFO'
                 }
         except Exception:
             # 파일을 읽을 수 없는 경우 기본 구조 생성
@@ -146,7 +155,8 @@ class Config:
                 'smb': {},
                 'credentials': {},
                 'nfs': {},
-                'timezone': 'Asia/Seoul'
+                'timezone': 'Asia/Seoul',
+                'log_level': 'INFO'
             }
 
         # 일반 설정 업데이트
@@ -176,6 +186,9 @@ class Config:
             yaml_config['smb']['links_dir'] = config_dict['SMB_LINKS_DIR']
         if 'TIMEZONE' in config_dict:
             yaml_config['timezone'] = config_dict['TIMEZONE']
+        # 로그 레벨 업데이트
+        if 'LOG_LEVEL' in config_dict:
+            yaml_config['log_level'] = config_dict['LOG_LEVEL']
         
         # 민감한 정보(자격 증명) 업데이트
         if 'PROXMOX_HOST' in config_dict:

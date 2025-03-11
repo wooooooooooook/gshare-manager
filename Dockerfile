@@ -28,10 +28,6 @@ COPY config.yaml.template /config/config.yaml.template
 
 # 애플리케이션 코드 복사
 COPY app/ .
-COPY docker-entrypoint.sh /
-
-# 진입점 스크립트에 실행 권한 부여
-RUN chmod +x /docker-entrypoint.sh
 
 # 포트 설정
 EXPOSE 5000
@@ -41,10 +37,7 @@ ENV PYTHONUNBUFFERED=1
 ENV TZ=Asia/Seoul
 
 # 볼륨 설정
-VOLUME ["/config", "/logs", "/mnt/gshare", "/mnt/gshare_links"]
-
-# 진입점 설정
-ENTRYPOINT ["/docker-entrypoint.sh"]
+VOLUME ["/config"]
 
 # 실행 명령
 CMD ["python", "gshare_manager.py"] 

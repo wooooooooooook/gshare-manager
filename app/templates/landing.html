@@ -254,6 +254,7 @@
                             <input type="number" class="form-control" id="threshold_count" name="THRESHOLD_COUNT" required value="{{ form_data.get('THRESHOLD_COUNT', 3) }}" min="1">
                             <small class="form-text text-muted">연속으로 이 횟수만큼 임계치 이하로 측정되면 VM을 종료합니다.</small>
                         </div>
+                        <h3>SMB 공유 설정</h3>
                         <div class="form-group">
                             <label for="smb_username">SMB 사용자 이름</label>
                             <input type="text" class="form-control" id="smb_username" name="SMB_USERNAME" required value="{{ form_data.get('SMB_USERNAME', '') }}">
@@ -266,7 +267,7 @@
                             <label for="smb_share_name">SMB 공유 이름</label>
                             <input type="text" class="form-control" id="smb_share_name" name="SMB_SHARE_NAME" required value="{{ form_data.get('SMB_SHARE_NAME', 'gshare') }}">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group hidden">
                             <label for="smb_comment">SMB 설명</label>
                             <input type="text" class="form-control" id="smb_comment" name="SMB_COMMENT" value="{{ form_data.get('SMB_COMMENT', 'GShare SMB 공유') }}">
                         </div>
@@ -284,10 +285,11 @@
                                 <option value="yes" {% if form_data.get('SMB_READ_ONLY') == 'yes' %}selected{% endif %}>예</option>
                             </select>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group hidden">
                             <label for="smb_links_dir">SMB 링크 디렉토리</label>
                             <input type="text" class="form-control" id="smb_links_dir" name="SMB_LINKS_DIR" value="{{ form_data.get('SMB_LINKS_DIR', '/mnt/gshare_links') }}">
                         </div>
+                        <h3>기타 설정</h3>
                         <div class="form-group">
                             <label for="timezone">시간대</label>
                             <select class="form-control" id="timezone" name="TIMEZONE">
@@ -295,6 +297,15 @@
                                 <option value="UTC" {% if form_data.get('TIMEZONE') == 'UTC' %}selected{% endif %}>UTC</option>
                                 <option value="America/New_York" {% if form_data.get('TIMEZONE') == 'America/New_York' %}selected{% endif %}>미국/뉴욕</option>
                                 <option value="Europe/London" {% if form_data.get('TIMEZONE') == 'Europe/London' %}selected{% endif %}>유럽/런던</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="log_level">로그 레벨</label>
+                            <select class="form-control" id="log_level" name="LOG_LEVEL">
+                                <option value="DEBUG" {% if form_data.get('LOG_LEVEL') == 'DEBUG' %}selected{% endif %}>DEBUG</option>
+                                <option value="INFO" {% if form_data.get('LOG_LEVEL') == 'INFO' or not form_data.get('LOG_LEVEL') %}selected{% endif %}>INFO</option>
+                                <option value="WARNING" {% if form_data.get('LOG_LEVEL') == 'WARNING' %}selected{% endif %}>WARNING</option>
+                                <option value="ERROR" {% if form_data.get('LOG_LEVEL') == 'ERROR' %}selected{% endif %}>ERROR</option>
                             </select>
                         </div>
                         <button type="button" class="btn btn-secondary" onclick="prevTab('vm-tab')">이전</button>
