@@ -828,81 +828,13 @@ def restart_app():
         logging.info("앱 재시작 요청 받음")
         logging.info("──────────────────────────────────────────────────")
         
-        # config.yaml 파일의 존재 여부와 수정 시간 확인
-        config_path = '/config/config.yaml'
-        init_flag_path = '/config/.init_complete'
-        restart_flag_path = '/config/.restart_in_progress'  # 재시작 진행중 플래그 경로
-        
-        # 재시작 시작 플래그 생성
+        # 재시작 플래그 파일 생성
+        restart_flag_path = '/config/.restart_in_progress'
         with open(restart_flag_path, 'w') as f:
             f.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         
-        if not os.path.exists(config_path):
-            logging.warning("설정 파일이 존재하지 않습니다. 재시작할 수 없습니다.")
-            return jsonify({"status": "error", "message": "설정 파일이 존재하지 않습니다."}), 400
-        
-        # 설정 파일의 수정 시간 확인
-        try:
-            config_mtime = os.path.getmtime(config_path)
-            config_time = datetime.fromtimestamp(config_mtime)
-            logging.info(f"설정 파일 수정 시간: {config_time.strftime('%Y-%m-%d %H:%M:%S')}")
-            
-            # 초기화 완료 플래그 확인 및 업데이트
-            if not os.path.exists(init_flag_path):
-                logging.info("초기화 완료 플래그가 없습니다. 새로 생성합니다.")
-                # 1초 지연을 통해 설정 파일보다 나중 시간으로 생성
-                time.sleep(1)
-            else:
-                # 기존 플래그의 시간 확인
-                try:
-                    with open(init_flag_path, 'r') as f:
-                        init_time_str = f.read().strip()
-                    init_time = datetime.strptime(init_time_str, '%Y-%m-%d %H:%M:%S')
-                    
-                    # 플래그 시간이 설정 파일보다 이전이면 업데이트 필요
-                    if init_time <= config_time:
-                        logging.info("초기화 플래그 시간이 설정 파일보다 이전입니다. 업데이트합니다.")
-                        time.sleep(1)  # 1초 지연
-                    else:
-                        logging.info("초기화 플래그 시간이 이미 최신입니다.")
-                        # 업데이트 없이 진행
-                        pass
-                except Exception as e:
-                    logging.error(f"초기화 플래그 시간 확인 중 오류: {e}")
-                    # 오류 발생 시 안전하게 업데이트
-                    time.sleep(1)
-            
-            # 초기화 완료 플래그 생성 또는 업데이트
-            current_time = datetime.now()
-            with open(init_flag_path, 'w') as f:
-                time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
-                f.write(time_str)
-            logging.info(f"초기화 완료 플래그 업데이트 시간: {time_str}")
-            
-            # 시간 차이 확인
-            time_diff = (current_time - config_time).total_seconds()
-            logging.info(f"설정 파일과 초기화 플래그 사이 시간 차이: {time_diff:.2f}초")
-            
-            if time_diff < 0:
-                logging.warning("초기화 플래그가 설정 파일보다 이른 시간으로 설정되었습니다. 문제가 발생할 수 있습니다.")
-                # 다시 시도
-                time.sleep(2)
-                current_time = datetime.now()
-                with open(init_flag_path, 'w') as f:
-                    time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
-                    f.write(time_str)
-                logging.info(f"초기화 완료 플래그 재업데이트 시간: {time_str}")
-        except Exception as e:
-            logging.error(f"초기화 완료 플래그 업데이트 중 오류: {e}")
-            # 오류 발생 시에도 기본 동작 진행
-            with open(init_flag_path, 'w') as f:
-                f.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        
-        # 설정 완료 여부 확인 로직 제거 - 재시작 시 자동으로 설정 상태 확인
-        logging.info("앱 재시작을 진행합니다. 재시작 후 애플리케이션이 자체적으로 설정 상태 확인")
-        
-        # delayed_restart 함수를 사용하여 앱 재시작
-        restart_thread = threading.Thread(target=delayed_restart)
+        # _delayed_restart 함수를 사용하여 앱 재시작
+        restart_thread = threading.Thread(target=_delayed_restart)
         restart_thread.daemon = True
         restart_thread.start()
         
@@ -910,6 +842,7 @@ def restart_app():
         return jsonify({"status": "success", "message": "앱이 재시작됩니다."})
     except Exception as e:
         logging.error(f"앱 재시작 중 오류 발생: {e}")
+        return jsonify({"status": "error", "message": f"재시작 중 오류 발생: {str(e)}"}), 500
 
 @app.route('/check_restart_status')
 def check_restart_status():
@@ -988,8 +921,8 @@ def run_flask_app():
         logging.info("Flask 웹 서버 재시작 시도...")
         return run_flask_app()  # 재귀적으로 다시 시도
 
-# 앱 재시작을 위한 함수 (모든 systemctl 호출 대체)
-def delayed_restart():
+# 앱 재시작을 위한 함수
+def _delayed_restart():
     time.sleep(2)  # 응답을 보낼 시간을 주기 위해 잠시 대기
     logging.info("──────────────────────────────────────────────────")
     logging.info("앱 재시작 실행 중...")

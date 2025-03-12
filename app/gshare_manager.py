@@ -12,6 +12,7 @@ import os
 import threading
 import sys
 import atexit
+from proxmox_api import ProxmoxAPI
 from web_server import init_server, run_flask_app, run_landing_page
 import yaml
 import traceback
@@ -43,77 +44,6 @@ class State:
         data['nfs_status'] = 'ON' if self.nfs_mounted else 'OFF'
         data['cpu_threshold'] = cpu_threshold if 'cpu_threshold' in globals() else 0.0
         return data
-
-class ProxmoxAPI:
-    def __init__(self, config: Config):
-        self.config = config
-        self.session = requests.Session()
-        self.session.verify = False
-        self._set_token_auth()
-        self.folder_monitor = None
-
-    def _set_token_auth(self) -> None:
-        # API 토큰을 사용하여 인증 헤더 설정
-        self.session.headers.update({
-            "Authorization": f"PVEAPIToken={self.config.TOKEN_ID}={self.config.SECRET}"
-        })
-        logging.info("Proxmox API 토큰 인증 설정 완료")
-        self.session.timeout = (5, 10)  # (connect timeout, read timeout)
-
-    def set_folder_monitor(self, folder_monitor):
-        """FolderMonitor 인스턴스 설정"""
-        self.folder_monitor = folder_monitor
-
-    def is_vm_running(self) -> bool:
-        try:
-            response = self.session.get(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current"
-            )
-            response.raise_for_status()
-            result = response.json()["data"]["status"]
-            logging.debug(f"VM 상태 확인 응답: {result}")
-            return result == "running"
-        except Exception as e:
-            logging.error(f"VM 상태 확인 실패: {e}")
-            return False    
-    
-    def get_vm_uptime(self) -> Optional[float]:
-        try:
-            response = self.session.get(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current"
-            )
-            response.raise_for_status()
-            result = response.json()["data"]["uptime"]
-            logging.debug(f"VM 부팅 시간 확인 응답: {result}")
-            return result
-        except Exception as e:
-            logging.error(f"VM 부팅 시간 확인 실패: {e}")
-            return None
-
-    def get_cpu_usage(self) -> Optional[float]:
-        try:
-            response = self.session.get(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current"
-            )
-            response.raise_for_status()
-            result = response.json()["data"]["cpu"] * 100
-            logging.debug(f"CPU 사용량 확인 응답: {result}")
-            return result
-        except Exception as e:
-            logging.error(f"CPU 사용량 확인 실패: {e}")
-            return None
-
-    def start_vm(self) -> bool:
-        try:
-            response = self.session.post(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/start"
-            )
-            response.raise_for_status()
-            logging.debug(f"VM 시작 응답 받음")
-                            
-            return True
-        except Exception as e:
-            return False
 
 class FolderMonitor:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
@@ -798,21 +728,6 @@ class FolderMonitor:
             logging.error(f"SMB 설정 파일 업데이트 실패: {e}")
             raise
 
-    def _check_nfs_status(self) -> bool:
-        """NFS 마운트가 되어 있는지 확인"""
-        try:
-            if not hasattr(self.config, 'NFS_PATH') or not self.config.NFS_PATH or not hasattr(self.config, 'MOUNT_PATH') or not self.config.MOUNT_PATH:
-                return False
-                
-            # mount 명령어로 현재 마운트된 NFS 리스트 확인
-            mount_check = subprocess.run(['mount', '-t', 'nfs'], capture_output=True, text=True)
-            
-            # NFS_PATH와 MOUNT_PATH가 모두 출력에 있으면 마운트된 것으로 판단
-            return self.config.NFS_PATH in mount_check.stdout and self.config.MOUNT_PATH in mount_check.stdout
-        except Exception as e:
-            logging.error(f"NFS 마운트 상태 확인 중 오류: {e}")
-            return False
-
 class GShareManager:
     def __init__(self, config: Config, proxmox_api: ProxmoxAPI):
         self.config = config
@@ -829,7 +744,6 @@ class GShareManager:
         # FolderMonitor 초기화 (NFS 마운트 이후에 수행)
         logging.info("FolderMonitor 초기화 중...")
         self.folder_monitor = FolderMonitor(config, proxmox_api)
-        self.proxmox_api.set_folder_monitor(self.folder_monitor)  # FolderMonitor 인스턴스 설정
         self.last_shutdown_time = datetime.fromtimestamp(self.folder_monitor.last_shutdown_time).strftime('%Y-%m-%d %H:%M:%S')
         logging.info("FolderMonitor 초기화 완료")
         global cpu_threshold
