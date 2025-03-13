@@ -209,7 +209,7 @@ class FolderMonitor:
                 self.previous_mtimes[path] = current_mtime
                 
                 # 심볼릭 링크 생성
-                if self.smb_manager.create_symlink(path, self.config.MOUNT_PATH):
+                if self.smb_manager.create_symlink(path):
                     self.active_links.add(path)
                 
                 # VM 마지막 시작 시간보다 수정 시간이 더 최근인 경우
@@ -253,7 +253,7 @@ class FolderMonitor:
             if recently_modified:
                 logging.info(f"마지막 VM 종료({datetime.fromtimestamp(self.last_shutdown_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(recently_modified)}개의 링크를 생성합니다.")
                 for folder in recently_modified:
-                    if self.smb_manager.create_symlink(folder, self.config.MOUNT_PATH):
+                    if self.smb_manager.create_symlink(folder):
                         self.active_links.add(folder)
                         logging.debug(f"초기 링크 생성 성공: {folder}")
                     else:
@@ -701,9 +701,6 @@ if __name__ == "__main__":
     
     # 보안 경고 억제
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    # urllib3와 requests 라이브러리의 로깅 레벨 조정
-    logging.getLogger('urllib3').setLevel(logging.WARNING)
-    logging.getLogger('requests').setLevel(logging.WARNING)
 
     try:
         # 초기화 완료 플래그 경로
@@ -747,7 +744,6 @@ if __name__ == "__main__":
                 logging.error(f"Proxmox API 객체 초기화 중 오류 발생: {api_error}")
                 logging.error(f"상세 오류: {traceback.format_exc()}")
                 raise
-            
             logging.debug("GShareManager 객체 초기화 중...")
             try:
                 gshare_manager = GShareManager(config, proxmox_api)
@@ -793,6 +789,10 @@ if __name__ == "__main__":
                 logging.error(f"Flask 웹 서버 시작 중 오류 발생: {flask_error}")
                 logging.error(f"상세 오류: {traceback.format_exc()}")
                 raise
+
+            # urllib3와 requests 라이브러리의 로깅 레벨 조정
+            logging.getLogger('urllib3').setLevel(logging.WARNING)
+            logging.getLogger('requests').setLevel(logging.WARNING)
             
             # 모니터링 시작
             logging.info(f"모니터링 시작... 간격: {config.CHECK_INTERVAL}초")

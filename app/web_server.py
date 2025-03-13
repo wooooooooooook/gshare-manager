@@ -11,6 +11,7 @@ import pytz
 import yaml
 import socket
 import tempfile
+from gshare_manager import GShareManager, State
 from config import GshareConfig  # type: ignore
 import time
 import traceback
@@ -24,9 +25,9 @@ log = logging.getLogger('werkzeug')
 log.disabled = True
 
 # 전역 변수로 상태와 관리자 객체 선언
-current_state = None
-gshare_manager = None
-config = None
+current_state: State | None = None
+gshare_manager: GShareManager | None = None
+config: GshareConfig | None = None
 is_setup_complete = False
 
 log_file = os.path.join('/logs', 'gshare_manager.log')
@@ -419,7 +420,7 @@ def toggle_mount(folder):
 
         if folder in gshare_manager.folder_monitor.active_links:
             # 마운트 해제
-            if gshare_manager.folder_monitor._remove_symlink(folder):
+            if gshare_manager.smb_manager.remove_symlink(folder):
                 # 상태 즉시 업데이트
                 gshare_manager._update_state()
                 return jsonify({"status": "success", "message": f"{folder} 마운트가 해제되었습니다."})
@@ -427,7 +428,7 @@ def toggle_mount(folder):
                 return jsonify({"status": "error", "message": f"{folder} 마운트 해제 실패"}), 500
         else:
             # 마운트
-            if gshare_manager.folder_monitor._create_symlink(folder) and gshare_manager.folder_monitor._activate_smb_share():
+            if gshare_manager.smb_manager.create_symlink(folder) and gshare_manager.smb_manager.activate_smb_share():
                 # 상태 즉시 업데이트
                 gshare_manager._update_state()
                 return jsonify({"status": "success", "message": f"{folder} 마운트가 활성화되었습니다."})

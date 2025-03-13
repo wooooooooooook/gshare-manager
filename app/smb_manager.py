@@ -416,7 +416,7 @@ class SMBManager:
             logging.error(f"심볼릭 링크 제거 실패 ({subfolder}): {e}")
             return False
 
-    def create_symlink(self, subfolder: str, source_base_path: str) -> bool:
+    def create_symlink(self, subfolder: str) -> bool:
         """
         특정 폴더의 심볼릭 링크 생성
         
@@ -428,7 +428,7 @@ class SMBManager:
             bool: 생성 성공 여부
         """
         try:
-            source_path = os.path.join(source_base_path, subfolder)
+            source_path = os.path.join(self.config.MOUNT_PATH, subfolder)
             link_path = os.path.join(self.links_dir, subfolder.replace(os.sep, '_'))
             
             # 이미 존재하는 링크 제거
