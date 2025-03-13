@@ -46,11 +46,12 @@ class Config:
     SMB_READ_ONLY: bool
     ## SMB 링크 디렉토리
     SMB_LINKS_DIR: str
-    ## SMB 포트
-    SMB_PORT: int = 445
     
     # 로그 시간대
-    TIMEZONE: str
+    TIMEZONE: str = 'Asia/Seoul'
+    
+    ## SMB 포트
+    SMB_PORT: int = 445
     
     # 로그 레벨 설정
     LOG_LEVEL: str = 'INFO'
