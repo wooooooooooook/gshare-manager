@@ -102,7 +102,7 @@ class FolderMonitor:
                 if len(parts) >= 4:
                     uid = int(parts[2])
                     gid = int(parts[3])
-                    logging.info(f"NFS 마운트 경로의 UID/GID: {uid}/{gid}")
+                    logging.debug(f"NFS 마운트 경로의 UID/GID: {uid}/{gid}")
                     return uid, gid
             
             # 디렉토리가 비어있는 경우
@@ -292,7 +292,7 @@ class FolderMonitor:
         # 모든 링크 제거
         self.smb_manager.cleanup_all_symlinks()
         self.active_links.clear()
-        logging.info("모든 리소스가 정리되었습니다.")
+        logging.debug("모든 리소스가 정리되었습니다.")
 
 class GShareManager:
     def __init__(self, config: GshareConfig, proxmox_api: ProxmoxAPI):
@@ -309,14 +309,14 @@ class GShareManager:
         self._mount_nfs()
         
         # FolderMonitor 초기화 (NFS 마운트 이후에 수행)
-        logging.info("FolderMonitor 초기화 중...")
+        logging.debug("FolderMonitor 초기화 중...")
         self.folder_monitor = FolderMonitor(config, proxmox_api, self.last_shutdown_time)
         self.last_shutdown_time_str = datetime.fromtimestamp(self.last_shutdown_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
-        logging.info("FolderMonitor 초기화 완료")
+        logging.debug("FolderMonitor 초기화 완료")
         
         # SMBManager 초기화 (FolderMonitor의 SMBManager를 사용)
         self.smb_manager = self.folder_monitor.smb_manager
-        logging.info("SMBManager 참조 완료")
+        logging.debug("SMBManager 참조 완료")
     
     def _load_last_shutdown_time(self) -> float:
         """VM 마지막 종료 시간을 로드 (UTC 기준)"""
@@ -330,7 +330,7 @@ class GShareManager:
                 current_time = datetime.now(pytz.UTC).timestamp()
                 with open(shutdown_file_path, 'w') as f:
                     f.write(str(current_time))
-                logging.info(f"VM 종료 시간 파일이 없어 현재 시간으로 생성: {datetime.fromtimestamp(current_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}")
+                logging.debug(f"VM 종료 시간 파일이 없어 현재 시간으로 생성: {datetime.fromtimestamp(current_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}")
                 return current_time
         except Exception as e:
             # 오류 발생 시 현재 UTC 시간 사용
@@ -351,16 +351,16 @@ class GShareManager:
             # 마운트 디렉토리가 없으면 생성
             if not os.path.exists(mount_path):
                 os.makedirs(mount_path, exist_ok=True)
-                logging.info(f"마운트 디렉토리 생성: {mount_path}")
+                logging.debug(f"마운트 디렉토리 생성: {mount_path}")
             
             # 이미 마운트되어 있는지 확인
             mount_check = subprocess.run(['mount', '-t', 'nfs'], capture_output=True, text=True)
             if nfs_path in mount_check.stdout and mount_path in mount_check.stdout:
-                logging.info(f"NFS가 이미 마운트되어 있습니다: {nfs_path} -> {mount_path}")
+                logging.debug(f"NFS가 이미 마운트되어 있습니다: {nfs_path} -> {mount_path}")
                 return
                 
             # NFS 마운트 시도
-            logging.info(f"NFS 마운트 시도: {nfs_path} -> {mount_path}")
+            logging.debug(f"NFS 마운트 시도: {nfs_path} -> {mount_path}")
             mount_cmd = ['mount', '-t', 'nfs', '-o', 'nolock,vers=3,soft,timeo=100', nfs_path, mount_path]
             result = subprocess.run(mount_cmd, capture_output=True, text=True)
             
@@ -614,7 +614,7 @@ def update_timezone(timezone='Asia/Seoul'):
         for handler in logging.getLogger().handlers:
             if handler.formatter:
                 handler.formatter.converter = lambda *args: datetime.now(tz=pytz.timezone(timezone)).timetuple()
-        logging.info(f"로깅 시간대가 '{timezone}'으로 업데이트되었습니다.")
+        logging.debug(f"로깅 시간대가 '{timezone}'으로 업데이트되었습니다.")
     except Exception as e:
         logging.error(f"로깅 시간대 업데이트 중 오류 발생: {e}")
 
@@ -710,12 +710,12 @@ if __name__ == "__main__":
                 
         try:
             # 설정 로드
-            logging.info("설정 파일 로드 중...")
+            logging.debug("설정 파일 로드 중...")
             config = GshareConfig.load_config()
-            logging.info("설정 파일 로드 완료")
+            logging.debug("설정 파일 로드 완료")
             
             # 시간대 설정
-            logging.info(f"시간대 설정: {config.TIMEZONE}")
+            logging.debug(f"시간대 설정: {config.TIMEZONE}")
             os.environ['TZ'] = config.TIMEZONE
             try:
                 time.tzset() #type: ignore
@@ -728,19 +728,19 @@ if __name__ == "__main__":
             update_timezone(config.TIMEZONE)
             
             # 객체 초기화
-            logging.info("Proxmox API 객체 초기화 중...")
+            logging.debug("Proxmox API 객체 초기화 중...")
             try:
                 proxmox_api = ProxmoxAPI(config)
-                logging.info("Proxmox API 객체 초기화 완료")
+                logging.debug("Proxmox API 객체 초기화 완료")
             except Exception as api_error:
                 logging.error(f"Proxmox API 객체 초기화 중 오류 발생: {api_error}")
                 logging.error(f"상세 오류: {traceback.format_exc()}")
                 raise
             
-            logging.info("GShareManager 객체 초기화 중...")
+            logging.debug("GShareManager 객체 초기화 중...")
             try:
                 gshare_manager = GShareManager(config, proxmox_api)
-                logging.info("GShareManager 객체 초기화 완료")
+                logging.debug("GShareManager 객체 초기화 완료")
             except Exception as manager_error:
                 logging.error(f"GShareManager 객체 초기화 중 오류 발생: {manager_error}")
                 logging.error(f"상세 오류: {traceback.format_exc()}")
@@ -749,7 +749,7 @@ if __name__ == "__main__":
             # VM 상태 확인
             try:
                 vm_running = gshare_manager.proxmox_api.is_vm_running()
-                logging.info(f"VM 실행 상태: {vm_running}")
+                logging.info(f"현재 VM 실행 상태: {vm_running}")
             except Exception as vm_error:
                 logging.error(f"VM 상태 확인 중 오류 발생: {vm_error}")
                 logging.error(f"상세 오류: {traceback.format_exc()}")
@@ -761,23 +761,23 @@ if __name__ == "__main__":
             logging.info("──────────────────────────────────────────────────")
             
             # Flask 앱 초기화 및 상태 전달
-            logging.info("웹 서버 초기화 중...")
+            logging.debug("웹 서버 초기화 중...")
             try:
                 current_state = gshare_manager._update_state()
                 init_server(current_state, gshare_manager, config)
-                logging.info("웹 서버 초기화 완료")
+                logging.debug("웹 서버 초기화 완료")
             except Exception as server_error:
                 logging.error(f"웹 서버 초기화 중 오류 발생: {server_error}")
                 logging.error(f"상세 오류: {traceback.format_exc()}")
                 raise
             
             # Flask 스레드 시작
-            logging.info("Flask 웹 서버 시작 중...")
+            logging.debug("Flask 웹 서버 시작 중...")
             try:
                 flask_thread = threading.Thread(target=run_flask_app)
                 flask_thread.daemon = True
                 flask_thread.start()
-                logging.info("Flask 웹 서버 시작 완료")
+                logging.debug("Flask 웹 서버 시작 완료")
             except Exception as flask_error:
                 logging.error(f"Flask 웹 서버 시작 중 오류 발생: {flask_error}")
                 logging.error(f"상세 오류: {traceback.format_exc()}")

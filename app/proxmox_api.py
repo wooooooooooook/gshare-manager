@@ -15,7 +15,7 @@ class ProxmoxAPI:
         self.session.headers.update({
             "Authorization": f"PVEAPIToken={self.config.TOKEN_ID}={self.config.SECRET}"
         })
-        logging.info("Proxmox API 토큰 인증 설정 완료")
+        logging.debug("Proxmox API 토큰 인증 설정 완료")
 
     def is_vm_running(self) -> bool:
         try:

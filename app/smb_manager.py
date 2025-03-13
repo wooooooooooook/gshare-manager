@@ -70,7 +70,7 @@ class SMBManager:
             except subprocess.CalledProcessError:
                 pass  # 사용자가 이미 존재하는 경우 무시
 
-            logging.info("SMB 기본 설정 초기화 완료")
+            logging.debug("SMB 기본 설정 초기화 완료")
         except Exception as e:
             logging.error(f"SMB 기본 설정 초기화 실패: {e}")
             raise
@@ -188,7 +188,7 @@ class SMBManager:
             with open('/etc/samba/smb.conf', 'w') as f:
                 f.writelines(final_lines)
                 
-            logging.info(f"SMB 설정 파일이 업데이트 되었습니다: {share_name}, 포트: {self.config.SMB_PORT}")
+            logging.debug(f"SMB 설정 파일이 업데이트 되었습니다: {share_name}, 포트: {self.config.SMB_PORT}")
         except Exception as e:
             logging.error(f"SMB 설정 파일 업데이트 실패: {e}")
             raise
@@ -204,15 +204,15 @@ class SMBManager:
             
             # 서비스 재시작/시작
             if is_running:
-                logging.info("SMB 서비스가 이미 실행 중입니다. 서비스를 재시작합니다.")
+                logging.debug("SMB 서비스가 이미 실행 중입니다. 서비스를 재시작합니다.")
                 self.restart_samba_service()
             else:
-                logging.info("SMB 서비스를 시작합니다.")
+                logging.debug("SMB 서비스를 시작합니다.")
                 self.start_samba_service()
             
             # 서비스 상태 확인
             if self.check_smb_status():
-                logging.info("SMB 공유가 활성화되었습니다.")
+                logging.debug("SMB 공유가 활성화되었습니다.")
                 return True
             else:
                 logging.error("SMB 서비스가 시작되지 않았습니다.")
@@ -243,7 +243,7 @@ class SMBManager:
             # Samba 서비스 중지
             self.stop_samba_service()
             
-            logging.info(f"SMB 공유 비활성화 성공")
+            logging.debug(f"SMB 공유 비활성화 성공")
             return True
         except Exception as e:
             logging.error(f"SMB 공유 비활성화 실패: {e}")
@@ -255,7 +255,7 @@ class SMBManager:
             # 설정에서 SMB 사용자 이름과 비밀번호 가져오기
             smb_username = self.config.SMB_USERNAME
             smb_password = self.config.SMB_PASSWORD
-            logging.info(f"SMB 사용자 설정: {smb_username}")
+            logging.debug(f"SMB 사용자 설정: {smb_username}")
             
             # 사용자 존재 여부와 UID/GID 일치 여부 한 번에 확인
             user_exists = False
@@ -271,8 +271,8 @@ class SMBManager:
                     current_uid = int(info_parts[0].split('=')[1].split('(')[0])
                     current_gid = int(info_parts[1].split('=')[1].split('(')[0])
                     uid_gid_match = (current_uid == self.nfs_uid and current_gid == self.nfs_gid)
-                    logging.info(f"사용자 '{smb_username}' 존재: UID={current_uid}, GID={current_gid}")
-                    logging.info(f"NFS UID/GID와 일치: {uid_gid_match} (NFS: UID={self.nfs_uid}, GID={self.nfs_gid})")
+                    logging.debug(f"사용자 '{smb_username}' 존재: UID={current_uid}, GID={current_gid}")
+                    logging.debug(f"NFS UID/GID와 일치: {uid_gid_match} (NFS: UID={self.nfs_uid}, GID={self.nfs_gid})")
             except Exception as e:
                 logging.error(f"사용자 확인 중 오류: {e}")
             
@@ -282,18 +282,18 @@ class SMBManager:
                 group_info = subprocess.run(['getent', 'group', str(self.nfs_gid)], capture_output=True, text=True)
                 if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
                     existing_group = group_info.stdout.strip().split(':')[0]
-                    logging.info(f"GID {self.nfs_gid}를 가진 기존 그룹 발견: {existing_group}")
+                    logging.debug(f"GID {self.nfs_gid}를 가진 기존 그룹 발견: {existing_group}")
             except Exception as e:
                 logging.error(f"그룹 확인 중 오류: {e}")
             
             # 사용자 처리 로직
             if not user_exists:
                 # 1. 사용자가 없음 - 새 사용자 생성
-                logging.info(f"사용자 '{smb_username}'가 존재하지 않습니다. NFS UID/GID로 사용자를 생성합니다.")
+                logging.debug(f"사용자 '{smb_username}'가 존재하지 않습니다. NFS UID/GID로 사용자를 생성합니다.")
                 try:
                     if existing_group:
                         # 이미 해당 GID를 가진 그룹이 있으면 그룹 생성 건너뜀
-                        logging.info(f"GID {self.nfs_gid}를 가진 그룹 '{existing_group}'이(가) 이미 존재합니다. 이 그룹을 사용합니다.")
+                        logging.debug(f"GID {self.nfs_gid}를 가진 그룹 '{existing_group}'이(가) 이미 존재합니다. 이 그룹을 사용합니다.")
                     else:
                         # 그룹이 존재하지 않으면 새로 생성
                         group_result = subprocess.run(['groupadd', '-r', '-g', str(self.nfs_gid), smb_username], capture_output=True, text=True, check=False)
@@ -301,25 +301,25 @@ class SMBManager:
                             logging.warning(f"그룹 생성 실패: {group_result.stderr.strip()}")
                         else:
                             existing_group = smb_username
-                            logging.info(f"그룹 '{smb_username}' 생성 완료 (GID={self.nfs_gid})")
+                            logging.debug(f"그룹 '{smb_username}' 생성 완료 (GID={self.nfs_gid})")
                     
                     # 사용자 생성 (지정된 UID와 찾은 또는 생성된 그룹 사용)
                     group_to_use = existing_group if existing_group else str(self.nfs_gid)
                     user_result = subprocess.run(['useradd', '-r', '-u', str(self.nfs_uid), '-g', group_to_use, smb_username], capture_output=True, text=True, check=False)
-                    logging.info(f"사용자 생성 결과: {user_result.returncode}, 오류: {user_result.stderr.strip() if user_result.stderr else '없음'}")
+                    logging.debug(f"사용자 생성 결과: {user_result.returncode}, 오류: {user_result.stderr.strip() if user_result.stderr else '없음'}")
                     
                     # SMB 패스워드 설정
                     if smb_password:
                         proc = subprocess.Popen(['passwd', smb_username], stdin=subprocess.PIPE)
                         proc.communicate(input=f"{smb_password}\n{smb_password}\n".encode())
-                        logging.info(f"사용자 '{smb_username}' 패스워드 설정 완료")
+                        logging.debug(f"사용자 '{smb_username}' 패스워드 설정 완료")
                     
-                    logging.info(f"사용자 '{smb_username}' 생성 완료 (UID={self.nfs_uid}, GID={self.nfs_gid})")
+                    logging.debug(f"사용자 '{smb_username}' 생성 완료 (UID={self.nfs_uid}, GID={self.nfs_gid})")
                 except Exception as e:
                     logging.error(f"사용자 생성 중 오류 발생: {e}")
             elif not uid_gid_match:
                 # 2. 사용자는 있지만 UID/GID가 일치하지 않음 - Samba 서비스 중지 후 UID/GID 수정
-                logging.info(f"사용자 '{smb_username}'의 UID/GID가 NFS와 일치하지 않아 수정합니다.")
+                logging.debug(f"사용자 '{smb_username}'의 UID/GID가 NFS와 일치하지 않아 수정합니다.")
                 
                 # Samba 서비스 중지
                 try:
@@ -328,29 +328,29 @@ class SMBManager:
                     
                     # 사용자 UID 수정
                     usermod_result = subprocess.run(['usermod', '-u', str(self.nfs_uid), smb_username], capture_output=True, text=True, check=False)
-                    logging.info(f"사용자 UID 수정 결과: {usermod_result.returncode}, 오류: {usermod_result.stderr.strip() if usermod_result.stderr else '없음'}")
+                    logging.debug(f"사용자 UID 수정 결과: {usermod_result.returncode}, 오류: {usermod_result.stderr.strip() if usermod_result.stderr else '없음'}")
                     
                     # 사용자 GID 수정 (기존 그룹 사용)
                     group_to_use = existing_group if existing_group else str(self.nfs_gid)
                     groupmod_result = subprocess.run(['usermod', '-g', group_to_use, smb_username], capture_output=True, text=True, check=False)
-                    logging.info(f"사용자 GID 수정 결과: {groupmod_result.returncode}, 오류: {groupmod_result.stderr.strip() if groupmod_result.stderr else '없음'}")
+                    logging.debug(f"사용자 GID 수정 결과: {groupmod_result.returncode}, 오류: {groupmod_result.stderr.strip() if groupmod_result.stderr else '없음'}")
                     
                     # 필요한 파일의 소유권 변경
                     group_name = existing_group if existing_group else smb_username
                     subprocess.run(['chown', '-R', f"{smb_username}:{group_name}", self.links_dir], check=False)
-                    logging.info(f"사용자 '{smb_username}'의 UID/GID 수정 완료 (UID={self.nfs_uid}, GID={self.nfs_gid})")
+                    logging.debug(f"사용자 '{smb_username}'의 UID/GID 수정 완료 (UID={self.nfs_uid}, GID={self.nfs_gid})")
                 except Exception as e:
                     logging.error(f"사용자 UID/GID 수정 중 오류 발생: {e}")
             else:
                 # 3. 사용자가 있고 UID/GID도 일치함 - 작업 없음
-                logging.info(f"사용자 '{smb_username}'의 UID/GID가 이미 NFS와 일치합니다.")
+                logging.debug(f"사용자 '{smb_username}'의 UID/GID가 이미 NFS와 일치합니다.")
             
             # 서비스 시작 (요청된 경우)
             if start_service:
                 try:
-                    logging.info("Samba 서비스 시작...")
+                    logging.debug("Samba 서비스 시작...")
                     self.start_samba_service()
-                    logging.info("Samba 서비스 시작 완료")
+                    logging.debug("Samba 서비스 시작 완료")
                 except Exception as e:
                     logging.error(f"Samba 서비스 시작 중 오류 발생: {e}")
             
@@ -363,7 +363,7 @@ class SMBManager:
         try:
             if not os.path.exists(links_dir):
                 os.makedirs(links_dir)
-                logging.info(f"공유용 링크 디렉토리 생성됨: {links_dir}")
+                logging.debug(f"공유용 링크 디렉토리 생성됨: {links_dir}")
             
             try:
                 # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
@@ -380,7 +380,7 @@ class SMBManager:
                 
                 # 디렉토리 소유권 설정
                 subprocess.run(['chown', f"{self.config.SMB_USERNAME}:{group_name}", links_dir], check=True)
-                logging.info("공유용 링크 디렉토리 권한 설정 완료")
+                logging.debug("공유용 링크 디렉토리 권한 설정 완료")
             except subprocess.CalledProcessError as e:
                 logging.error(f"디렉토리 소유권 변경 실패: {e}")
         except Exception as e:
@@ -392,7 +392,7 @@ class SMBManager:
         try:
             # Samba 서비스 중지
             self.stop_samba_service(timeout=30)
-            logging.info("SMB 서비스 중지 완료")
+            logging.debug("SMB 서비스 중지 완료")
         except Exception as e:
             logging.error(f"SMB 서비스 정리 중 오류 발생: {e}")
 
@@ -410,7 +410,7 @@ class SMBManager:
             link_path = os.path.join(self.links_dir, subfolder.replace(os.sep, '_'))
             if os.path.exists(link_path):
                 os.remove(link_path)
-                logging.info(f"심볼릭 링크 제거됨: {link_path}")
+                logging.debug(f"심볼릭 링크 제거됨: {link_path}")
             return True
         except Exception as e:
             logging.error(f"심볼릭 링크 제거 실패 ({subfolder}): {e}")
@@ -438,7 +438,7 @@ class SMBManager:
             # 심볼릭 링크 생성
             os.symlink(source_path, link_path)
             
-            logging.info(f"심볼릭 링크 생성됨: {link_path} -> {source_path}")
+            logging.debug(f"심볼릭 링크 생성됨: {link_path} -> {source_path}")
             return True
         except Exception as e:
             logging.error(f"심볼릭 링크 생성 실패 ({subfolder}): {e}")
@@ -458,6 +458,6 @@ class SMBManager:
                             logging.debug(f"심볼릭 링크 제거됨: {file_path}")
                         except Exception as e:
                             logging.error(f"심볼릭 링크 제거 실패 ({file_path}): {e}")
-                logging.info(f"모든 심볼릭 링크 제거 완료: {self.links_dir}")
+                logging.debug(f"모든 심볼릭 링크 제거 완료: {self.links_dir}")
         except Exception as e:
             logging.error(f"심볼릭 링크 정리 중 오류 발생: {e}") 

@@ -41,12 +41,12 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler()]
 )
-logging.info(f"웹 서버 초기화 - 로그 레벨: {log_level_str}")
+logging.debug(f"웹 서버 초기화 - 로그 레벨: {log_level_str}")
 
 def init_server(state, manager, app_config: GshareConfig):
     """웹서버 초기화"""
     try:
-        logging.info("웹 서버 상태 초기화 시작")
+        logging.debug("웹 서버 상태 초기화 시작")
         global current_state, gshare_manager, config, is_setup_complete
         current_state = state
         gshare_manager = manager
@@ -57,13 +57,13 @@ def init_server(state, manager, app_config: GshareConfig):
         # 재시작 플래그 파일 확인 및 정리
         restart_flag_path = '/config/.restart_in_progress'
         if os.path.exists(restart_flag_path):
-            logging.info("이전 재시작 플래그 파일이 발견되었습니다. 삭제합니다.")
+            logging.debug("이전 재시작 플래그 파일이 발견되었습니다. 삭제합니다.")
             try:
                 os.remove(restart_flag_path)
             except Exception as e:
                 logging.error(f"재시작 플래그 파일 삭제 중 오류: {e}")
         
-        logging.info("웹 서버 상태 초기화 완료")
+        logging.debug("웹 서버 상태 초기화 완료")
     except Exception as e:
         logging.error(f"웹 서버 초기화 중 오류 발생: {e}")
         logging.error(f"상세 오류: {traceback.format_exc()}")
@@ -111,11 +111,10 @@ def main_page():
     
     # 설정이 완료되지 않았으면 설정 페이지로 리다이렉션
     if not is_setup_complete:
-        logging.info("'/' 경로 접근: 설정 페이지로 리디렉션")
+        logging.debug("'/' 경로 접근: 설정 페이지로 리디렉션")
         return redirect(url_for('setup'))
     
     # 기본 대시보드 표시
-    logging.info("'/' 경로 접근: 설정 완료됨. 대시보드 표시.")
     if current_state:
         return render_template('index.html', state=current_state, config=config)
     else:
@@ -162,11 +161,11 @@ def setup():
                 'SMB_LINKS_DIR': yaml_config.get('smb', {}).get('links_dir', '/mnt/gshare_links'),
                 'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul')
             }
-            logging.info("기존 설정 파일 로드 성공")
+            logging.debug("기존 설정 파일 로드 성공")
         except Exception as e:
             logging.error(f"설정 파일 로드 중 오류 발생: {e}")
     
-    logging.info("랜딩 페이지 표시")
+    logging.debug("랜딩 페이지 표시")
     return render_template('landing.html', form_data=form_data, has_config=has_config, container_ip=container_ip)
 
 @app.route('/save-config', methods=['POST'])
@@ -178,7 +177,7 @@ def save_config():
     config_path = '/config/config.yaml'
     init_flag_path = '/config/.init_complete'
     
-    logging.info("설정 저장 시작")
+    logging.debug("설정 저장 시작")
     
     try:
         # 폼 데이터 가져오기
@@ -228,7 +227,7 @@ def save_config():
         try:
             config_mtime = os.path.getmtime(config_path)
             config_time = datetime.fromtimestamp(config_mtime)
-            logging.info(f"설정 파일 업데이트 시간: {config_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            logging.debug(f"설정 파일 업데이트 시간: {config_time.strftime('%Y-%m-%d %H:%M:%S')}")
             
             # config.yaml 파일이 수정된 후 1초 대기하여 타임스탬프 차이 보장
             time.sleep(1)
@@ -238,11 +237,11 @@ def save_config():
             with open(init_flag_path, 'w') as f:
                 time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
                 f.write(time_str)
-            logging.info(f"초기화 완료 플래그 생성 시간: {time_str}")
+            logging.debug(f"초기화 완료 플래그 생성 시간: {time_str}")
             
             # 두 파일의 시간 차이 확인 및 로깅
             time_diff = (current_time - config_time).total_seconds()
-            logging.info(f"설정 파일과 초기화 플래그 사이 시간 차이: {time_diff:.2f}초")
+            logging.debug(f"설정 파일과 초기화 플래그 사이 시간 차이: {time_diff:.2f}초")
             
             if time_diff < 0:
                 logging.warning("초기화 플래그가 설정 파일보다 이른 시간으로 설정되었습니다. 문제가 발생할 수 있습니다.")
@@ -252,7 +251,7 @@ def save_config():
             with open(init_flag_path, 'w') as f:
                 f.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                 
-        logging.info(f"설정 저장 완료 - 설정 완료 페이지로 이동합니다.")
+        logging.debug(f"설정 저장 완료 - 설정 완료 페이지로 이동합니다.")
         
         # 항상 설정 완료 페이지로 이동
         # 설정 완료 페이지에서 자동 재시작 후 원래 모드로 돌아가도록 함
@@ -648,7 +647,7 @@ def test_nfs():
 def import_config():
     """업로드된 설정 파일 가져오기"""
     try:
-        logging.info("설정 파일 업로드 요청 처리 중...")
+        logging.debug("설정 파일 업로드 요청 처리 중...")
         
         # 파일이 업로드되었는지 확인
         if 'config_file' not in request.files:
@@ -743,11 +742,11 @@ def import_config():
             try:
                 with open(temp_config_path, 'w') as f:
                     yaml.dump(yaml_config, f, allow_unicode=True, default_flow_style=False)
-                logging.info(f"가져온 설정을 임시 파일에 저장했습니다: {temp_config_path}")
+                logging.debug(f"가져온 설정을 임시 파일에 저장했습니다: {temp_config_path}")
             except Exception as e:
                 logging.error(f"임시 설정 파일 저장 실패: {e}")
             
-            logging.info("설정 파일 가져오기 성공")
+            logging.debug("설정 파일 가져오기 성공")
             return jsonify({
                 "status": "success",
                 "message": "설정 파일을 성공적으로 가져왔습니다. 폼에 값이 자동으로 채워졌습니다.",
@@ -808,7 +807,7 @@ def export_config():
         )
         response.headers["Content-Disposition"] = f"attachment; filename={filename}"
         
-        logging.info("설정 파일 내보내기 성공")
+        logging.debug("설정 파일 내보내기 성공")
         return response
         
     except Exception as e:
@@ -878,7 +877,6 @@ def run_landing_page():
 def run_flask_app():
     """Flask 웹 애플리케이션 실행"""
     try:
-        logging.info("Flask 웹 서버 시작 중...")
         host = '0.0.0.0'
         port = int(os.environ.get('FLASK_PORT', 5000))
         logging.info(f"웹 서버 바인딩: {host}:{port}")
@@ -921,7 +919,7 @@ def run_flask_app():
 
 # 앱 재시작을 위한 함수
 def _delayed_restart():
-    time.sleep(2)  # 응답을 보낼 시간을 주기 위해 잠시 대기
+    time.sleep(1)  # 응답을 보낼 시간을 주기 위해 짧게 대기 (2초에서 1초로 줄임)
     logging.info("──────────────────────────────────────────────────")
     logging.info("앱 재시작 실행 중...")
     logging.info("──────────────────────────────────────────────────")
@@ -931,154 +929,62 @@ def _delayed_restart():
         
         try:
             flask_port = int(os.environ.get('FLASK_PORT', 5000))
-            # lsof 명령이 있는지 확인
-            lsof_exists = subprocess.run(
-                ["which", "lsof"], 
-                capture_output=True,
-                check=False
-            ).returncode == 0
+            # 현재 PID 확인
+            current_pid = os.getpid()
             
-            if lsof_exists:
-                # lsof로 포트 사용 프로세스 찾기
+            # 직접 Python 프로세스 종료 (더 효율적인 방법)
+            try:
+                # 현재 PID를 제외한 gshare_manager.py 관련 프로세스 찾기
                 result = subprocess.run(
-                    ["lsof", "-i", f":{flask_port}"],
-                    capture_output=True, 
+                    ["ps", "-ef"], 
+                    capture_output=True,
                     text=True,
                     check=False
                 )
-                if result.stdout:
-                    processes = result.stdout.strip().split('\n')[1:]  # 헤더 제외
-                    for process in processes:
-                        parts = process.split()
+                
+                killed = False
+                for line in result.stdout.split('\n'):
+                    if 'python' in line and 'gshare_manager.py' in line:
+                        parts = line.split()
                         if len(parts) > 1:
                             pid = parts[1]
-                            try:
-                                logging.info(f"포트 {flask_port} 사용 프로세스(PID: {pid}) 종료 시도...")
-                                subprocess.run(["kill", pid], check=False)
-                            except Exception as e:
-                                logging.warning(f"프로세스 종료 중 오류: {e}")
-            else:
-                # lsof가 없는 경우 대체 명령 사용
-                logging.info("lsof 명령이 없습니다. 대체 명령 사용...")
-                try:
-                    # ss 또는 netstat으로 시도
-                    ss_exists = subprocess.run(
-                        ["which", "ss"], 
-                        capture_output=True,
-                        check=False
-                    ).returncode == 0
-                    
-                    if ss_exists:
-                        # ss 명령 사용
-                        result = subprocess.run(
-                            ["ss", "-tunlp", f"sport = {flask_port}"],
-                            capture_output=True,
-                            text=True,
-                            check=False
-                        )
-                        if "pid=" in result.stdout:
-                            # pid 추출 (형식: pid=12345,...)
-                            import re
-                            pid_matches = re.findall(r'pid=(\d+)', result.stdout)
-                            for pid in pid_matches:
-                                logging.info(f"ss로 찾은 포트 {flask_port} 사용 프로세스(PID: {pid}) 종료 시도...")
-                                subprocess.run(["kill", pid], check=False)
-                    else:
-                        # netstat 시도
-                        netstat_exists = subprocess.run(
-                            ["which", "netstat"], 
-                            capture_output=True,
-                            check=False
-                        ).returncode == 0
-                        
-                        if netstat_exists:
-                            result = subprocess.run(
-                                ["netstat", "-tunlp"],
-                                capture_output=True,
-                                text=True,
-                                check=False
-                            )
-                            for line in result.stdout.split('\n'):
-                                if f":{flask_port}" in line and "LISTEN" in line:
-                                    # PID 추출 (형식: PID/프로그램명)
-                                    parts = line.split()
-                                    for part in parts:
-                                        if '/' in part:
-                                            pid = part.split('/')[0]
-                                            logging.info(f"netstat으로 찾은 포트 {flask_port} 사용 프로세스(PID: {pid}) 종료 시도...")
-                                            subprocess.run(["kill", pid], check=False)
-                except Exception as e:
-                    logging.warning(f"대체 명령 사용 중 오류: {e}")
-                    
-            # Python 기반 방식으로 포트 사용 여부 확인
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
-                result = sock.connect_ex(('127.0.0.1', flask_port))
-                sock.close()
+                            if pid and pid.isdigit() and int(pid) != current_pid:
+                                logging.debug(f"Python 프로세스(PID: {pid}) 종료 시도...")
+                                # SIGTERM 대신 SIGKILL 사용 (강제 종료)
+                                subprocess.run(["kill", "-9", pid], check=False)
+                                killed = True
                 
-                if result == 0:  # 포트가 열려 있음
-                    logging.warning(f"포트 {flask_port}이 여전히 사용 중입니다. python 프로세스 종료 시도...")
-                    # 현재 PID 제외한 모든 Python 프로세스 종료 시도
-                    current_pid = os.getpid()
-                    try:
-                        result = subprocess.run(
-                            ["ps", "-ef"], 
-                            capture_output=True,
-                            text=True,
-                            check=False
-                        )
-                        for line in result.stdout.split('\n'):
-                            if 'python' in line and 'gshare_manager.py' in line:
-                                parts = line.split()
-                                if len(parts) > 1:
-                                    pid = parts[1]
-                                    if pid and pid.isdigit() and int(pid) != current_pid:
-                                        logging.info(f"다른 Python 프로세스(PID: {pid}) 종료 시도...")
-                                        subprocess.run(["kill", pid], check=False)
-                    except Exception as e:
-                        logging.warning(f"Python 프로세스 종료 시도 중 오류: {e}")
+                if killed:
+                    # 프로세스 종료 확인을 위해 짧게 대기
+                    time.sleep(1)
             except Exception as e:
-                logging.warning(f"소켓 확인 중 오류: {e}")
+                logging.warning(f"Python 프로세스 종료 시도 중 오류: {e}")
+            
+            # 빠른 소켓 확인 및 포트 변경 결정
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.5)  # 빠른 타임아웃
+            result = sock.connect_ex(('127.0.0.1', flask_port))
+            sock.close()
+            
+            # 포트가 여전히 사용 중이면 다른 포트 사용
+            if result == 0:
+                logging.warning(f"포트 {flask_port}이 여전히 사용 중입니다. 다른 포트로 변경합니다.")
+                flask_port += 1
+                os.environ['FLASK_PORT'] = str(flask_port)
+            else:
+                logging.debug(f"포트 {flask_port}이 사용 가능합니다.")
                 
-            # 프로세스가 종료될 때까지 잠시 대기
-            time.sleep(3)
         except Exception as e:
             logging.warning(f"프로세스 확인/종료 중 오류: {e}")
         
         main_script = os.path.join('/app', 'gshare_manager.py')
         
-        logging.info(f"앱 재시작 실행 명령: {sys.executable} {main_script}")
+        logging.debug(f"앱 재시작 실행 명령: {sys.executable} {main_script}")
         
-        # Python 인터프리터로 메인 스크립트 실행 - 환경 변수 설정 제거
+        # Python 인터프리터로 메인 스크립트 실행
         env = os.environ.copy()
         
-        # 재시작 전에 잠시 대기하여 포트가 해제될 수 있도록 함
-        time.sleep(3)
-        
-        # 추가 안전장치: 포트가 여전히 사용 중인지 확인
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1)
-            result = sock.connect_ex(('0.0.0.0', flask_port))
-            sock.close()
-            if result == 0:  # 포트가 열려 있음 (사용 중)
-                logging.warning(f"포트 {flask_port}이 여전히 사용 중입니다. 추가 대기...")
-                time.sleep(5)  # 추가 대기
-                
-                # 비상 수단: 포트가 계속 사용 중이면 강제로 다른 포트 사용
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
-                result = sock.connect_ex(('0.0.0.0', flask_port))
-                sock.close()
-                
-                if result == 0:  # 여전히 사용 중
-                    logging.warning(f"포트 {flask_port}이 계속 사용 중입니다. 환경 변수로 다른 포트 설정...")
-                    env['FLASK_PORT'] = str(flask_port + 1)  # 다른 포트로 설정
-        except Exception as e:
-            logging.warning(f"포트 확인 중 오류: {e}")
-        
-        # -u 옵션을 추가하여 버퍼링 없이 로그 출력
+        # 새 프로세스 시작
         subprocess.Popen(
             [sys.executable, "-u", main_script], 
             stdout=subprocess.PIPE, 
@@ -1089,14 +995,14 @@ def _delayed_restart():
         
         # 현재 프로세스는 잠시 후 종료
         def exit_current_process():
-            # 종료 전에 더 오래 대기 (포트 해제를 위해)
-            time.sleep(5)  # 5초로 증가
+            # 종료 전에 짧게 대기 (새 프로세스가 시작할 시간 부여)
+            time.sleep(2)  # 5초에서 2초로 단축
             
             # 재시작 완료 후 재시작 플래그 파일 삭제
             try:
                 if os.path.exists(restart_flag_path):
                     os.remove(restart_flag_path)
-                    logging.info("재시작 완료 플래그 파일 삭제됨")
+                    logging.debug("재시작 완료 플래그 파일 삭제됨")
             except Exception as e:
                 logging.error(f"재시작 플래그 파일 삭제 중 오류: {e}")
             
@@ -1115,6 +1021,6 @@ def _delayed_restart():
         try:
             if os.path.exists(restart_flag_path):
                 os.remove(restart_flag_path)
-                logging.info("오류 발생으로 재시작 플래그 파일 삭제됨")
+                logging.debug("오류 발생으로 재시작 플래그 파일 삭제됨")
         except Exception as ex:
             logging.error(f"재시작 플래그 파일 삭제 중 오류: {ex}")
