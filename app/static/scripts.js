@@ -598,9 +598,7 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true) {
         for (const entry of foldersArray) {
             const folder = Array.isArray(sortedFolders) ? entry[0] : entry[0];
             const info = Array.isArray(sortedFolders) ? entry[1] : entry[1];
-            
-            console.log('폴더 항목 처리 중:', folder, info);
-            
+                        
             foldersHtml += `
                 <div class="flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50">
                     <div class="flex-1 overflow-hidden">
