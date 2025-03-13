@@ -486,25 +486,39 @@ function shutdownVM() {
 }
 
 // 폴더 목록 HTML 생성 함수 추가
-function generateFolderListHtml(sortedFolders) {
+function generateFolderListHtml(sortedFolders, showToggleButtons = true) {
     let foldersHtml = '';
-    for (const [folder, info] of sortedFolders) {
+    
+    // sortedFolders가 객체인 경우 배열로 변환하고 정렬
+    const foldersArray = Array.isArray(sortedFolders) 
+        ? sortedFolders 
+        : Object.entries(sortedFolders).sort((a, b) => {
+            if (a[1].is_mounted !== b[1].is_mounted) {
+                return b[1].is_mounted ? 1 : -1;
+            }
+            return new Date(b[1].mtime) - new Date(a[1].mtime);
+        });
+    
+    for (const entry of foldersArray) {
+        const folder = Array.isArray(sortedFolders) ? entry[0] : entry[0];
+        const info = Array.isArray(sortedFolders) ? entry[1] : entry[1];
+        
         foldersHtml += `
-            <div class="flex justify-between items-center bg-white rounded p-2 border ${info.is_mounted ? 'border-green-200' : 'border-red-200'} hover:bg-gray-50 transition-colors duration-200">
-                <div class="flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full ${info.is_mounted ? 'bg-green-500' : 'bg-red-500'}"></span>
-                    <div class="flex flex-col">
-                        <span class="text-sm text-gray-700">${folder}</span>
-                        <span class="text-xs text-gray-500 toggle-text">
-                            <span class="readable-time">${get_time_ago(info.mtime)}</span>
-                            <span class="time-string hidden">${info.mtime}</span>
-                        </span>
+            <div class="flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50">
+                <div class="flex-1 overflow-hidden">
+                    <div class="text-sm mb-1 font-medium text-gray-800 truncate">${folder}</div>
+                    <div class="flex items-center toggle-text text-xs text-gray-500">
+                        <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                        </svg>
+                        <span class="readable-time">${get_time_ago(info.mtime)}</span>
+                        <span class="hidden time-string">${info.mtime}</span>
                     </div>
                 </div>
-                <button onclick="toggleMount('${folder}')" 
+                ${showToggleButtons ? `<button onclick="toggleMount('${folder}')" 
                     class="text-xs px-2 py-1 rounded ${info.is_mounted ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-green-50 text-green-700 hover:bg-green-100'} transition-colors duration-200">
                     ${info.is_mounted ? '마운트 해제' : '마운트'}
-                </button>
+                </button>` : ''}
             </div>
         `;
     }
@@ -597,37 +611,76 @@ function updateFolderState() {
 
 // 폴더 목록만 업데이트하는 함수로 분리
 function updateFolderList(folders) {
-    const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
-    if (!monitoredFoldersContainer) return;
+    // 폴더 목록이 비어있는 경우
+    if (!folders || Object.keys(folders).length === 0) {
+        document.getElementById('monitoredFoldersContainer').innerHTML = `
+            <div class="text-center py-4">
+                <p class="text-sm text-gray-600">감시 중인 폴더가 없습니다.</p>
+            </div>
+        `;
+        document.getElementById('smbFoldersContainer').innerHTML = `
+            <div class="text-center py-4">
+                <p class="text-sm text-gray-600">공유 중인 폴더가 없습니다.</p>
+            </div>
+        `;
+        return;
+    }
+
+    // 로딩 요소 숨기기
+    const loadingElement = document.getElementById('loadingFolders');
+    if (loadingElement) {
+        loadingElement.style.display = 'none';
+    }
     
-    try {
-        // 정렬 작업 최적화
-        const sortedFolders = Object.entries(folders)
-            .sort((a, b) => {
-                // 간소화된 정렬 로직
-                if (a[1].is_mounted !== b[1].is_mounted) {
-                    return b[1].is_mounted ? 1 : -1;
-                }
-                return new Date(b[1].mtime) - new Date(a[1].mtime);
-            });
-        
-        // HTML 생성
-        monitoredFoldersContainer.innerHTML = generateFolderListHtml(sortedFolders);
+    const loadingSmbElement = document.getElementById('loadingSmbFolders');
+    if (loadingSmbElement) {
+        loadingSmbElement.style.display = 'none';
+    }
+
+    // 모니터링 중인 모든 폴더 표시
+    const foldersContainer = document.getElementById('monitoredFoldersContainer');
+    if (foldersContainer) {
+        foldersContainer.innerHTML = generateFolderListHtml(folders);
         
         // 필요한 이벤트 리스너 추가
-        monitoredFoldersContainer.querySelectorAll('.toggle-text').forEach(el => {
+        foldersContainer.querySelectorAll('.toggle-text').forEach(el => {
             el.addEventListener('click', () => {
                 el.querySelector('.time-string').classList.toggle('hidden');
                 el.querySelector('.readable-time').classList.toggle('hidden');
             });
         });
+    }
+    
+    // SMB로 공유 중인 폴더만 필터링하여 표시
+    const smbFoldersContainer = document.getElementById('smbFoldersContainer');
+    if (smbFoldersContainer) {
+        // 마운트된 폴더만 필터링
+        const mountedFolders = Object.fromEntries(
+            Object.entries(folders).filter(([_, info]) => info.is_mounted)
+        );
         
-        // 상태 표시기 숨기기
-        const statusIndicator = document.querySelector('.status-update-indicator');
-        if (statusIndicator) {
-            statusIndicator.classList.add('hidden');
+        if (Object.keys(mountedFolders).length === 0) {
+            smbFoldersContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <p class="text-sm text-gray-600">현재 SMB로 공유 중인 폴더가 없습니다.</p>
+                </div>
+            `;
+        } else {
+            smbFoldersContainer.innerHTML = generateFolderListHtml(mountedFolders, false);
+            
+            // SMB 폴더 리스트에도 이벤트 리스너 추가
+            smbFoldersContainer.querySelectorAll('.toggle-text').forEach(el => {
+                el.addEventListener('click', () => {
+                    el.querySelector('.time-string').classList.toggle('hidden');
+                    el.querySelector('.readable-time').classList.toggle('hidden');
+                });
+            });
         }
-    } catch (e) {
-        console.error('폴더 목록 업데이트 오류:', e);
+    }
+    
+    // 상태 표시기 숨기기
+    const statusIndicator = document.querySelector('.status-update-indicator');
+    if (statusIndicator) {
+        statusIndicator.classList.add('hidden');
     }
 }
