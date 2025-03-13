@@ -12,3 +12,4 @@ config.yaml
 config.yaml.secret
 .init_complete
 .cursor/rules/custom-rule.mdc
+config/.last_shutdown

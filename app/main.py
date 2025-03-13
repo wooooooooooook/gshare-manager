@@ -13,7 +13,7 @@ import sys
 import atexit
 from config import GshareConfig #type: ignore
 from proxmox_api import ProxmoxAPI
-from web_server import init_server, run_flask_app, run_landing_page
+from web_server import GshareWebServer
 from smb_manager import SMBManager
 import yaml
 import traceback
@@ -702,6 +702,7 @@ if __name__ == "__main__":
     # 보안 경고 억제
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+    gshare_web_server = GshareWebServer()
     try:
         # 초기화 완료 플래그 경로
         init_flag_path = '/config/.init_complete'
@@ -712,8 +713,8 @@ if __name__ == "__main__":
         # 설정이 완료되지 않았으면 랜딩 페이지로
         if not setup_completed:
             logging.info("랜딩 페이지 진입")
-            # 랜딩 페이지 실행
-            run_landing_page()
+            # 랜딩 페이지 실행            
+            gshare_web_server.run_landing_page()
             sys.exit(0)
                 
         try:
@@ -770,8 +771,11 @@ if __name__ == "__main__":
             # Flask 앱 초기화 및 상태 전달
             logging.debug("웹 서버 초기화 중...")
             try:
-                current_state = gshare_manager._update_state()
-                init_server(current_state, gshare_manager, config)
+                # 초기 상태 업데이트
+                gshare_manager._update_state()
+                gshare_web_server.set_config(config)
+                gshare_web_server.set_manager(gshare_manager)
+                gshare_web_server.init_server()
                 logging.debug("웹 서버 초기화 완료")
             except Exception as server_error:
                 logging.error(f"웹 서버 초기화 중 오류 발생: {server_error}")
@@ -781,7 +785,7 @@ if __name__ == "__main__":
             # Flask 스레드 시작
             logging.debug("Flask 웹 서버 시작 중...")
             try:
-                flask_thread = threading.Thread(target=run_flask_app)
+                flask_thread = threading.Thread(target=gshare_web_server.run_flask_app)
                 flask_thread.daemon = True
                 flask_thread.start()
                 logging.debug("Flask 웹 서버 시작 완료")

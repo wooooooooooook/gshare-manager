@@ -39,4 +39,4 @@ ENV TZ=Asia/Seoul
 VOLUME ["/config"]
 
 # 실행 명령
-CMD ["python", "gshare_manager.py"] 
+CMD ["python", "main.py"] 
