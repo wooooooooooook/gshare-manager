@@ -11,7 +11,6 @@ import pytz
 import yaml
 import socket
 import tempfile
-from gshare_manager import GShareManager, State
 from config import GshareConfig  # type: ignore
 import time
 import traceback
@@ -25,9 +24,9 @@ log = logging.getLogger('werkzeug')
 log.disabled = True
 
 # 전역 변수로 상태와 관리자 객체 선언
-current_state: State | None = None
-gshare_manager: GShareManager | None = None
-config: GshareConfig | None = None
+current_state = None
+gshare_manager = None
+config = None
 is_setup_complete = False
 
 log_file = os.path.join('/logs', 'gshare_manager.log')
@@ -42,6 +41,10 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler()]
 )
+
+# urllib3와 requests 라이브러리의 로깅 레벨 조정
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('requests').setLevel(logging.WARNING)
 
 logging.debug(f"웹 서버 초기화 - 로그 레벨: {log_level_str}")
 
@@ -73,6 +76,7 @@ def init_server(state, manager, app_config: GshareConfig):
 
 def _get_default_state():
     """State가 초기화되지 않았을 때 사용할 기본값을 반환"""
+    # 함수 내부에서 필요할 때만 임포트
     from gshare_manager import State
     
     # 기본 시간대를 'Asia/Seoul'로 설정
@@ -418,7 +422,7 @@ def toggle_mount(folder):
         if current_state is None or gshare_manager is None:
             return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
 
-        if folder in gshare_manager.folder_monitor.active_links:
+        if folder in gshare_manager.smb_manager.active_links:
             # 마운트 해제
             if gshare_manager.smb_manager.remove_symlink(folder):
                 # 상태 즉시 업데이트
