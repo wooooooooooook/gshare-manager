@@ -291,11 +291,12 @@
                             <label for="smb_share_name">SMB 공유 이름</label>
                             <input type="text" class="form-control" id="smb_share_name" name="SMB_SHARE_NAME" required value="{{ form_data.get('SMB_SHARE_NAME', 'gshare') }}">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group hidden">
                             <label for="smb_port">SMB 포트</label>
                             <input type="number" class="form-control" id="smb_port" name="SMB_PORT" required min="1" max="65535" value="{{ form_data.get('SMB_PORT', 445) }}">
                             <small class="form-text text-muted">기본 SMB 포트는 445입니다. 포트 충돌이 있을 경우 변경하세요.</small>
                         </div>
+                        
                         <div class="form-group hidden">
                             <label for="smb_comment">SMB 설명</label>
                             <input type="text" class="form-control" id="smb_comment" name="SMB_COMMENT" value="{{ form_data.get('SMB_COMMENT', 'GShare SMB 공유') }}">

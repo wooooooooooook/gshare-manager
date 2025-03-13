@@ -6,12 +6,14 @@ services:
     container_name: gshare_manager
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "${FLASK_PORT:-5000}:${FLASK_PORT:-5000}"
+      - "${SMB_PORT:-1445}:445"
     volumes:
       - ./config:/config
     environment:
       - TZ=Asia/Seoul
       - FLASK_PORT=5000
+      - SMB_PORT=1445
       - LOG_LEVEL=DEBUG
     privileged: true
     cap_add:
