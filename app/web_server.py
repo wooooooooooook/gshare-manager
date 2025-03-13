@@ -52,10 +52,6 @@ class GshareWebServer:
         log = logging.getLogger('werkzeug')
         log.disabled = True
 
-        # urllib3와 requests 라이브러리의 로깅 레벨 조정
-        logging.getLogger('urllib3').setLevel(logging.WARNING)
-        logging.getLogger('requests').setLevel(logging.WARNING)
-
     def init_server(self):
         """웹서버 초기화"""
         try:
@@ -661,9 +657,47 @@ class GshareWebServer:
                     "message": "NFS 경로가 제공되지 않았습니다."
                 }), 400
 
+            # 먼저 이미 마운트되어 있는지 확인
+            mount_check = subprocess.run(
+                ['mount', '-t', 'nfs'], capture_output=True, text=True)
+
+            # 이미 마운트된 경우 해당 마운트 지점 확인
+            if nfs_path in mount_check.stdout:
+                logging.debug(f"이미 마운트된 NFS 경로입니다: {nfs_path}")
+
+                # 마운트 포인트 찾기
+                mount_lines = mount_check.stdout.strip().split('\n')
+                existing_mount_point = None
+
+                for line in mount_lines:
+                    if nfs_path in line:
+                        parts = line.split(' on ')
+                        if len(parts) > 1:
+                            mount_point = parts[1].split(' ')[0]
+                            existing_mount_point = mount_point
+                            break
+
+                if existing_mount_point:
+                    logging.debug(f"기존 마운트 지점에서 테스트: {existing_mount_point}")
+                    try:
+                        # 기존 마운트 지점에서 읽기 테스트
+                        ls_result = subprocess.run(
+                            f"ls {existing_mount_point}", shell=True, check=True, capture_output=True, text=True)
+                        return jsonify({
+                            "status": "success",
+                            "message": f"NFS 경로({nfs_path})가 이미 {existing_mount_point}에 마운트되어 있으며, 정상 작동합니다."
+                        })
+                    except Exception as e:
+                        return jsonify({
+                            "status": "warning",
+                            "message": f"NFS 경로({nfs_path})가 이미 {existing_mount_point}에 마운트되어 있으나, 읽기 권한이 없습니다: {str(e)}"
+                        })
+
+            # 기존 마운트가 없거나 찾지 못한 경우 새로 테스트
             with tempfile.TemporaryDirectory() as temp_mount:
                 try:
-                    mount_cmd = f"mount -t nfs -o nolock,vers=3,soft,timeo=100 {nfs_path} {temp_mount} {temp_mount}"
+                    # 마운트 명령 수정 (temp_mount가 두 번 반복되는 오류 수정)
+                    mount_cmd = f"mount -t nfs -o nolock,vers=3,soft,timeo=100 {nfs_path} {temp_mount}"
                     result = subprocess.run(
                         mount_cmd, shell=True, capture_output=True, text=True, timeout=60)
 

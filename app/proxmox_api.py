@@ -1,7 +1,8 @@
 import logging
-import requests
+import requests  # type: ignore
 from typing import Optional
-from config import GshareConfig   # type: ignore
+from config import GshareConfig  # type: ignore
+
 
 class ProxmoxAPI:
     def __init__(self, config: GshareConfig):
@@ -9,10 +10,7 @@ class ProxmoxAPI:
         self.session = requests.Session()
         self.session.verify = False
         self._set_token_auth()
-        # urllib3와 requests 라이브러리의 로깅 레벨 조정
-        logging.getLogger('urllib3').setLevel(logging.WARNING)
-        logging.getLogger('requests').setLevel(logging.WARNING)
-        
+
     def _set_token_auth(self) -> None:
         # API 토큰을 사용하여 인증 헤더 설정
         self.session.headers.update({
@@ -32,8 +30,8 @@ class ProxmoxAPI:
             return result == "running"
         except Exception as e:
             logging.error(f"VM 상태 확인 실패: {e}")
-            return False    
-    
+            return False
+
     def get_vm_uptime(self) -> Optional[float]:
         try:
             response = self.session.get(
@@ -70,7 +68,7 @@ class ProxmoxAPI:
             )
             response.raise_for_status()
             logging.debug(f"VM 시작 응답 받음")
-                            
+
             return True
         except Exception as e:
-            return False 
+            return False

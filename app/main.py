@@ -19,6 +19,9 @@ import yaml  # type: ignore
 import traceback
 import urllib3  # type: ignore
 
+# SSL 경고 메시지 비활성화
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 # 전역 변수로 상태와 관리자 객체 선언
 gshare_manager = None
 
@@ -642,6 +645,15 @@ def update_log_level():
     for logger_name in logging.root.manager.loggerDict:
         logging.getLogger(logger_name).setLevel(getattr(logging, log_level))
 
+    # urllib3와 requests 라이브러리의 로깅 레벨은 항상 WARNING으로 유지
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
+    logging.getLogger('urllib3.connection').setLevel(logging.WARNING)
+    logging.getLogger('urllib3.poolmanager').setLevel(logging.WARNING)
+    logging.getLogger('urllib3.util.retry').setLevel(logging.WARNING)
+    logging.getLogger('requests').setLevel(logging.WARNING)
+    logging.getLogger('requests.packages.urllib3').setLevel(logging.WARNING)
+
 
 def update_timezone(timezone='Asia/Seoul'):
     """로깅 시간대 설정 업데이트"""
@@ -732,9 +744,6 @@ if __name__ == "__main__":
     logging.info("──────────────────────────────────────────────────")
     logging.info("GShare 애플리케이션 시작")
     logging.info("──────────────────────────────────────────────────")
-
-    # 보안 경고 억제
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     gshare_web_server = GshareWebServer()
     try:
