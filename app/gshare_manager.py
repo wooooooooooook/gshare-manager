@@ -408,14 +408,18 @@ class GShareManager:
     def _update_state(self) -> State:
         try:
             global current_state
-            current_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
+            # 매번 호출 시 현재 시간을 새로 계산
+            current_time = datetime.now(pytz.timezone(self.config.TIMEZONE))
+            current_time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
+            logging.debug(f"상태 업데이트 - 현재 시간: {current_time_str}, 타임스탬프: {current_time.timestamp()}")
+            
             vm_running = self.proxmox_api.is_vm_running()
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
             uptime = self.proxmox_api.get_vm_uptime()
             uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
 
             current_state = State(
-                last_check_time=current_time,
+                last_check_time=current_time_str,
                 vm_running=vm_running,
                 cpu_usage=round(cpu_usage, 2),
                 last_action=self.last_action,
@@ -432,8 +436,10 @@ class GShareManager:
             return current_state
         except Exception as e:
             logging.error(f"상태 업데이트 실패: {e}")
+            # 현재 시간을 다시 계산
+            current_time_str = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
             return State(
-                last_check_time=current_time,
+                last_check_time=current_time_str,
                 vm_running=False,
                 cpu_usage=0.0,
                 cpu_threshold=0.0,
@@ -449,15 +455,14 @@ class GShareManager:
 
     def monitor(self) -> None:
         last_vm_status = None  # VM 상태 변화 감지를 위한 변수
-        
+        count=0        
         while True:
             try:
                 update_log_level()
-                logging.debug("모니터링 루프 시작")
-                
+                logging.debug(f"모니터링 루프 Count:{count}")
+                count+=1
                 # VM 상태 확인
-                current_vm_status = self.proxmox_api.is_vm_running()
-                
+                current_vm_status = self.proxmox_api.is_vm_running()                
                 
                 # VM 상태가 변경되었고, 현재 종료 상태인 경우
                 if last_vm_status is not None and last_vm_status != current_vm_status and not current_vm_status:
@@ -506,6 +511,8 @@ class GShareManager:
                     # 상태 업데이트 (웹서버용)
                     global current_state
                     current_state = self._update_state()
+                    # 상태 업데이트 로깅 추가
+                    logging.debug(f"상태 업데이트 완료 - last_check_time: {current_state.last_check_time}")
                 except Exception as e:
                     logging.error(f"상태 업데이트 중 오류: {e}")
 
@@ -694,6 +701,10 @@ if __name__ == "__main__":
     
     # 보안 경고 억제
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    # urllib3와 requests 라이브러리의 로깅 레벨 조정
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('requests').setLevel(logging.WARNING)
+
     try:
         # 초기화 완료 플래그 경로
         init_flag_path = '/config/.init_complete'
@@ -784,7 +795,7 @@ if __name__ == "__main__":
                 raise
             
             # 모니터링 시작
-            logging.info("모니터링 시작...")
+            logging.info(f"모니터링 시작... 간격: {config.CHECK_INTERVAL}초")
             gshare_manager.monitor()
             
         except Exception as e:

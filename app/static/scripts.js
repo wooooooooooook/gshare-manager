@@ -58,6 +58,20 @@ let autoUpdateLog = true;
 let logHovered = false;
 let autoScrollLog = true; // 자동 스크롤 상태 변수 추가
 
+// state를 콘솔에 로깅하는 함수
+function logStateToConsole(state) {
+    console.log('=== State 업데이트 ===');
+    console.log(`시간: ${new Date().toLocaleString()}`);
+    console.log(`VM 상태: ${state.vm_status}`);
+    console.log(`SMB 상태: ${state.smb_status}`);
+    console.log(`NFS 상태: ${state.nfs_status}`);
+    console.log(`CPU 사용률: ${state.cpu_usage}%`);
+    console.log(`Low CPU 카운트: ${state.low_cpu_count}/${state.threshold_count}`);
+    console.log(`업타임: ${state.uptime}`);
+    console.log(`마지막 체크 시간: ${state.last_check_time}`);
+    console.log('===================');
+}
+
 // 프로그레스 바 업데이트
 function updateProgressBar() {
     const progressBar = document.querySelector('.last-check-progress');
@@ -188,6 +202,9 @@ window.onload = function () {
         fetch('/update_state')
             .then(response => response.json())
             .then(data => {
+                // state 업데이트를 콘솔에 로깅
+                logStateToConsole(data);
+                
                 // check_interval 업데이트
                 if (data.check_interval) {
                     checkInterval = data.check_interval;
@@ -406,6 +423,15 @@ function startVM() {
             .then(data => {
                 if (data.status === 'success') {
                     statusText.textContent = data.message;
+                    
+                    // VM 시작 후 즉시 state를 가져와서 콘솔에 로깅
+                    console.log('=== VM 시작 요청 성공 ===');
+                    fetch('/update_state')
+                        .then(response => response.json())
+                        .then(stateData => {
+                            logStateToConsole(stateData);
+                        });
+                    
                     setTimeout(() => {
                         statusDiv.classList.add('hidden');
                     }, 3000);
@@ -434,6 +460,15 @@ function shutdownVM() {
             .then(data => {
                 if (data.status === 'success') {
                     statusText.textContent = data.message;
+                    
+                    // VM 종료 후 즉시 state를 가져와서 콘솔에 로깅
+                    console.log('=== VM 종료 요청 성공 ===');
+                    fetch('/update_state')
+                        .then(response => response.json())
+                        .then(stateData => {
+                            logStateToConsole(stateData);
+                        });
+                    
                     setTimeout(() => {
                         statusDiv.classList.add('hidden');
                     }, 3000);
@@ -491,6 +526,14 @@ function toggleMount(folder) {
         .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
+                // 폴더 마운트 상태 변경 후 로깅
+                console.log(`=== 폴더 '${folder}' 마운트 상태 변경 성공 ===`);
+                fetch('/update_state')
+                    .then(response => response.json())
+                    .then(stateData => {
+                        logStateToConsole(stateData);
+                    });
+                
                 // 별도 함수로 분리하여 상태 업데이트 - 블록 방지
                 updateFolderState();
             } else {

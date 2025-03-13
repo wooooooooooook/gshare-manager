@@ -41,6 +41,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler()]
 )
+
 logging.debug(f"웹 서버 초기화 - 로그 레벨: {log_level_str}")
 
 def init_server(state, manager, app_config: GshareConfig):
