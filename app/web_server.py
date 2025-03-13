@@ -483,13 +483,21 @@ class GshareWebServer:
             if self.manager is None:
                 return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
 
-            if folder in self.manager.folder_monitor.active_links:
+            # 실제 심볼릭 링크가 존재하는지 확인
+            links_dir = self.manager.smb_manager.links_dir
+            symlink_path = os.path.join(links_dir, folder)
+            is_mounted = os.path.exists(
+                symlink_path) and os.path.islink(symlink_path)
+
+            if is_mounted:
+                # 마운트 해제
                 if self.manager.smb_manager.remove_symlink(folder):
                     self.manager._update_state()
                     return jsonify({"status": "success", "message": f"{folder} 마운트가 해제되었습니다."})
                 else:
                     return jsonify({"status": "error", "message": f"{folder} 마운트 해제 실패"}), 500
             else:
+                # 마운트 활성화
                 if self.manager.smb_manager.create_symlink(folder) and self.manager.smb_manager.activate_smb_share():
                     self.manager._update_state()
                     return jsonify({"status": "success", "message": f"{folder} 마운트가 활성화되었습니다."})

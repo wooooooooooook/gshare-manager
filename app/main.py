@@ -55,7 +55,6 @@ class FolderMonitor:
         self.config = config
         self.proxmox_api = proxmox_api
         self.previous_mtimes = {}  # 각 서브폴더별 이전 수정 시간을 저장
-        self.active_links = set()  # 현재 활성화된 심볼릭 링크 목록
         self.last_shutdown_time = last_shutdown_time  # VM 마지막 종료 시간
         self.nfs_uid, self.nfs_gid = self._get_nfs_ownership()
         logging.debug(
@@ -192,8 +191,7 @@ class FolderMonitor:
         for folder in deleted_folders:
             logging.info(f"폴더 삭제 감지: {folder}")
             # 심볼릭 링크 제거
-            if self.smb_manager.remove_symlink(folder):
-                self.active_links.discard(folder)
+            self.smb_manager.remove_symlink(folder)
             # 이전 수정 시간 기록에서 삭제
             if folder in self.previous_mtimes:
                 del self.previous_mtimes[folder]
@@ -219,8 +217,7 @@ class FolderMonitor:
                 self.previous_mtimes[path] = current_mtime
 
                 # 심볼릭 링크 생성
-                if self.smb_manager.create_symlink(path):
-                    self.active_links.add(path)
+                self.smb_manager.create_symlink(path)
 
                 # VM 마지막 시작 시간보다 수정 시간이 더 최근인 경우
                 if current_mtime > self.last_shutdown_time:
@@ -244,9 +241,16 @@ class FolderMonitor:
 
         monitored_folders = {}
         for path, mtime in folder_times:
+            # 실제 심볼릭 링크가 존재하는지 확인
+            # SMBManager에서 사용하는 링크 경로 값 사용
+            links_dir = self.smb_manager.links_dir
+            symlink_path = os.path.join(links_dir, path)
+            is_mounted = os.path.exists(
+                symlink_path) and os.path.islink(symlink_path)
+
             monitored_folders[path] = {
                 'mtime': datetime.fromtimestamp(mtime, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S'),
-                'is_mounted': path in self.active_links
+                'is_mounted': is_mounted
             }
 
         return monitored_folders
@@ -267,7 +271,6 @@ class FolderMonitor:
                     f"마지막 VM 종료({datetime.fromtimestamp(self.last_shutdown_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(recently_modified)}개의 링크를 생성합니다.")
                 for folder in recently_modified:
                     if self.smb_manager.create_symlink(folder):
-                        self.active_links.add(folder)
                         logging.debug(f"초기 링크 생성 성공: {folder}")
                     else:
                         logging.error(f"초기 링크 생성 실패: {folder}")
@@ -305,7 +308,6 @@ class FolderMonitor:
         """리소스 정리: 활성 심볼릭 링크 제거"""
         # 모든 링크 제거
         self.smb_manager.cleanup_all_symlinks()
-        self.active_links.clear()
         logging.debug("모든 리소스가 정리되었습니다.")
 
 
@@ -423,7 +425,6 @@ class GShareManager:
 
                 # VM 종료 시 모든 SMB 공유 비활성화
                 self.smb_manager.deactivate_smb_share()
-                self.folder_monitor.active_links.clear()
 
                 logging.info(f"종료 웹훅 전송 성공, 업타임: {uptime_str}")
             except Exception as e:
@@ -515,7 +516,6 @@ class GShareManager:
                 if last_vm_status is not None and last_vm_status != current_vm_status and not current_vm_status:
                     logging.info("VM이 종료되어 SMB 공유를 비활성화합니다.")
                     self.smb_manager.deactivate_smb_share()
-                    self.folder_monitor.active_links.clear()
 
                 last_vm_status = current_vm_status
 

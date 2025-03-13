@@ -487,32 +487,6 @@ class SMBManager:
             # 심볼릭 링크 생성
             os.symlink(source_path, link_path)
 
-            # 심볼릭 링크 권한 설정 (읽기 권한 추가)
-            try:
-                # 링크 자체의 권한 설정
-                os.chmod(link_path, 0o755)
-
-                # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
-                existing_group = None
-                try:
-                    group_info = subprocess.run(['getent', 'group', str(
-                        self.nfs_gid)], capture_output=True, text=True)
-                    if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
-                        existing_group = group_info.stdout.strip().split(':')[
-                            0]
-                except Exception as e:
-                    logging.error(f"그룹 확인 중 오류: {e}")
-
-                # 적절한 그룹 이름 결정
-                group_name = existing_group if existing_group else self.config.SMB_USERNAME
-
-                # 심볼릭 링크 소유권 설정
-                subprocess.run(
-                    ['chown', '-h', f"{self.config.SMB_USERNAME}:{group_name}", link_path], check=False)
-                logging.debug(f"심볼릭 링크 권한 설정 완료: {link_path}")
-            except Exception as e:
-                logging.warning(f"심볼릭 링크 권한 설정 실패 ({link_path}): {e}")
-
             logging.debug(f"심볼릭 링크 생성됨: {link_path} -> {source_path}")
             return True
         except Exception as e:
