@@ -4,22 +4,20 @@ import threading
 import subprocess
 import os
 import sys
-import argparse
 from dataclasses import asdict
 import requests
 from datetime import datetime
 import pytz
 import yaml
-import json
 import socket
 import tempfile
-from config import Config
+from config import GshareConfig  # type: ignore
 import time
 import traceback
 
 # Flask 로그 비활성화
 cli = sys.modules['flask.cli']
-cli.show_server_banner = lambda *x: None
+cli.show_server_banner = lambda *x: None  # type: ignore
 app = Flask(__name__)
 app.logger.disabled = True
 log = logging.getLogger('werkzeug')
@@ -45,7 +43,7 @@ logging.basicConfig(
 )
 logging.info(f"웹 서버 초기화 - 로그 레벨: {log_level_str}")
 
-def init_server(state, manager, app_config):
+def init_server(state, manager, app_config: GshareConfig):
     """웹서버 초기화"""
     try:
         logging.info("웹 서버 상태 초기화 시작")
@@ -81,6 +79,7 @@ def _get_default_state():
         last_check_time=current_time,
         vm_running=False,
         cpu_usage=0.0,
+        cpu_threshold=0.0,
         last_action="초기화되지 않음",
         low_cpu_count=0,
         threshold_count=0,
@@ -223,7 +222,7 @@ def save_config():
         }
         
         # 설정 파일 업데이트
-        Config.update_yaml_config(config_dict)
+        GshareConfig.update_yaml_config(config_dict)
         
         # config.yaml 파일의 수정 시간 확인
         try:
@@ -341,7 +340,7 @@ def set_log_level(level):
             config_data = {
                 'LOG_LEVEL': level.upper()
             }
-            Config.update_yaml_config(config_data)
+            GshareConfig.update_yaml_config(config_data)
         except Exception as e:
             logging.error(f"config.yaml에 로그 레벨 업데이트 실패: {str(e)}")
             # 파일 업데이트 실패해도 실시간 로깅 변경은 적용됨
@@ -384,8 +383,8 @@ def get_log_level():
 @app.route('/start_vm')
 def start_vm():
     try:
-        if current_state is None:
-            return jsonify({"status": "error", "message": "State not initialized."}), 404
+        if current_state is None or gshare_manager is None:
+            return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
 
         if current_state.vm_running:
             return jsonify({"status": "error", "message": "VM이 이미 실행 중입니다."}), 400
@@ -400,8 +399,8 @@ def start_vm():
 @app.route('/shutdown_vm')
 def shutdown_vm():
     try:
-        if current_state is None:
-            return jsonify({"status": "error", "message": "State not initialized."}), 404
+        if current_state is None or config is None:
+            return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
 
         if not current_state.vm_running:
             return jsonify({"status": "error", "message": "VM이 이미 종료되어 있습니다."}), 400
@@ -415,8 +414,8 @@ def shutdown_vm():
 @app.route('/toggle_mount/<path:folder>')
 def toggle_mount(folder):
     try:
-        if current_state is None:
-            return jsonify({"status": "error", "message": "State not initialized."}), 404
+        if current_state is None or gshare_manager is None:
+            return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
 
         if folder in gshare_manager.folder_monitor.active_links:
             # 마운트 해제
@@ -495,7 +494,7 @@ def update_config():
         data = request.json
         
         # YAML 설정 업데이트
-        Config.update_yaml_config(data)
+        GshareConfig.update_yaml_config(data)
         
         return jsonify({
             "status": "success",
@@ -504,8 +503,8 @@ def update_config():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/test_proxmox_api', methods=['POST'])
-def test_proxmox_api():
+@app.route('/test_proxmox_api', methods=['POST']) # type: ignore
+def test_proxmox_api(): 
     """Proxmox API 연결 테스트"""
     try:
         # POST 데이터에서 필요한 정보 추출
@@ -527,19 +526,18 @@ def test_proxmox_api():
         session.headers.update({
             "Authorization": f"PVEAPIToken={token_id}={secret}"
         })
-        session.timeout = (5, 10)  # (연결 타임아웃, 읽기 타임아웃)
         
         try:
             # API 버전 정보 가져오기 (기본 연결 테스트)
-            version_response = session.get(f"{proxmox_host}/version")
+            version_response = session.get(f"{proxmox_host}/version", timeout=(5, 10))
             version_response.raise_for_status()
             
             # 노드 정보 가져오기 (노드 존재 테스트)
-            node_response = session.get(f"{proxmox_host}/nodes/{node_name}")
+            node_response = session.get(f"{proxmox_host}/nodes/{node_name}", timeout=(5, 10))
             node_response.raise_for_status()
             
             # VM 상태 확인 (VM 접근 테스트)
-            vm_response = session.get(f"{proxmox_host}/nodes/{node_name}/qemu/{vm_id}/status/current")
+            vm_response = session.get(f"{proxmox_host}/nodes/{node_name}/qemu/{vm_id}/status/current", timeout=(5, 10))
             vm_response.raise_for_status()
             
             vm_status = vm_response.json()["data"]["status"]
@@ -663,7 +661,7 @@ def import_config():
         file = request.files['config_file']
         
         # 파일명 확인
-        if file.filename == '':
+        if file.filename == '' or file.filename is None:
             logging.warning("선택된 파일이 없습니다.")
             return jsonify({
                 "status": "error",

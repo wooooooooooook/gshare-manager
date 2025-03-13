@@ -4,7 +4,7 @@ import yaml
 from typing import Dict, Any, Optional
 
 @dataclass
-class Config:
+class GshareConfig:
     # Proxmox android 사용량 감시
     ## Proxmox API 호스트
     PROXMOX_HOST: str
@@ -61,7 +61,7 @@ class Config:
     NFS_PATH: Optional[str] = None
 
     @classmethod
-    def load_config(cls) -> 'Config':
+    def load_config(cls) -> 'GshareConfig':
         """설정 파일에서 설정 로드"""
         # Docker 환경을 가정하고 설정 파일 경로 고정
         config_path = '/config/config.yaml'
@@ -93,6 +93,28 @@ class Config:
         if 'credentials' not in yaml_config:
             yaml_config['credentials'] = {}
 
+        # 로그 레벨: 환경 변수에서 우선적으로 가져오고, 없으면 YAML에서 가져옴
+        env_log_level = os.environ.get('LOG_LEVEL')
+        yaml_log_level = yaml_config.get('log_level', 'INFO')
+        
+        # 환경 변수가 설정되어 있고, YAML과 다른 경우 YAML 업데이트
+        if env_log_level and env_log_level != yaml_log_level:
+            yaml_config['log_level'] = env_log_level
+            # YAML 파일 업데이트
+            try:
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    yaml.dump(yaml_config, f, allow_unicode=True, default_flow_style=False)
+                print(f"로그 레벨 업데이트됨: {env_log_level} (환경 변수 값으로)")
+            except Exception as e:
+                print(f"YAML 업데이트 실패: {e}")
+        
+        # 환경 변수에 설정이 없으면 YAML 값을 환경 변수에 설정
+        elif not env_log_level:
+            os.environ['LOG_LEVEL'] = yaml_log_level
+        
+        # 최종적으로 사용할 로그 레벨 (환경 변수 우선)
+        log_level = env_log_level if env_log_level else yaml_log_level
+
         # YAML 설정에서 값 추출
         config_dict = {
             'PROXMOX_HOST': yaml_config['credentials'].get('proxmox_host', ''),
@@ -115,16 +137,12 @@ class Config:
             'SMB_LINKS_DIR': yaml_config['smb'].get('links_dir', '/mnt/gshare_links'),
             'SMB_PORT': yaml_config['smb'].get('port', 445),
             'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
-            'LOG_LEVEL': yaml_config.get('log_level', 'INFO')
+            'LOG_LEVEL': log_level
         }
 
         # NFS 설정 추가
         if 'nfs' in yaml_config and 'path' in yaml_config['nfs']:
             config_dict['NFS_PATH'] = yaml_config['nfs']['path']
-            
-        # 로그 레벨 로드 및 환경 변수 설정
-        log_level = yaml_config.get('log_level', 'INFO')
-        os.environ['LOG_LEVEL'] = log_level
 
         return cls(**config_dict)
 

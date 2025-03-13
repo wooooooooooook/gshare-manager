@@ -1,13 +1,10 @@
 import logging
 import requests
 from typing import Optional
-import time
-from config import Config
-from datetime import datetime
-import pytz
+from config import GshareConfig   # type: ignore
 
 class ProxmoxAPI:
-    def __init__(self, config: Config):
+    def __init__(self, config: GshareConfig):
         self.config = config
         self.session = requests.Session()
         self.session.verify = False
@@ -19,12 +16,12 @@ class ProxmoxAPI:
             "Authorization": f"PVEAPIToken={self.config.TOKEN_ID}={self.config.SECRET}"
         })
         logging.info("Proxmox API 토큰 인증 설정 완료")
-        self.session.timeout = (5, 10)  # (connect timeout, read timeout)
 
     def is_vm_running(self) -> bool:
         try:
             response = self.session.get(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current"
+                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
+                timeout=(5, 10)
             )
             response.raise_for_status()
             result = response.json()["data"]["status"]
@@ -37,7 +34,8 @@ class ProxmoxAPI:
     def get_vm_uptime(self) -> Optional[float]:
         try:
             response = self.session.get(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current"
+                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
+                timeout=(5, 10)
             )
             response.raise_for_status()
             result = response.json()["data"]["uptime"]
@@ -50,7 +48,8 @@ class ProxmoxAPI:
     def get_cpu_usage(self) -> Optional[float]:
         try:
             response = self.session.get(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current"
+                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
+                timeout=(5, 10)
             )
             response.raise_for_status()
             result = response.json()["data"]["cpu"] * 100
@@ -63,7 +62,8 @@ class ProxmoxAPI:
     def start_vm(self) -> bool:
         try:
             response = self.session.post(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/start"
+                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/start",
+                timeout=(5, 10)
             )
             response.raise_for_status()
             logging.debug(f"VM 시작 응답 받음")
