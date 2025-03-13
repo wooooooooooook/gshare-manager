@@ -188,20 +188,13 @@ class GshareWebServer:
     def main_page(self):
         """메인 페이지 표시"""
         try:
-            logging.info("메인 페이지 접속 시도")
-
             if not self.is_setup_complete:
                 logging.debug("'/' 경로 접근: 설정 페이지로 리디렉션")
                 return redirect(url_for('setup'))
 
-            logging.info(
-                f"setup 완료 상태: {self.is_setup_complete}, manager 상태: {self.manager is not None}")
-
             if self.manager:
                 try:
                     current_state = self.manager.current_state
-                    logging.info(
-                        f"manager.current_state: {current_state is not None}")
                     return render_template('index.html', state=current_state, config=self.config)
                 except Exception as e:
                     logging.error(f"manager.current_state 사용 중 에러: {e}")

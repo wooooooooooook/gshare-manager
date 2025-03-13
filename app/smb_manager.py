@@ -183,8 +183,7 @@ class SMBManager:
    read only = yes
    create mask = 0644
    directory mask = 0755
-   force user = {self.config.SMB_USERNAME}
-   force group = {self.config.SMB_USERNAME}
+   force user = root
    veto files = /@*
    hide dot files = yes
    delete veto files = no

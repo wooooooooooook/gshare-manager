@@ -566,8 +566,7 @@ function shutdownVM() {
 }
 
 // 폴더 목록 HTML 생성 함수 추가
-function generateFolderListHtml(sortedFolders, showToggleButtons = true) {
-    console.log('generateFolderListHtml 호출됨', sortedFolders, showToggleButtons);
+function generateFolderListHtml(sortedFolders, showToggleButtons = true, action = 'mount') {
     
     let foldersHtml = '';
     
@@ -582,9 +581,7 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true) {
         const foldersArray = Array.isArray(sortedFolders) 
             ? sortedFolders 
             : Object.entries(sortedFolders).sort((a, b) => {
-                if (a[1].is_mounted !== b[1].is_mounted) {
-                    return b[1].is_mounted ? 1 : -1;
-                }
+                // 시간순 정렬
                 return new Date(b[1].mtime) - new Date(a[1].mtime);
             });
         
@@ -598,7 +595,17 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true) {
         for (const entry of foldersArray) {
             const folder = Array.isArray(sortedFolders) ? entry[0] : entry[0];
             const info = Array.isArray(sortedFolders) ? entry[1] : entry[1];
-                        
+            
+            // 버튼 텍스트와 스타일 결정
+            let buttonText, buttonClass;
+            if (action === 'mount') {
+                buttonText = '마운트';
+                buttonClass = 'bg-green-50 text-green-700 hover:bg-green-100';
+            } else {
+                buttonText = '마운트 해제';
+                buttonClass = 'bg-red-50 text-red-700 hover:bg-red-100';
+            }
+            
             foldersHtml += `
                 <div class="flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50">
                     <div class="flex-1 overflow-hidden">
@@ -611,9 +618,9 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true) {
                             <span class="hidden time-string">${info.mtime}</span>
                         </div>
                     </div>
-                    ${showToggleButtons ? `<button onclick="toggleMount('${folder}')" 
-                        class="text-xs px-2 py-1 rounded ${info.is_mounted ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-green-50 text-green-700 hover:bg-green-100'} transition-colors duration-200">
-                        ${info.is_mounted ? '마운트 해제' : '마운트'}
+                    ${showToggleButtons ? `<button onclick="toggleMount('${folder}', '${action}')" 
+                        class="text-xs px-2 py-1 rounded ${buttonClass} transition-colors duration-200">
+                        ${buttonText}
                     </button>` : ''}
                 </div>
             `;
@@ -628,14 +635,16 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true) {
 }
 
 // toggleMount 함수 내부 수정
-function toggleMount(folder) {
+function toggleMount(folder, action = 'mount') {
     // 사용자에게 작업 중임을 시각적으로 표시
-    const toggleButtons = document.querySelectorAll(`button[onclick="toggleMount('${folder}')"]`);
+    const toggleButtons = document.querySelectorAll(`button[onclick="toggleMount('${folder}', '${action}')"]`);
     toggleButtons.forEach(btn => {
         btn.disabled = true;
         btn.innerText = '처리 중...';
         btn.classList.add('opacity-50', 'cursor-not-allowed');
     });
+    
+    console.log(`폴더 ${folder}에 대한 ${action} 작업 요청`);
     
     // 비동기 요청으로 처리
     fetch(`/toggle_mount/${encodeURIComponent(folder)}`)
@@ -669,7 +678,9 @@ function toggleMount(folder) {
     function resetToggleButtons() {
         toggleButtons.forEach(btn => {
             btn.disabled = false;
-            btn.innerText = document.querySelector(`.monitored-folders-grid [onclick="toggleMount('${folder}')"]`).innerText;
+            // action에 따라 복원할 텍스트 결정
+            const buttonText = action === 'mount' ? '마운트' : '마운트 해제';
+            btn.innerText = buttonText;
             btn.classList.remove('opacity-50', 'cursor-not-allowed');
         });
     }
@@ -747,33 +758,50 @@ function updateFolderList(folders) {
         loadingSmbElement.style.display = 'none';
     }
 
-    // 모니터링 중인 모든 폴더 표시
+    // 마운트된 폴더와 마운트되지 않은 폴더 분류
+    const unmountedFolders = {};
+    const mountedFolders = {};
+    
+    // 각 폴더를 마운트 상태에 따라 분류
+    Object.entries(folders).forEach(([path, info]) => {
+        if (info.is_mounted) {
+            mountedFolders[path] = info;
+        } else {
+            unmountedFolders[path] = info;
+        }
+    });
+    
+    console.log('마운트되지 않은 폴더 갯수:', Object.keys(unmountedFolders).length);
+    console.log('마운트된 폴더 갯수:', Object.keys(mountedFolders).length);
+
+    // NFS 패널에는 마운트되지 않은 폴더만 표시 (마운트 가능한 목록)
     const foldersContainer = document.getElementById('monitoredFoldersContainer');
-    console.log('폴더 컨테이너 요소:', foldersContainer);
+    console.log('NFS 폴더 컨테이너 요소:', foldersContainer);
     if (foldersContainer) {
-        foldersContainer.innerHTML = generateFolderListHtml(folders);
-        
-        // 필요한 이벤트 리스너 추가
-        foldersContainer.querySelectorAll('.toggle-text').forEach(el => {
-            el.addEventListener('click', () => {
-                el.querySelector('.time-string').classList.toggle('hidden');
-                el.querySelector('.readable-time').classList.toggle('hidden');
+        if (Object.keys(unmountedFolders).length === 0) {
+            foldersContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <p class="text-sm text-gray-600">모든 폴더가 마운트되었습니다.</p>
+                </div>
+            `;
+        } else {
+            // 마운트 버튼만 표시 (마운트 기능만 활성화)
+            foldersContainer.innerHTML = generateFolderListHtml(unmountedFolders, true, 'mount');
+            
+            // 필요한 이벤트 리스너 추가
+            foldersContainer.querySelectorAll('.toggle-text').forEach(el => {
+                el.addEventListener('click', () => {
+                    el.querySelector('.time-string').classList.toggle('hidden');
+                    el.querySelector('.readable-time').classList.toggle('hidden');
+                });
             });
-        });
+        }
     }
     
-    // SMB로 공유 중인 폴더만 필터링하여 표시
+    // SMB 패널에는 마운트된 폴더만 표시 (언마운트 가능한 목록)
     const smbFoldersContainer = document.getElementById('smbFoldersContainer');
     console.log('SMB 폴더 컨테이너 요소:', smbFoldersContainer);
     if (smbFoldersContainer) {
-        // 마운트된 폴더만 필터링
-        const mountedFolders = Object.fromEntries(
-            Object.entries(folders).filter(([_, info]) => info.is_mounted)
-        );
-        
-        console.log('마운트된 폴더 목록:', mountedFolders);
-        console.log('마운트된 폴더 갯수:', Object.keys(mountedFolders).length);
-        
         if (Object.keys(mountedFolders).length === 0) {
             console.log('마운트된 폴더가 없음');
             smbFoldersContainer.innerHTML = `
@@ -783,7 +811,8 @@ function updateFolderList(folders) {
             `;
         } else {
             console.log('마운트된 폴더 있음, HTML 생성');
-            const htmlContent = generateFolderListHtml(mountedFolders, false);
+            // 언마운트 버튼 표시 (언마운트 기능만 활성화)
+            const htmlContent = generateFolderListHtml(mountedFolders, true, 'unmount');
             console.log('생성된 HTML:', htmlContent);
             smbFoldersContainer.innerHTML = htmlContent;
             
