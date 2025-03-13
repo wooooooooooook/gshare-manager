@@ -790,10 +790,6 @@ if __name__ == "__main__":
                 logging.error(f"상세 오류: {traceback.format_exc()}")
                 raise
 
-            # urllib3와 requests 라이브러리의 로깅 레벨 조정
-            logging.getLogger('urllib3').setLevel(logging.WARNING)
-            logging.getLogger('requests').setLevel(logging.WARNING)
-            
             # 모니터링 시작
             logging.info(f"모니터링 시작... 간격: {config.CHECK_INTERVAL}초")
             gshare_manager.monitor()

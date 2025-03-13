@@ -9,7 +9,10 @@ class ProxmoxAPI:
         self.session = requests.Session()
         self.session.verify = False
         self._set_token_auth()
-
+        # urllib3와 requests 라이브러리의 로깅 레벨 조정
+        logging.getLogger('urllib3').setLevel(logging.WARNING)
+        logging.getLogger('requests').setLevel(logging.WARNING)
+        
     def _set_token_auth(self) -> None:
         # API 토큰을 사용하여 인증 헤더 설정
         self.session.headers.update({
