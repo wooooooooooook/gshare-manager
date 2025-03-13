@@ -1,18 +1,19 @@
 import logging
-from flask import Flask, jsonify, render_template, request, redirect, url_for
+from flask import Flask, jsonify, render_template, request, redirect, url_for  # type: ignore
 import threading
 import subprocess
 import os
 import sys
-import requests
+import requests  # type: ignore
 from datetime import datetime
-import pytz
-import yaml
+import pytz  # type: ignore
+import yaml  # type: ignore
 import socket
 import tempfile
 from config import GshareConfig  # type: ignore
 import time
 import traceback
+
 
 class GshareWebServer:
     """GShare 웹 서버를 관리하는 클래스"""
@@ -63,9 +64,11 @@ class GshareWebServer:
 
             # manager 객체 상태 확인
             if self.manager:
-                logging.debug(f"manager.current_state 존재: {hasattr(self.manager, 'current_state') and self.manager.current_state is not None}")
+                logging.debug(
+                    f"manager.current_state 존재: {hasattr(self.manager, 'current_state') and self.manager.current_state is not None}")
                 if hasattr(self.manager, 'current_state') and self.manager.current_state is None:
-                    logging.warning("manager.current_state가 None 값입니다. 초기화가 필요할 수 있습니다.")
+                    logging.warning(
+                        "manager.current_state가 None 값입니다. 초기화가 필요할 수 있습니다.")
 
             restart_flag_path = '/config/.restart_in_progress'
             if os.path.exists(restart_flag_path):
@@ -79,7 +82,7 @@ class GshareWebServer:
         except Exception as e:
             logging.error(f"웹 서버 초기화 중 오류 발생: {e}")
             logging.error(f"상세 오류: {traceback.format_exc()}")
-            
+
             # 오류가 발생해도 기본 설정은 완료하도록 함
             self.is_setup_complete = False
             logging.warning("웹 서버 초기화 실패로 설정 페이지로 리디렉션됩니다.")
@@ -88,7 +91,8 @@ class GshareWebServer:
         """State가 초기화되지 않았을 때 사용할 기본값을 반환"""
         from main import State
 
-        current_time = datetime.now(tz=pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S')
+        current_time = datetime.now(tz=pytz.timezone(
+            'Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S')
         return State(
             last_check_time=current_time,
             vm_running=False,
@@ -118,33 +122,46 @@ class GshareWebServer:
         """Flask 라우트 등록"""
         self.app.add_url_rule('/', 'main_page', self.main_page)
         self.app.add_url_rule('/setup', 'setup', self.setup)
-        self.app.add_url_rule('/save-config', 'save_config', self.save_config, methods=['POST'])
+        self.app.add_url_rule('/save-config', 'save_config',
+                              self.save_config, methods=['POST'])
         self.app.add_url_rule('/settings', 'show_settings', self.show_settings)
-        self.app.add_url_rule('/update_state', 'update_state', self.update_state)
+        self.app.add_url_rule(
+            '/update_state', 'update_state', self.update_state)
         self.app.add_url_rule('/update_log', 'update_log', self.update_log)
         self.app.add_url_rule('/clear_log', 'clear_log', self.clear_log)
-        self.app.add_url_rule('/trim_log/<int:lines>', 'trim_log', self.trim_log)
-        self.app.add_url_rule('/set_log_level/<string:level>', 'set_log_level', self.set_log_level)
-        self.app.add_url_rule('/get_log_level', 'get_log_level', self.get_log_level)
+        self.app.add_url_rule('/trim_log/<int:lines>',
+                              'trim_log', self.trim_log)
+        self.app.add_url_rule('/set_log_level/<string:level>',
+                              'set_log_level', self.set_log_level)
+        self.app.add_url_rule(
+            '/get_log_level', 'get_log_level', self.get_log_level)
         self.app.add_url_rule('/start_vm', 'start_vm', self.start_vm)
         self.app.add_url_rule('/shutdown_vm', 'shutdown_vm', self.shutdown_vm)
-        self.app.add_url_rule('/toggle_mount/<path:folder>', 'toggle_mount', self.toggle_mount)
+        self.app.add_url_rule('/toggle_mount/<path:folder>',
+                              'toggle_mount', self.toggle_mount)
         self.app.add_url_rule('/get_config', 'get_config', self.get_config)
-        self.app.add_url_rule('/update_config', 'update_config', self.update_config, methods=['POST'])
-        self.app.add_url_rule('/test_proxmox_api', 'test_proxmox_api', self.test_proxmox_api, methods=['POST'])
-        self.app.add_url_rule('/test_nfs', 'test_nfs', self.test_nfs, methods=['POST'])
-        self.app.add_url_rule('/import-config', 'import_config', self.import_config, methods=['POST'])
-        self.app.add_url_rule('/export-config', 'export_config', self.export_config)
-        self.app.add_url_rule('/restart_app', 'restart_app', self.restart_app, methods=['POST'])
-        self.app.add_url_rule('/check_restart_status', 'check_restart_status', self.check_restart_status)
-        
+        self.app.add_url_rule('/update_config', 'update_config',
+                              self.update_config, methods=['POST'])
+        self.app.add_url_rule(
+            '/test_proxmox_api', 'test_proxmox_api', self.test_proxmox_api, methods=['POST'])
+        self.app.add_url_rule('/test_nfs', 'test_nfs',
+                              self.test_nfs, methods=['POST'])
+        self.app.add_url_rule('/import-config', 'import_config',
+                              self.import_config, methods=['POST'])
+        self.app.add_url_rule(
+            '/export-config', 'export_config', self.export_config)
+        self.app.add_url_rule('/restart_app', 'restart_app',
+                              self.restart_app, methods=['POST'])
+        self.app.add_url_rule('/check_restart_status',
+                              'check_restart_status', self.check_restart_status)
+
         # 에러 핸들러 등록
         @self.app.errorhandler(Exception)
         def handle_exception(e):
             # 모든 예외를 로깅
             logging.error(f"에러 발생: {str(e)}")
             logging.error(traceback.format_exc())
-            
+
             # 개발 중에는 디버그 정보를 포함하는 에러 페이지 반환
             if os.getenv('FLASK_ENV') == 'development' or os.getenv('LOG_LEVEL') == 'DEBUG':
                 return f"""
@@ -162,7 +179,7 @@ class GshareWebServer:
                 <p>죄송합니다. 요청을 처리하는 동안 오류가 발생했습니다.</p>
                 <p>로그를 확인하거나 관리자에게 문의하세요.</p>
                 """, 500
-                
+
         @self.app.errorhandler(404)
         def page_not_found(e):
             logging.warning(f"404 에러: {request.path}")
@@ -176,17 +193,19 @@ class GshareWebServer:
         """메인 페이지 표시"""
         try:
             logging.info("메인 페이지 접속 시도")
-            
+
             if not self.is_setup_complete:
                 logging.debug("'/' 경로 접근: 설정 페이지로 리디렉션")
                 return redirect(url_for('setup'))
-            
-            logging.info(f"setup 완료 상태: {self.is_setup_complete}, manager 상태: {self.manager is not None}")
-            
+
+            logging.info(
+                f"setup 완료 상태: {self.is_setup_complete}, manager 상태: {self.manager is not None}")
+
             if self.manager:
                 try:
                     current_state = self.manager.current_state
-                    logging.info(f"manager.current_state: {current_state is not None}")
+                    logging.info(
+                        f"manager.current_state: {current_state is not None}")
                     return render_template('index.html', state=current_state, config=self.config)
                 except Exception as e:
                     logging.error(f"manager.current_state 사용 중 에러: {e}")
@@ -284,7 +303,8 @@ class GshareWebServer:
             try:
                 config_mtime = os.path.getmtime(config_path)
                 config_time = datetime.fromtimestamp(config_mtime)
-                logging.debug(f"설정 파일 업데이트 시간: {config_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                logging.debug(
+                    f"설정 파일 업데이트 시간: {config_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
                 time.sleep(1)
 
@@ -298,7 +318,8 @@ class GshareWebServer:
                 logging.debug(f"설정 파일과 초기화 플래그 사이 시간 차이: {time_diff:.2f}초")
 
                 if time_diff < 0:
-                    logging.warning("초기화 플래그가 설정 파일보다 이른 시간으로 설정되었습니다. 문제가 발생할 수 있습니다.")
+                    logging.warning(
+                        "초기화 플래그가 설정 파일보다 이른 시간으로 설정되었습니다. 문제가 발생할 수 있습니다.")
             except Exception as e:
                 logging.error(f"파일 시간 설정 중 오류 발생: {e}")
                 with open(init_flag_path, 'w') as f:
@@ -322,11 +343,13 @@ class GshareWebServer:
                     return jsonify(self.manager.current_state.to_dict())
                 else:
                     state = self._get_default_state()
-                    logging.debug(f"gshare_manager의 current_state가 None, 기본 상태 사용 - last_check_time: {state.last_check_time}")
+                    logging.debug(
+                        f"gshare_manager의 current_state가 None, 기본 상태 사용 - last_check_time: {state.last_check_time}")
                     return jsonify(state.to_dict())
             else:
                 state = self._get_default_state()
-                logging.debug(f"gshare_manager 객체 없음, 기본 상태 사용 - last_check_time: {state.last_check_time}")
+                logging.debug(
+                    f"gshare_manager 객체 없음, 기본 상태 사용 - last_check_time: {state.last_check_time}")
                 return jsonify(state.to_dict())
         except Exception as e:
             logging.error(f"상태 요청 중 오류: {e}")
@@ -357,7 +380,8 @@ class GshareWebServer:
             with open(self.log_file, 'r') as file:
                 log_lines = file.readlines()
 
-            trimmed_lines = log_lines[-lines:] if len(log_lines) > lines else log_lines
+            trimmed_lines = log_lines[-lines:] if len(
+                log_lines) > lines else log_lines
 
             with open(self.log_file, 'w') as file:
                 file.writelines(trimmed_lines)
@@ -457,7 +481,8 @@ class GshareWebServer:
             if not self.manager.current_state.vm_running:
                 return jsonify({"status": "error", "message": "VM이 이미 종료되어 있습니다."}), 400
 
-            response = requests.post(self.config.SHUTDOWN_WEBHOOK_URL, timeout=5)
+            response = requests.post(
+                self.config.SHUTDOWN_WEBHOOK_URL, timeout=5)
             response.raise_for_status()
             return jsonify({"status": "success", "message": "VM 종료가 요청되었습니다."})
         except Exception as e:
@@ -565,13 +590,16 @@ class GshareWebServer:
             })
 
             try:
-                version_response = session.get(f"{proxmox_host}/version", timeout=(5, 10))
+                version_response = session.get(
+                    f"{proxmox_host}/version", timeout=(5, 10))
                 version_response.raise_for_status()
 
-                node_response = session.get(f"{proxmox_host}/nodes/{node_name}", timeout=(5, 10))
+                node_response = session.get(
+                    f"{proxmox_host}/nodes/{node_name}", timeout=(5, 10))
                 node_response.raise_for_status()
 
-                vm_response = session.get(f"{proxmox_host}/nodes/{node_name}/qemu/{vm_id}/status/current", timeout=(5, 10))
+                vm_response = session.get(
+                    f"{proxmox_host}/nodes/{node_name}/qemu/{vm_id}/status/current", timeout=(5, 10))
                 vm_response.raise_for_status()
 
                 vm_status = vm_response.json()["data"]["status"]
@@ -636,11 +664,13 @@ class GshareWebServer:
             with tempfile.TemporaryDirectory() as temp_mount:
                 try:
                     mount_cmd = f"mount -t nfs -o nolock,vers=3,soft,timeo=100 {nfs_path} {temp_mount} {temp_mount}"
-                    result = subprocess.run(mount_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                    result = subprocess.run(
+                        mount_cmd, shell=True, capture_output=True, text=True, timeout=60)
 
                     if result.returncode == 0:
                         try:
-                            ls_result = subprocess.run(f"ls {temp_mount}", shell=True, check=True, capture_output=True, text=True)
+                            ls_result = subprocess.run(
+                                f"ls {temp_mount}", shell=True, check=True, capture_output=True, text=True)
                             message = "NFS 연결 테스트 성공: 읽기 권한이 정상입니다."
                             status = "success"
                         except Exception as e:
@@ -658,7 +688,8 @@ class GshareWebServer:
                     status = "error"
                 finally:
                     try:
-                        subprocess.run(f"umount {temp_mount}", shell=True, check=False)
+                        subprocess.run(
+                            f"umount {temp_mount}", shell=True, check=False)
                     except:
                         pass
 
@@ -712,7 +743,8 @@ class GshareWebServer:
                     }), 400
 
                 required_sections = ['credentials', 'proxmox']
-                missing_sections = [section for section in required_sections if section not in yaml_config]
+                missing_sections = [
+                    section for section in required_sections if section not in yaml_config]
 
                 if missing_sections:
                     logging.warning(f"필수 섹션 누락: {missing_sections}")
@@ -729,7 +761,8 @@ class GshareWebServer:
                         missing_credentials.append(cred)
 
                 if missing_credentials:
-                    logging.warning(f"필수 자격 증명이 누락되었습니다: {missing_credentials}")
+                    logging.warning(
+                        f"필수 자격 증명이 누락되었습니다: {missing_credentials}")
                     return jsonify({
                         "status": "warning",
                         "message": f"필수 자격 증명이 누락되었습니다: {', '.join(missing_credentials)}"
@@ -761,7 +794,8 @@ class GshareWebServer:
                 temp_config_path = '/tmp/imported_config.yaml'
                 try:
                     with open(temp_config_path, 'w') as f:
-                        yaml.dump(yaml_config, f, allow_unicode=True, default_flow_style=False)
+                        yaml.dump(yaml_config, f, allow_unicode=True,
+                                  default_flow_style=False)
                     logging.debug(f"가져온 설정을 임시 파일에 저장했습니다: {temp_config_path}")
                 except Exception as e:
                     logging.error(f"임시 설정 파일 저장 실패: {e}")
@@ -809,7 +843,8 @@ class GshareWebServer:
                     "message": "설정 파일이 비어있습니다."
                 }), 400
 
-            yaml_content = yaml.dump(yaml_config, allow_unicode=True, default_flow_style=False)
+            yaml_content = yaml.dump(
+                yaml_config, allow_unicode=True, default_flow_style=False)
 
             current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"gshare_config_{current_time}.yaml"
@@ -885,13 +920,14 @@ class GshareWebServer:
             port = int(os.environ.get('FLASK_PORT', 5000))
             logging.info(f"웹 서버 바인딩: {host}:{port}")
 
-            from werkzeug.serving import BaseWSGIServer
+            from werkzeug.serving import BaseWSGIServer  # type: ignore
             import socket
 
             original_server_bind = BaseWSGIServer.server_bind
 
             def custom_server_bind(self):
-                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.socket.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 return original_server_bind(self)
 
             BaseWSGIServer.server_bind = custom_server_bind
@@ -943,8 +979,10 @@ class GshareWebServer:
                             if len(parts) > 1:
                                 pid = parts[1]
                                 if pid and pid.isdigit() and int(pid) != current_pid:
-                                    logging.debug(f"Python 프로세스(PID: {pid}) 종료 시도...")
-                                    subprocess.run(["kill", "-9", pid], check=False)
+                                    logging.debug(
+                                        f"Python 프로세스(PID: {pid}) 종료 시도...")
+                                    subprocess.run(
+                                        ["kill", "-9", pid], check=False)
                                     killed = True
 
                     if killed:
@@ -958,7 +996,8 @@ class GshareWebServer:
                 sock.close()
 
                 if result == 0:
-                    logging.warning(f"포트 {flask_port}이 여전히 사용 중입니다. 다른 포트로 변경합니다.")
+                    logging.warning(
+                        f"포트 {flask_port}이 여전히 사용 중입니다. 다른 포트로 변경합니다.")
                     flask_port += 1
                     os.environ['FLASK_PORT'] = str(flask_port)
                 else:
@@ -991,9 +1030,11 @@ class GshareWebServer:
                 except Exception as e:
                     logging.error(f"재시작 플래그 파일 삭제 중 오류: {e}")
 
-                logging.info("──────────────────────────────────────────────────")
+                logging.info(
+                    "──────────────────────────────────────────────────")
                 logging.info("현재 프로세스를 종료합니다...")
-                logging.info("──────────────────────────────────────────────────")
+                logging.info(
+                    "──────────────────────────────────────────────────")
                 os._exit(0)
 
             exit_thread = threading.Thread(target=exit_current_process)
