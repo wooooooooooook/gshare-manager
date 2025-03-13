@@ -46,6 +46,8 @@ class Config:
     SMB_READ_ONLY: bool
     ## SMB 링크 디렉토리
     SMB_LINKS_DIR: str
+    ## SMB 포트
+    SMB_PORT: int = 445
     
     # 로그 시간대
     TIMEZONE: str
@@ -110,6 +112,7 @@ class Config:
             'SMB_GUEST_OK': yaml_config['smb'].get('guest_ok', False),
             'SMB_READ_ONLY': yaml_config['smb'].get('read_only', True),
             'SMB_LINKS_DIR': yaml_config['smb'].get('links_dir', '/mnt/gshare_links'),
+            'SMB_PORT': yaml_config['smb'].get('port', 445),
             'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
             'LOG_LEVEL': yaml_config.get('log_level', 'INFO')
         }
@@ -184,6 +187,8 @@ class Config:
             yaml_config['smb']['read_only'] = config_dict['SMB_READ_ONLY'] == 'yes'
         if 'SMB_LINKS_DIR' in config_dict:
             yaml_config['smb']['links_dir'] = config_dict['SMB_LINKS_DIR']
+        if 'SMB_PORT' in config_dict:
+            yaml_config['smb']['port'] = int(config_dict['SMB_PORT'])
         if 'TIMEZONE' in config_dict:
             yaml_config['timezone'] = config_dict['TIMEZONE']
         # 로그 레벨 업데이트
@@ -249,7 +254,7 @@ class Config:
         return {
             'proxmox': {'node_name': '', 'vm_id': '', 'cpu': {'threshold': 10.0, 'check_interval': 60, 'threshold_count': 3}},
             'mount': {'path': '/mnt/gshare', 'folder_size_timeout': 30},
-            'smb': {'share_name': 'gshare', 'comment': 'GShare SMB 공유', 'guest_ok': False, 'read_only': True, 'links_dir': '/mnt/gshare_links'},
+            'smb': {'share_name': 'gshare', 'comment': 'GShare SMB 공유', 'guest_ok': False, 'read_only': True, 'links_dir': '/mnt/gshare_links', 'port': 445},
             'nfs': {'path': ''},
             'credentials': {'proxmox_host': '', 'token_id': '', 'secret': '', 'shutdown_webhook_url': '', 'smb_username': '', 'smb_password': ''},
             'timezone': 'Asia/Seoul'

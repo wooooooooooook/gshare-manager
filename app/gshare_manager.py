@@ -145,6 +145,8 @@ class FolderMonitor:
    log file = /var/log/samba/log.%m
    max log size = 50
    dns proxy = no
+   # 포트 설정
+   smb ports = {}
    # SMB1 설정
    server min protocol = NT1
    server max protocol = NT1
@@ -153,7 +155,7 @@ class FolderMonitor:
    wide links = yes
    unix extensions = no
    allow insecure wide links = yes
-"""
+""".format(self.config.SMB_PORT)
             # 기본 설정 저장
             with open('/etc/samba/smb.conf', 'w') as f:
                 f.write(base_config)
@@ -686,6 +688,46 @@ class FolderMonitor:
             
             share_name = self.config.SMB_SHARE_NAME
             
+            # 설정 파일 읽기
+            with open('/etc/samba/smb.conf', 'r') as f:
+                lines = f.readlines()
+
+            # [global] 섹션을 찾아서 포트 설정 추가/업데이트
+            global_section_found = False
+            port_set = False
+            new_lines = []
+            
+            for line in lines:
+                # [global] 섹션 감지
+                if line.strip() == '[global]':
+                    global_section_found = True
+                    new_lines.append(line)
+                # 다른 섹션 시작 감지
+                elif line.strip().startswith('[') and line.strip() != '[global]':
+                    global_section_found = False
+                    # 포트 설정이 없었다면 여기서 추가
+                    if not port_set:
+                        new_lines.append(f"   smb ports = {self.config.SMB_PORT}\n")
+                        port_set = True
+                    new_lines.append(line)
+                # global 섹션 내에서 포트 설정 업데이트
+                elif global_section_found and "smb ports" in line.lower():
+                    new_lines.append(f"   smb ports = {self.config.SMB_PORT}\n")
+                    port_set = True
+                else:
+                    new_lines.append(line)
+            
+            # [global] 섹션만 있고 다른 섹션이 없는 경우를 처리
+            if global_section_found and not port_set:
+                new_lines.append(f"   smb ports = {self.config.SMB_PORT}\n")
+            
+            # 여기부터는 기존 코드 - 여기까지의 코드로 [global] 섹션까지만 유지하고 포트 설정도 업데이트
+            final_lines = []
+            for line in new_lines:
+                if line.strip().startswith('[') and not line.strip() == '[global]':
+                    break
+                final_lines.append(line)
+            
             # 공유 설정 생성
             share_config = f"""
 [{share_name}]
@@ -705,25 +747,14 @@ class FolderMonitor:
    wide links = yes
    unix extensions = no
 """
-            # 설정 파일 읽기
-            with open('/etc/samba/smb.conf', 'r') as f:
-                lines = f.readlines()
-
-            # [global] 섹션만 유지
-            new_lines = []
-            for line in lines:
-                if line.strip().startswith('[') and not line.strip() == '[global]':
-                    break
-                new_lines.append(line)
-            
             # 새로운 공유 설정 추가
-            new_lines.append(share_config)
+            final_lines.append(share_config)
             
             # 설정 파일 저장
             with open('/etc/samba/smb.conf', 'w') as f:
-                f.writelines(new_lines)
+                f.writelines(final_lines)
                 
-            logging.info(f"SMB 설정 파일이 업데이트 되었습니다: {share_name}")
+            logging.info(f"SMB 설정 파일이 업데이트 되었습니다: {share_name}, 포트: {self.config.SMB_PORT}")
         except Exception as e:
             logging.error(f"SMB 설정 파일 업데이트 실패: {e}")
             raise
