@@ -316,7 +316,6 @@ class GShareManager:
         self.low_cpu_count = 0
         self.last_action = "프로그램 시작"
         self.restart_required = False
-        self.current_state = self._update_state()  # current_state 인스턴스 변수 추가
 
         # VM 마지막 종료 시간 로드
         self.last_shutdown_time = self._load_last_shutdown_time()
@@ -335,6 +334,9 @@ class GShareManager:
         # SMBManager 초기화 (FolderMonitor의 SMBManager를 사용)
         self.smb_manager = self.folder_monitor.smb_manager
         logging.debug("SMBManager 참조 완료")
+
+        # 모든 속성이 초기화된 후에 상태 업데이트 수행
+        self.current_state = self._update_state()
 
     def _load_last_shutdown_time(self) -> float:
         """VM 마지막 종료 시간을 로드 (UTC 기준)"""
@@ -443,6 +445,25 @@ class GShareManager:
             uptime_str = self._format_uptime(
                 uptime) if uptime is not None else "알 수 없음"
 
+            # 필요한 속성들이 초기화되었는지 확인
+            last_shutdown_time = getattr(self, 'last_shutdown_time_str', '-')
+            monitored_folders = {}
+            smb_running = False
+            nfs_mounted = False
+
+            if hasattr(self, 'folder_monitor'):
+                try:
+                    monitored_folders = self.folder_monitor.get_monitored_folders()
+                    nfs_mounted = self.folder_monitor.check_nfs_status()
+                except Exception as e:
+                    logging.error(f"폴더 모니터 정보 가져오기 실패: {e}")
+
+            if hasattr(self, 'smb_manager'):
+                try:
+                    smb_running = self.smb_manager.check_smb_status()
+                except Exception as e:
+                    logging.error(f"SMB 상태 확인 실패: {e}")
+
             current_state = State(
                 last_check_time=current_time_str,
                 vm_running=vm_running,
@@ -452,11 +473,11 @@ class GShareManager:
                 low_cpu_count=self.low_cpu_count,
                 threshold_count=self.config.THRESHOLD_COUNT,
                 uptime=uptime_str,
-                last_shutdown_time=self.last_shutdown_time_str,
-                monitored_folders=self.folder_monitor.get_monitored_folders(),
-                smb_running=self.smb_manager.check_smb_status(),
+                last_shutdown_time=last_shutdown_time,
+                monitored_folders=monitored_folders,
+                smb_running=smb_running,
                 check_interval=self.config.CHECK_INTERVAL,
-                nfs_mounted=self.folder_monitor.check_nfs_status()
+                nfs_mounted=nfs_mounted
             )
             return current_state
         except Exception as e:

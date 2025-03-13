@@ -69,6 +69,16 @@ function logStateToConsole(state) {
     console.log(`Low CPU 카운트: ${state.low_cpu_count}/${state.threshold_count}`);
     console.log(`업타임: ${state.uptime}`);
     console.log(`마지막 체크 시간: ${state.last_check_time}`);
+    
+    // 마운트된 폴더 갯수 출력
+    if (state.monitored_folders) {
+        const mountedCount = Object.values(state.monitored_folders).filter(folder => folder.is_mounted).length;
+        const totalCount = Object.keys(state.monitored_folders).length;
+        console.log(`마운트된 폴더: ${mountedCount}/${totalCount}`);
+    } else {
+        console.log(`마운트된 폴더: 0/0`);
+    }
+    
     console.log('===================');
 }
 
@@ -155,6 +165,10 @@ window.onload = function () {
     // 초기 SMB 상태에 따라 컨테이너 표시 설정
     const initialSMBStatus = document.querySelector('.smb-status span').innerText;
     updateSMBStatus(initialSMBStatus);
+    
+    // 초기 NFS 상태에 따라 컨테이너 표시 설정
+    const initialNFSStatus = document.querySelector('.nfs-status span').innerText;
+    updateNFSStatus(initialNFSStatus);
 
     // .toggle-text 클릭이벤트 추가
     document.querySelectorAll('.toggle-text').forEach(el => {
@@ -188,7 +202,7 @@ window.onload = function () {
         }
 
         // 모든 폴더의 수정 시간 업데이트
-        document.querySelectorAll('.monitored-folders-grid .toggle-text').forEach(el => {
+        document.querySelectorAll('.monitored-folders-grid .toggle-text, .smb-folders-grid .toggle-text').forEach(el => {
             const timeString = el.querySelector('.time-string');
             const readableTime = el.querySelector('.readable-time');
             if (timeString && readableTime) {
@@ -217,6 +231,7 @@ window.onload = function () {
                     lastAction: document.querySelector('.last-action'),
                     vmStatus: document.querySelector('.vm-status'),
                     smbStatus: document.querySelector('.smb-status'),
+                    nfsStatus: document.querySelector('.nfs-status'),
                     cpuUsage: document.querySelector('.cpu-usage'),
                     lowCpuCount: document.querySelector('.low-cpu-count'),
                     uptime: document.querySelector('.uptime'),
@@ -228,20 +243,22 @@ window.onload = function () {
                 if (elements.lastCheckTimeReadable) elements.lastCheckTimeReadable.innerText = get_time_ago(data.last_check_time);
                 if (elements.lastCheckTimeString) elements.lastCheckTimeString.innerText = data.last_check_time;
                 if (elements.lastAction) elements.lastAction.innerText = data.last_action;
+                
+                // VM 상태 업데이트
                 if (elements.vmStatus) {
-                    const vmStatusSpan = elements.vmStatus.querySelector('span');
-                    if (vmStatusSpan) {
-                        vmStatusSpan.innerText = data.vm_status;
-                        updateVMStatus(data.vm_status);
-                    }
+                    updateVMStatus(data.vm_status);
                 }
+                
+                // SMB 상태 업데이트
                 if (elements.smbStatus) {
-                    const smbStatusSpan = elements.smbStatus.querySelector('span');
-                    if (smbStatusSpan) {
-                        smbStatusSpan.innerText = data.smb_status;
-                        updateSMBStatus(data.smb_status);
-                    }
+                    updateSMBStatus(data.smb_status);
                 }
+                
+                // NFS 상태 업데이트
+                if (elements.nfsStatus) {
+                    updateNFSStatus(data.nfs_status);
+                }
+                
                 if (elements.cpuUsage) elements.cpuUsage.innerText = data.cpu_usage + '%';
                 if (elements.lowCpuCount) elements.lowCpuCount.innerText = data.low_cpu_count + '/' + data.threshold_count;
                 if (elements.uptime) elements.uptime.innerText = data.uptime;
@@ -253,28 +270,11 @@ window.onload = function () {
                     elements.lastShutdownTimeString.innerText = data.last_shutdown_time;
                 }
 
-                // 감시 중인 폴더 목록 업데이트
-                const monitoredFoldersContainer = document.querySelector('.monitored-folders-grid');
-                if (monitoredFoldersContainer) {
-                    const sortedFolders = Object.entries(data.monitored_folders)
-                        .sort((a, b) => {
-                            // 먼저 마운트 상태로 정렬
-                            if (a[1].is_mounted !== b[1].is_mounted) {
-                                return b[1].is_mounted ? 1 : -1; // 마운트된 것이 위로
-                            }
-                            // 마운트 상태가 같다면 수정 시간으로 정렬
-                            const timeA = new Date(a[1].mtime);
-                            const timeB = new Date(b[1].mtime);
-                            return timeB - timeA; // 최신순 정렬
-                        });
-                    monitoredFoldersContainer.innerHTML = generateFolderListHtml(sortedFolders);
-
-                    // 토글 이벤트 리스너 다시 추가
-                    monitoredFoldersContainer.querySelectorAll('.toggle-text').forEach(el => {
-                        el.addEventListener('click', () => {
-                            el.querySelector('.time-string').classList.toggle('hidden');
-                            el.querySelector('.readable-time').classList.toggle('hidden');
-                        });
+                // 감시 중인 폴더 목록 업데이트 - 별도 함수 사용
+                if (data.monitored_folders) {
+                    // 백그라운드로 폴더 목록 처리를 위해 requestAnimationFrame 사용
+                    window.requestAnimationFrame(() => {
+                        updateFolderList(data.monitored_folders);
                     });
                 }
             });
@@ -299,7 +299,8 @@ function updateVMStatus(status) {
     const vmStatusContainer = document.querySelector('.vm-status-container');
     const vmRunningElements = document.querySelectorAll('.vm-running-element');
     const vmStoppedElements = document.querySelectorAll('.vm-stopped-element');
-    const vmStatusSpan = document.querySelector('.vm-status span');
+    const vmStatusSpan = document.querySelector('.vm-status span:first-child');
+    const statusIcon = document.querySelector('.vm-status span:last-child');
 
     if (status === 'ON') {
         // VM 실행 중
@@ -307,8 +308,17 @@ function updateVMStatus(status) {
         vmStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
         
         // 상태 표시 스타일 변경
-        vmStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
-        vmStatusSpan.classList.add('bg-emerald-50', 'text-emerald-700');
+        if (vmStatusSpan) {
+            vmStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
+            vmStatusSpan.classList.add('bg-emerald-50', 'text-emerald-700');
+            vmStatusSpan.innerText = 'ON';
+        }
+        
+        // 상태 아이콘 변경 (신호등)
+        if (statusIcon) {
+            statusIcon.classList.remove('bg-red-500');
+            statusIcon.classList.add('bg-green-500');
+        }
 
         // 실행 중 요소들 표시
         vmRunningElements.forEach(el => el.classList.remove('hidden'));
@@ -319,8 +329,17 @@ function updateVMStatus(status) {
         vmStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
         
         // 상태 표시 스타일 변경
-        vmStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
-        vmStatusSpan.classList.add('bg-slate-50', 'text-slate-700');
+        if (vmStatusSpan) {
+            vmStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
+            vmStatusSpan.classList.add('bg-slate-50', 'text-slate-700');
+            vmStatusSpan.innerText = 'OFF';
+        }
+        
+        // 상태 아이콘 변경 (신호등)
+        if (statusIcon) {
+            statusIcon.classList.remove('bg-green-500');
+            statusIcon.classList.add('bg-red-500');
+        }
 
         // 중지 시 요소들 표시
         vmRunningElements.forEach(el => el.classList.add('hidden'));
@@ -330,7 +349,8 @@ function updateVMStatus(status) {
 
 function updateSMBStatus(status) {
     const smbStatusContainer = document.querySelector('.smb-status-container');
-    const smbStatusSpan = document.querySelector('.smb-status span');
+    const smbStatusSpan = document.querySelector('.smb-status span:first-child');
+    const statusIcon = document.querySelector('.smb-status span:last-child');
 
     if (status === 'ON') {
         // SMB 실행 중
@@ -338,16 +358,76 @@ function updateSMBStatus(status) {
         smbStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
         
         // 상태 표시 스타일 변경
-        smbStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
-        smbStatusSpan.classList.add('bg-emerald-50', 'text-emerald-700');
+        if (smbStatusSpan) {
+            smbStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
+            smbStatusSpan.classList.add('bg-emerald-50', 'text-emerald-700');
+            smbStatusSpan.innerText = 'ON';
+        }
+        
+        // 상태 아이콘 변경 (신호등)
+        if (statusIcon) {
+            statusIcon.classList.remove('bg-red-500');
+            statusIcon.classList.add('bg-green-500');
+        }
     } else {
         // SMB 중지됨
         smbStatusContainer.classList.remove('bg-green-50', 'border-green-100');
         smbStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
         
         // 상태 표시 스타일 변경
-        smbStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
-        smbStatusSpan.classList.add('bg-slate-50', 'text-slate-700');
+        if (smbStatusSpan) {
+            smbStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
+            smbStatusSpan.classList.add('bg-slate-50', 'text-slate-700');
+            smbStatusSpan.innerText = 'OFF';
+        }
+        
+        // 상태 아이콘 변경 (신호등)
+        if (statusIcon) {
+            statusIcon.classList.remove('bg-green-500');
+            statusIcon.classList.add('bg-red-500');
+        }
+    }
+}
+
+function updateNFSStatus(status) {
+    const nfsStatusContainer = document.querySelector('.nfs-status-container');
+    const nfsStatusSpan = document.querySelector('.nfs-status span:first-child');
+    const statusIcon = document.querySelector('.nfs-status span:last-child');
+
+    if (status === 'ON') {
+        // NFS 마운트됨
+        nfsStatusContainer.classList.remove('bg-red-50', 'border-red-100');
+        nfsStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
+        
+        // 상태 표시 스타일 변경
+        if (nfsStatusSpan) {
+            nfsStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
+            nfsStatusSpan.classList.add('bg-emerald-50', 'text-emerald-700');
+            nfsStatusSpan.innerText = 'ON';
+        }
+        
+        // 상태 아이콘 변경 (신호등)
+        if (statusIcon) {
+            statusIcon.classList.remove('bg-red-500');
+            statusIcon.classList.add('bg-green-500');
+        }
+    } else {
+        // NFS 마운트 해제됨
+        nfsStatusContainer.classList.remove('bg-green-50', 'border-green-100');
+        nfsStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
+        
+        // 상태 표시 스타일 변경
+        if (nfsStatusSpan) {
+            nfsStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
+            nfsStatusSpan.classList.add('bg-slate-50', 'text-slate-700');
+            nfsStatusSpan.innerText = 'OFF';
+        }
+        
+        // 상태 아이콘 변경 (신호등)
+        if (statusIcon) {
+            statusIcon.classList.remove('bg-green-500');
+            statusIcon.classList.add('bg-red-500');
+        }
     }
 }
 
@@ -487,42 +567,66 @@ function shutdownVM() {
 
 // 폴더 목록 HTML 생성 함수 추가
 function generateFolderListHtml(sortedFolders, showToggleButtons = true) {
+    console.log('generateFolderListHtml 호출됨', sortedFolders, showToggleButtons);
+    
     let foldersHtml = '';
     
-    // sortedFolders가 객체인 경우 배열로 변환하고 정렬
-    const foldersArray = Array.isArray(sortedFolders) 
-        ? sortedFolders 
-        : Object.entries(sortedFolders).sort((a, b) => {
-            if (a[1].is_mounted !== b[1].is_mounted) {
-                return b[1].is_mounted ? 1 : -1;
-            }
-            return new Date(b[1].mtime) - new Date(a[1].mtime);
-        });
-    
-    for (const entry of foldersArray) {
-        const folder = Array.isArray(sortedFolders) ? entry[0] : entry[0];
-        const info = Array.isArray(sortedFolders) ? entry[1] : entry[1];
-        
-        foldersHtml += `
-            <div class="flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50">
-                <div class="flex-1 overflow-hidden">
-                    <div class="text-sm mb-1 font-medium text-gray-800 truncate">${folder}</div>
-                    <div class="flex items-center toggle-text text-xs text-gray-500">
-                        <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-                        </svg>
-                        <span class="readable-time">${get_time_ago(info.mtime)}</span>
-                        <span class="hidden time-string">${info.mtime}</span>
-                    </div>
-                </div>
-                ${showToggleButtons ? `<button onclick="toggleMount('${folder}')" 
-                    class="text-xs px-2 py-1 rounded ${info.is_mounted ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-green-50 text-green-700 hover:bg-green-100'} transition-colors duration-200">
-                    ${info.is_mounted ? '마운트 해제' : '마운트'}
-                </button>` : ''}
-            </div>
-        `;
+    // sortedFolders가 비어있거나 정의되지 않은 경우 처리
+    if (!sortedFolders || (typeof sortedFolders === 'object' && Object.keys(sortedFolders).length === 0)) {
+        console.log('폴더 목록이 비어있음');
+        return '<div class="text-center py-4"><p class="text-sm text-gray-600">폴더가 없습니다.</p></div>';
     }
-    return foldersHtml;
+    
+    try {
+        // sortedFolders가 객체인 경우 배열로 변환하고 정렬
+        const foldersArray = Array.isArray(sortedFolders) 
+            ? sortedFolders 
+            : Object.entries(sortedFolders).sort((a, b) => {
+                if (a[1].is_mounted !== b[1].is_mounted) {
+                    return b[1].is_mounted ? 1 : -1;
+                }
+                return new Date(b[1].mtime) - new Date(a[1].mtime);
+            });
+        
+        console.log('변환된 foldersArray:', foldersArray);
+        
+        if (!foldersArray.length) {
+            console.log('변환 후 배열이 비어있음');
+            return '<div class="text-center py-4"><p class="text-sm text-gray-600">폴더가 없습니다.</p></div>';
+        }
+        
+        for (const entry of foldersArray) {
+            const folder = Array.isArray(sortedFolders) ? entry[0] : entry[0];
+            const info = Array.isArray(sortedFolders) ? entry[1] : entry[1];
+            
+            console.log('폴더 항목 처리 중:', folder, info);
+            
+            foldersHtml += `
+                <div class="flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50">
+                    <div class="flex-1 overflow-hidden">
+                        <div class="text-sm mb-1 font-medium text-gray-800 truncate">${folder}</div>
+                        <div class="flex items-center toggle-text text-xs text-gray-500">
+                            <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                            </svg>
+                            <span class="readable-time">${get_time_ago(info.mtime)}</span>
+                            <span class="hidden time-string">${info.mtime}</span>
+                        </div>
+                    </div>
+                    ${showToggleButtons ? `<button onclick="toggleMount('${folder}')" 
+                        class="text-xs px-2 py-1 rounded ${info.is_mounted ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-green-50 text-green-700 hover:bg-green-100'} transition-colors duration-200">
+                        ${info.is_mounted ? '마운트 해제' : '마운트'}
+                    </button>` : ''}
+                </div>
+            `;
+        }
+        
+        console.log('생성된 HTML 길이:', foldersHtml.length);
+        return foldersHtml;
+    } catch (error) {
+        console.error('generateFolderListHtml 오류:', error);
+        return '<div class="text-center py-4"><p class="text-sm text-gray-600">폴더 목록 생성 중 오류가 발생했습니다.</p></div>';
+    }
 }
 
 // toggleMount 함수 내부 수정
@@ -584,7 +688,7 @@ function updateFolderState() {
     fetch('/update_state')
         .then(response => response.json())
         .then(data => {
-            // VM과 SMB 상태 업데이트 - 중요한 UI 업데이트 먼저 처리
+            // VM과 SMB, NFS 상태 업데이트 - 중요한 UI 업데이트 먼저 처리
             const vmStatusSpan = document.querySelector('.vm-status span');
             if (vmStatusSpan) {
                 vmStatusSpan.innerText = data.vm_status;
@@ -594,6 +698,11 @@ function updateFolderState() {
             if (smbStatusSpan) {
                 smbStatusSpan.innerText = data.smb_status;
                 updateSMBStatus(data.smb_status);
+            }
+            const nfsStatusSpan = document.querySelector('.nfs-status span');
+            if (nfsStatusSpan) {
+                nfsStatusSpan.innerText = data.nfs_status;
+                updateNFSStatus(data.nfs_status);
             }
 
             // 백그라운드로 폴더 목록 처리를 위해 requestAnimationFrame 사용
@@ -611,8 +720,11 @@ function updateFolderState() {
 
 // 폴더 목록만 업데이트하는 함수로 분리
 function updateFolderList(folders) {
+    console.log('updateFolderList 호출됨', folders);
+    
     // 폴더 목록이 비어있는 경우
     if (!folders || Object.keys(folders).length === 0) {
+        console.log('폴더 목록이 비어있음');
         document.getElementById('monitoredFoldersContainer').innerHTML = `
             <div class="text-center py-4">
                 <p class="text-sm text-gray-600">감시 중인 폴더가 없습니다.</p>
@@ -639,6 +751,7 @@ function updateFolderList(folders) {
 
     // 모니터링 중인 모든 폴더 표시
     const foldersContainer = document.getElementById('monitoredFoldersContainer');
+    console.log('폴더 컨테이너 요소:', foldersContainer);
     if (foldersContainer) {
         foldersContainer.innerHTML = generateFolderListHtml(folders);
         
@@ -653,20 +766,28 @@ function updateFolderList(folders) {
     
     // SMB로 공유 중인 폴더만 필터링하여 표시
     const smbFoldersContainer = document.getElementById('smbFoldersContainer');
+    console.log('SMB 폴더 컨테이너 요소:', smbFoldersContainer);
     if (smbFoldersContainer) {
         // 마운트된 폴더만 필터링
         const mountedFolders = Object.fromEntries(
             Object.entries(folders).filter(([_, info]) => info.is_mounted)
         );
         
+        console.log('마운트된 폴더 목록:', mountedFolders);
+        console.log('마운트된 폴더 갯수:', Object.keys(mountedFolders).length);
+        
         if (Object.keys(mountedFolders).length === 0) {
+            console.log('마운트된 폴더가 없음');
             smbFoldersContainer.innerHTML = `
                 <div class="text-center py-4">
                     <p class="text-sm text-gray-600">현재 SMB로 공유 중인 폴더가 없습니다.</p>
                 </div>
             `;
         } else {
-            smbFoldersContainer.innerHTML = generateFolderListHtml(mountedFolders, false);
+            console.log('마운트된 폴더 있음, HTML 생성');
+            const htmlContent = generateFolderListHtml(mountedFolders, false);
+            console.log('생성된 HTML:', htmlContent);
+            smbFoldersContainer.innerHTML = htmlContent;
             
             // SMB 폴더 리스트에도 이벤트 리스너 추가
             smbFoldersContainer.querySelectorAll('.toggle-text').forEach(el => {
