@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GShare 설정</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
         body {
@@ -58,7 +59,7 @@
 <body>
     <div class="container setup-container">
         <div class="setup-header">
-            <h1>GShare 초기 설정</h1>
+            <h1>GShare 설정</h1>
             <p>앱을 사용하기 위한 필수 설정을 구성해주세요.</p>
         </div>
         
@@ -75,49 +76,58 @@
         {% endif %}
         
         <div class="progress" id="progress-bar">
-            <div class="progress-bar" role="progressbar" style="width: 25%;" aria-valuenow="25" aria-valuemin="0" aria-valuemax="100">1/4</div>
+            <div class="progress-bar" role="progressbar" style="width: 16.67%;" aria-valuenow="16.67" aria-valuemin="0" aria-valuemax="100">1/6</div>
+        </div>
+        
+        <!-- 설정 파일 접기/펼치기 버튼 -->
+        <div class="text-center mb-4">
+            <button class="btn btn-sm btn-outline-primary" type="button" data-toggle="collapse" data-target="#configImportExport" aria-expanded="false" aria-controls="configImportExport">
+                <i class="fas fa-cog"></i> 설정 파일 불러오기/내보내기 <i class="fas fa-chevron-down ml-1"></i>
+            </button>
         </div>
         
         <!-- 설정 파일 업로드 -->
-        <div class="card mb-4">
-            <div class="card-header bg-primary text-white">
-                <h5 class="mb-0">설정 파일 불러오기/내보내기</h5>
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-8">
-                        <form id="import-config-form" action="/import-config" method="post" enctype="multipart/form-data">
-                            <div class="form-group">
-                                <label for="config-file">YAML 설정 파일 업로드</label>
-                                <div class="input-group">
-                                    <div class="custom-file">
-                                        <input type="file" class="custom-file-input" id="config-file" name="config_file" accept=".yaml,.yml">
-                                        <label class="custom-file-label" for="config-file">파일 선택...</label>
+        <div class="collapse" id="configImportExport">
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">설정 파일 불러오기/내보내기</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <form id="import-config-form" action="/import-config" method="post" enctype="multipart/form-data">
+                                <div class="form-group">
+                                    <label for="config-file">YAML 설정 파일 업로드</label>
+                                    <div class="input-group">
+                                        <div class="custom-file">
+                                            <input type="file" class="custom-file-input" id="config-file" name="config_file" accept=".yaml,.yml">
+                                            <label class="custom-file-label" for="config-file">파일 선택...</label>
+                                        </div>
+                                        <div class="input-group-append">
+                                            <button class="btn btn-outline-primary" type="submit">
+                                                <span id="upload-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                                                업로드
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div class="input-group-append">
-                                        <button class="btn btn-outline-primary" type="submit">
-                                            <span id="upload-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
-                                            업로드
-                                        </button>
-                                    </div>
+                                    <small class="form-text text-muted">기존 config.yaml 파일을 업로드하여 설정을 불러올 수 있습니다.</small>
                                 </div>
-                                <small class="form-text text-muted">기존 config.yaml 파일을 업로드하여 설정을 불러올 수 있습니다.</small>
+                            </form>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-group w-100 text-right">
+                                <label>&nbsp;</label>
+                                <div>
+                                    <a href="/export-config" class="btn btn-outline-success" id="export-config-btn">
+                                        <i class="fas fa-download"></i> 설정 파일 내보내기
+                                    </a>
+                                </div>
+                                <small class="form-text text-muted">현재 설정을 YAML 파일로 내보냅니다.</small>
                             </div>
-                        </form>
-                    </div>
-                    <div class="col-md-4 d-flex align-items-end">
-                        <div class="form-group w-100 text-right">
-                            <label>&nbsp;</label>
-                            <div>
-                                <a href="/export-config" class="btn btn-outline-success" id="export-config-btn">
-                                    <i class="fas fa-download"></i> 설정 파일 내보내기
-                                </a>
-                            </div>
-                            <small class="form-text text-muted">현재 설정을 YAML 파일로 내보냅니다.</small>
                         </div>
                     </div>
+                    <div id="import-result" class="mt-2" style="display: none;"></div>
                 </div>
-                <div id="import-result" class="mt-2" style="display: none;"></div>
             </div>
         </div>
         
@@ -134,6 +144,12 @@
                 </li>
                 <li class="nav-item">
                     <a class="nav-link" id="monitoring-tab" data-toggle="tab" href="#monitoring" role="tab">모니터링</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="smb-tab" data-toggle="tab" href="#smb" role="tab">SMB 설정</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="other-tab" data-toggle="tab" href="#other" role="tab">기타 설정</a>
                 </li>
             </ul>
             
@@ -254,6 +270,14 @@
                             <input type="number" class="form-control" id="threshold_count" name="THRESHOLD_COUNT" required value="{{ form_data.get('THRESHOLD_COUNT', 3) }}" min="1">
                             <small class="form-text text-muted">연속으로 이 횟수만큼 임계치 이하로 측정되면 VM을 종료합니다.</small>
                         </div>
+                        <button type="button" class="btn btn-secondary" onclick="prevTab('vm-tab')">이전</button>
+                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('smb-tab')">다음</button>
+                    </div>
+                </div>
+                
+                <!-- SMB 공유 설정 -->
+                <div class="tab-pane fade" id="smb" role="tabpanel" aria-labelledby="smb-tab">
+                    <div class="form-section">
                         <h3>SMB 공유 설정</h3>
                         <div class="form-group">
                             <label for="smb_username">SMB 사용자 이름</label>
@@ -294,6 +318,14 @@
                             <label for="smb_links_dir">SMB 링크 디렉토리</label>
                             <input type="text" class="form-control" id="smb_links_dir" name="SMB_LINKS_DIR" value="{{ form_data.get('SMB_LINKS_DIR', '/mnt/gshare_links') }}">
                         </div>
+                        <button type="button" class="btn btn-secondary" onclick="prevTab('monitoring-tab')">이전</button>
+                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('other-tab')">다음</button>
+                    </div>
+                </div>
+                
+                <!-- 기타 설정 -->
+                <div class="tab-pane fade" id="other" role="tabpanel" aria-labelledby="other-tab">
+                    <div class="form-section">
                         <h3>기타 설정</h3>
                         <div class="form-group">
                             <label for="timezone">시간대</label>
@@ -313,7 +345,7 @@
                                 <option value="ERROR" {% if form_data.get('LOG_LEVEL') == 'ERROR' %}selected{% endif %}>ERROR</option>
                             </select>
                         </div>
-                        <button type="button" class="btn btn-secondary" onclick="prevTab('vm-tab')">이전</button>
+                        <button type="button" class="btn btn-secondary" onclick="prevTab('smb-tab')">이전</button>
                         <button type="submit" class="btn btn-success">설정 완료</button>
                     </div>
                 </div>
@@ -352,7 +384,7 @@
         }
         
         function updateProgressBar(tabId) {
-            const tabs = ['proxmox-tab', 'nfs-tab', 'vm-tab', 'monitoring-tab'];
+            const tabs = ['proxmox-tab', 'nfs-tab', 'vm-tab', 'monitoring-tab', 'smb-tab', 'other-tab'];
             const currentIndex = tabs.indexOf(tabId);
             const progressPercentage = ((currentIndex + 1) / tabs.length) * 100;
             
@@ -362,7 +394,9 @@
         }
         
         // 폼 제출 전 유효성 검사
-        document.getElementById('setup-form').addEventListener('submit', function(e) {
+        document.getElementById('setup-form').addEventListener('submit', async function(e) {
+            e.preventDefault(); // 항상 먼저 제출을 방지
+            
             const requiredFields = document.querySelectorAll('input[required]');
             let allValid = true;
             
@@ -376,16 +410,30 @@
             });
             
             if (!allValid) {
-                e.preventDefault();
                 alert('모든 필수 항목을 입력해주세요.');
                 return;
             }
             
-            // Proxmox API와 NFS 테스트가 통과되었는지 확인
-            if (!proxmoxApiTestPassed || !nfsTestPassed) {
-                e.preventDefault();
-                alert('Proxmox API 및 NFS 테스트를 모두 통과해야 설정을 완료할 수 있습니다.');
+            // Proxmox API 테스트가 필요한 경우 자동 실행
+            if (!proxmoxApiTestPassed) {
+                const testResult = await runProxmoxTest();
+                if (!testResult) {
+                    alert('Proxmox API 테스트에 실패했습니다. 설정을 확인하고 다시 시도해주세요.');
+                    return;
+                }
             }
+            
+            // NFS 테스트가 필요한 경우 자동 실행
+            if (!nfsTestPassed) {
+                const testResult = await runNfsTest();
+                if (!testResult) {
+                    alert('NFS 테스트에 실패했습니다. 설정을 확인하고 다시 시도해주세요.');
+                    return;
+                }
+            }
+            
+            // 모든 테스트가 통과되었으므로 폼 제출
+            this.submit();
         });
         
         // 설정 파일 업로드 처리
@@ -477,7 +525,8 @@
             label.textContent = fileName;
         });
         
-        async function testProxmoxAPI() {
+        // Proxmox API 테스트 자동 실행 함수
+        async function runProxmoxTest() {
             // 필요한 폼 데이터 가져오기
             const proxmoxHost = document.getElementById('proxmox_host').value;
             const nodeName = document.getElementById('node_name').value;
@@ -487,8 +536,7 @@
             
             // 값 검증
             if (!proxmoxHost || !nodeName || !vmId || !tokenId || !secret) {
-                alert('모든 Proxmox API 필드를 입력해주세요.');
-                return;
+                return false;
             }
             
             // UI 업데이트
@@ -535,22 +583,24 @@
                 }
                 
                 resultDiv.textContent = result.message;
+                return proxmoxApiTestPassed;
             } catch (error) {
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'mt-2 alert alert-danger';
                 resultDiv.textContent = '테스트 중 오류가 발생했습니다: ' + error.message;
                 proxmoxApiTestPassed = false;
                 updateNextButtonState('proxmox');
+                return false;
             } finally {
                 spinner.classList.add('d-none');
             }
         }
         
-        async function testNFS() {
+        // NFS 테스트 자동 실행 함수
+        async function runNfsTest() {
             const nfsPath = document.getElementById('NFS_PATH').value;
             if (!nfsPath) {
-                alert('NFS 경로를 입력해주세요.');
-                return;
+                return false;
             }
             
             // UI 업데이트
@@ -593,15 +643,26 @@
                 }
                 
                 resultDiv.textContent = result.message;
+                return nfsTestPassed;
             } catch (error) {
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'mt-2 alert alert-danger';
                 resultDiv.textContent = '테스트 중 오류가 발생했습니다: ' + error.message;
                 nfsTestPassed = false;
                 updateNextButtonState('nfs');
+                return false;
             } finally {
                 spinner.classList.add('d-none');
             }
+        }
+        
+        // 기존 테스트 함수 수정
+        async function testProxmoxAPI() {
+            return await runProxmoxTest();
+        }
+        
+        async function testNFS() {
+            return await runNfsTest();
         }
         
         // 탭별 다음 버튼 상태 업데이트
@@ -631,6 +692,15 @@
         document.addEventListener('DOMContentLoaded', function() {
             updateNextButtonState('proxmox');
             updateNextButtonState('nfs');
+            
+            // 설정 파일 접기/펼치기 버튼 아이콘 변경
+            $('#configImportExport').on('show.bs.collapse', function () {
+                $('.fa-chevron-down').removeClass('fa-chevron-down').addClass('fa-chevron-up');
+            });
+            
+            $('#configImportExport').on('hide.bs.collapse', function () {
+                $('.fa-chevron-up').removeClass('fa-chevron-up').addClass('fa-chevron-down');
+            });
         });
     </script>
 </body>
