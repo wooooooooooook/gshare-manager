@@ -12,7 +12,7 @@ services:
     environment:
       - TZ=Asia/Seoul
       - FLASK_PORT=5000
-      - LOG_LEVEL=INFO
+      - LOG_LEVEL=DEBUG
     privileged: true
     cap_add:
       - SYS_ADMIN

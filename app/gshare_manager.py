@@ -17,6 +17,7 @@ from web_server import init_server, run_flask_app, run_landing_page
 from smb_manager import SMBManager
 import yaml
 import traceback
+import urllib3
 
 # 전역 변수로 상태와 관리자 객체 선언
 current_state = None
@@ -46,12 +47,12 @@ class State:
         return data
 
 class FolderMonitor:
-    def __init__(self, config: GshareConfig, proxmox_api: ProxmoxAPI):
+    def __init__(self, config: GshareConfig, proxmox_api: ProxmoxAPI, last_shutdown_time: float):
         self.config = config
         self.proxmox_api = proxmox_api
         self.previous_mtimes = {}  # 각 서브폴더별 이전 수정 시간을 저장
         self.active_links = set()  # 현재 활성화된 심볼릭 링크 목록
-        self.last_shutdown_time = self._load_last_shutdown_time()  # VM 마지막 종료 시간
+        self.last_shutdown_time = last_shutdown_time  # VM 마지막 종료 시간
         self.nfs_uid, self.nfs_gid = self._get_nfs_ownership()
         logging.debug(f"NFS 마운트 경로의 UID/GID 확인 완료: {self.nfs_uid}/{self.nfs_gid}")
         
@@ -67,36 +68,51 @@ class FolderMonitor:
         logging.debug("최근 수정된 폴더의 링크 생성 중...")
         self._create_links_for_recently_modified()
 
-    def _load_last_shutdown_time(self) -> float:
-        """VM 마지막 종료 시간을 로드 (UTC 기준)"""
+    def _get_nfs_ownership(self) -> tuple[int, int]:
+        """NFS 마운트 경로의 UID/GID를 반환"""
+        # 마운트 경로가 존재하는지 확인
+        if not os.path.exists(self.config.MOUNT_PATH):
+            error_msg = f"NFS 마운트 경로가 존재하지 않습니다: {self.config.MOUNT_PATH}"
+            logging.error(error_msg)
+            raise FileNotFoundError(error_msg)
+            
+        # 마운트 경로가 디렉토리인지 확인
+        if not os.path.isdir(self.config.MOUNT_PATH):
+            error_msg = f"NFS 마운트 경로가 디렉토리가 아닙니다: {self.config.MOUNT_PATH}"
+            logging.error(error_msg)
+            raise NotADirectoryError(error_msg)
+            
+        # 마운트 경로에 접근 권한이 있는지 확인
+        if not os.access(self.config.MOUNT_PATH, os.R_OK):
+            error_msg = f"NFS 마운트 경로에 읽기 권한이 없습니다: {self.config.MOUNT_PATH}"
+            logging.error(error_msg)
+            raise PermissionError(error_msg)
+        
+        # ls -n 명령어로 마운트 경로의 첫 번째 항목의 UID/GID 확인
         try:
-            if os.path.exists('last_shutdown.txt'):
-                with open('last_shutdown.txt', 'r') as f:
-                    return float(f.read().strip())
-            else:
-                # 파일이 없는 경우 현재 UTC 시간을 저장하고 반환
-                current_time = datetime.now(pytz.UTC).timestamp()
-                with open('last_shutdown.txt', 'w') as f:
-                    f.write(str(current_time))
-                logging.info(f"VM 종료 시간 파일이 없어 현재 시간으로 생성: {datetime.fromtimestamp(current_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}")
-                return current_time
-        except Exception as e:
-            # 오류 발생 시 현재 UTC 시간 사용
-            current_time = datetime.now(pytz.UTC).timestamp()
-            logging.error(f"VM 마지막 종료 시간 로드 실패: {e}, 현재 시간을 사용합니다.")
-            return current_time
-
-    def save_last_shutdown_time(self) -> None:
-        """현재 시간을 VM 마지막 종료 시간으로 저장 (UTC 기준)"""
-        try:
-            # UTC 기준 현재 시간
-            current_time = datetime.now(pytz.UTC).timestamp()
-            with open('last_shutdown.txt', 'w') as f:
-                f.write(str(current_time))
-            self.last_shutdown_time = current_time
-            logging.info(f"VM 종료 시간 저장됨: {datetime.fromtimestamp(current_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}")
-        except Exception as e:
-            logging.error(f"VM 종료 시간 저장 실패: {e}")
+            result = subprocess.run(['ls', '-n', self.config.MOUNT_PATH], capture_output=True, text=True, check=True)
+            # 출력 결과를 줄 단위로 분리
+            lines = result.stdout.strip().split('\n')
+            # 첫 번째 파일/디렉토리 정보가 있는 줄 찾기 (total 제외)
+            for line in lines:
+                if line.startswith('total'):
+                    continue
+                # 공백으로 분리하여 UID(3번째 필드)와 GID(4번째 필드) 추출
+                parts = line.split()
+                if len(parts) >= 4:
+                    uid = int(parts[2])
+                    gid = int(parts[3])
+                    logging.info(f"NFS 마운트 경로의 UID/GID: {uid}/{gid}")
+                    return uid, gid
+            
+            # 디렉토리가 비어있는 경우
+            error_msg = "마운트 경로가 비어있거나 파일/디렉토리 정보를 읽을 수 없습니다. UID/GID를 0/0으로 반환합니다."
+            logging.error(error_msg)
+            return 0, 0
+        except subprocess.CalledProcessError as e:
+            error_msg = f"ls 명령 실행 실패: {e}"
+            logging.error(error_msg)
+            raise RuntimeError(error_msg)
 
     def _get_subfolders(self) -> list[str]:
         """마운트 경로의 모든 서브폴더를 재귀적으로 반환"""
@@ -278,52 +294,6 @@ class FolderMonitor:
         self.active_links.clear()
         logging.info("모든 리소스가 정리되었습니다.")
 
-    def _get_nfs_ownership(self) -> tuple[int, int]:
-        """NFS 마운트 경로의 UID/GID를 반환"""
-        # 마운트 경로가 존재하는지 확인
-        if not os.path.exists(self.config.MOUNT_PATH):
-            error_msg = f"NFS 마운트 경로가 존재하지 않습니다: {self.config.MOUNT_PATH}"
-            logging.error(error_msg)
-            raise FileNotFoundError(error_msg)
-            
-        # 마운트 경로가 디렉토리인지 확인
-        if not os.path.isdir(self.config.MOUNT_PATH):
-            error_msg = f"NFS 마운트 경로가 디렉토리가 아닙니다: {self.config.MOUNT_PATH}"
-            logging.error(error_msg)
-            raise NotADirectoryError(error_msg)
-            
-        # 마운트 경로에 접근 권한이 있는지 확인
-        if not os.access(self.config.MOUNT_PATH, os.R_OK):
-            error_msg = f"NFS 마운트 경로에 읽기 권한이 없습니다: {self.config.MOUNT_PATH}"
-            logging.error(error_msg)
-            raise PermissionError(error_msg)
-        
-        # ls -n 명령어로 마운트 경로의 첫 번째 항목의 UID/GID 확인
-        try:
-            result = subprocess.run(['ls', '-n', self.config.MOUNT_PATH], capture_output=True, text=True, check=True)
-            # 출력 결과를 줄 단위로 분리
-            lines = result.stdout.strip().split('\n')
-            # 첫 번째 파일/디렉토리 정보가 있는 줄 찾기 (total 제외)
-            for line in lines:
-                if line.startswith('total'):
-                    continue
-                # 공백으로 분리하여 UID(3번째 필드)와 GID(4번째 필드) 추출
-                parts = line.split()
-                if len(parts) >= 4:
-                    uid = int(parts[2])
-                    gid = int(parts[3])
-                    logging.info(f"NFS 마운트 경로의 UID/GID: {uid}/{gid}")
-                    return uid, gid
-            
-            # 디렉토리가 비어있는 경우
-            error_msg = "마운트 경로가 비어있거나 파일/디렉토리 정보를 읽을 수 없습니다. UID/GID를 0/0으로 반환합니다."
-            logging.error(error_msg)
-            return 0, 0
-        except subprocess.CalledProcessError as e:
-            error_msg = f"ls 명령 실행 실패: {e}"
-            logging.error(error_msg)
-            raise RuntimeError(error_msg)
-
 class GShareManager:
     def __init__(self, config: GshareConfig, proxmox_api: ProxmoxAPI):
         self.config = config
@@ -332,21 +302,42 @@ class GShareManager:
         self.last_action = "프로그램 시작"
         self.restart_required = False
         
+        # VM 마지막 종료 시간 로드
+        self.last_shutdown_time = self._load_last_shutdown_time()
+        
         # NFS 마운트 먼저 시도
-        logging.info("NFS 마운트 시도 중...")
         self._mount_nfs()
-        logging.info("NFS 마운트 작업 완료")
         
         # FolderMonitor 초기화 (NFS 마운트 이후에 수행)
         logging.info("FolderMonitor 초기화 중...")
-        self.folder_monitor = FolderMonitor(config, proxmox_api)
-        self.last_shutdown_time = datetime.fromtimestamp(self.folder_monitor.last_shutdown_time).strftime('%Y-%m-%d %H:%M:%S')
+        self.folder_monitor = FolderMonitor(config, proxmox_api, self.last_shutdown_time)
+        self.last_shutdown_time_str = datetime.fromtimestamp(self.last_shutdown_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
         logging.info("FolderMonitor 초기화 완료")
         
         # SMBManager 초기화 (FolderMonitor의 SMBManager를 사용)
         self.smb_manager = self.folder_monitor.smb_manager
         logging.info("SMBManager 참조 완료")
-        
+    
+    def _load_last_shutdown_time(self) -> float:
+        """VM 마지막 종료 시간을 로드 (UTC 기준)"""
+        try:
+            shutdown_file_path = '/config/.last_shutdown'
+            if os.path.exists(shutdown_file_path):
+                with open(shutdown_file_path, 'r') as f:
+                    return float(f.read().strip())
+            else:
+                # 파일이 없는 경우 현재 UTC 시간을 저장하고 반환
+                current_time = datetime.now(pytz.UTC).timestamp()
+                with open(shutdown_file_path, 'w') as f:
+                    f.write(str(current_time))
+                logging.info(f"VM 종료 시간 파일이 없어 현재 시간으로 생성: {datetime.fromtimestamp(current_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}")
+                return current_time
+        except Exception as e:
+            # 오류 발생 시 현재 UTC 시간 사용
+            current_time = datetime.now(pytz.UTC).timestamp()
+            logging.error(f"VM 마지막 종료 시간 로드 실패: {e}, 현재 시간을 사용합니다.")
+            return current_time
+
     def _mount_nfs(self):
         """NFS 마운트 시도"""
         try:
@@ -400,10 +391,9 @@ class GShareManager:
 
                 uptime = self.proxmox_api.get_vm_uptime()
                 uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
-                self.last_shutdown_time = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
                 
                 # VM 종료 시간 저장
-                self.folder_monitor.save_last_shutdown_time()
+                self.save_last_shutdown_time()
                 
                 # VM 종료 시 모든 SMB 공유 비활성화
                 self.smb_manager.deactivate_smb_share()
@@ -423,11 +413,6 @@ class GShareManager:
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
             uptime = self.proxmox_api.get_vm_uptime()
             uptime_str = self._format_uptime(uptime) if uptime is not None else "알 수 없음"
-            # 타임존을 고려하여 timestamp를 문자열로 변환
-            self.last_shutdown_time = datetime.fromtimestamp(
-                self.folder_monitor.last_shutdown_time,
-                pytz.timezone(self.config.TIMEZONE)
-            ).strftime('%Y-%m-%d %H:%M:%S')
 
             current_state = State(
                 last_check_time=current_time,
@@ -438,7 +423,7 @@ class GShareManager:
                 low_cpu_count=self.low_cpu_count,
                 threshold_count=self.config.THRESHOLD_COUNT,
                 uptime=uptime_str,
-                last_shutdown_time=self.last_shutdown_time,
+                last_shutdown_time=self.last_shutdown_time_str,
                 monitored_folders=self.folder_monitor.get_monitored_folders(),
                 smb_running=self.smb_manager.check_smb_status(),
                 check_interval=self.config.CHECK_INTERVAL,
@@ -529,6 +514,23 @@ class GShareManager:
             except Exception as e:
                 logging.error(f"모니터링 루프에서 예상치 못한 오류 발생: {e}")
                 time.sleep(self.config.CHECK_INTERVAL)  # 오류 발생시에도 대기 후 계속 실행
+
+    def save_last_shutdown_time(self) -> None:
+        """현재 시간을 VM 마지막 종료 시간으로 저장 (UTC 기준)"""
+        try:
+            # UTC 기준 현재 시간
+            current_time = datetime.now(pytz.UTC).timestamp()
+            shutdown_file_path = '/config/.last_shutdown'
+            with open(shutdown_file_path, 'w') as f:
+                f.write(str(current_time))
+            self.last_shutdown_time = current_time
+            # 폴더 모니터의 last_shutdown_time도 업데이트
+            if hasattr(self, 'folder_monitor') and self.folder_monitor is not None:
+                self.folder_monitor.last_shutdown_time = current_time
+            self.last_shutdown_time_str = datetime.fromtimestamp(current_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
+            logging.info(f"VM 종료 시간 저장됨: {self.last_shutdown_time_str}")
+        except Exception as e:
+            logging.error(f"VM 종료 시간 저장 실패: {e}")
 
 def setup_logging():
     """기본 로깅 설정을 초기화"""
@@ -690,6 +692,8 @@ if __name__ == "__main__":
     logging.info("GShare 애플리케이션 시작")
     logging.info("──────────────────────────────────────────────────")
     
+    # 보안 경고 억제
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     try:
         # 초기화 완료 플래그 경로
         init_flag_path = '/config/.init_complete'
@@ -806,3 +810,4 @@ if __name__ == "__main__":
 
 # 프로그램 종료 시 호출
 atexit.register(lambda: gshare_manager.folder_monitor.cleanup_resources() if gshare_manager else None)
+
