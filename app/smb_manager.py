@@ -63,20 +63,46 @@ class SMBManager:
    ntlm auth = yes
    client ntlmv2 auth = no
    lanman auth = yes
+   # 디버깅 설정
+   log level = 3
 """.format(self.config.SMB_PORT)
             # 기본 설정 저장
             with open('/etc/samba/smb.conf', 'w') as f:
                 f.write(base_config)
 
-            # Samba 사용자 추가
-            try:
-                subprocess.run(['smbpasswd', '-a', self.config.SMB_USERNAME],
-                               input=f"{self.config.SMB_PASSWORD}\n{self.config.SMB_PASSWORD}\n".encode(
-                ),
-                    capture_output=True)
-            except subprocess.CalledProcessError:
-                pass  # 사용자가 이미 존재하는 경우 무시
-
+            # 기존 Samba 사용자 존재 여부 확인
+            user_in_samba = subprocess.run(['pdbedit', '-L', self.config.SMB_USERNAME], 
+                                       capture_output=True).returncode == 0
+            
+            # 시스템에 사용자 존재 여부 확인
+            user_exists = subprocess.run(['id', self.config.SMB_USERNAME], 
+                                      capture_output=True).returncode == 0
+            
+            # 사용자 관리 단계별 처리
+            if user_in_samba:
+                # 1. Samba 사용자가 이미 존재하면 삭제 후 다시 생성
+                logging.debug(f"기존 Samba 사용자 {self.config.SMB_USERNAME} 삭제 시도")
+                subprocess.run(['smbpasswd', '-x', self.config.SMB_USERNAME], 
+                            capture_output=True, check=False)
+            
+            if user_exists:
+                # 2. 시스템 사용자가 존재하면 패스워드 설정
+                passwd_cmd = f"{self.config.SMB_PASSWORD}\n{self.config.SMB_PASSWORD}\n".encode()
+                result = subprocess.run(['smbpasswd', '-a', '-s', self.config.SMB_USERNAME],
+                                     input=passwd_cmd, capture_output=True)
+                
+                if result.returncode == 0:
+                    logging.debug(f"Samba 사용자 {self.config.SMB_USERNAME} 비밀번호 설정 성공")
+                else:
+                    logging.error(f"Samba 사용자 비밀번호 설정 실패: {result.stderr.decode()}")
+                
+                # 사용자 활성화
+                subprocess.run(['smbpasswd', '-e', self.config.SMB_USERNAME], check=False)
+                logging.debug(f"Samba 사용자 {self.config.SMB_USERNAME} 활성화")
+            else:
+                logging.debug(f"시스템에 {self.config.SMB_USERNAME} 사용자가 존재하지 않습니다.")
+                # 사용자 생성은 _set_smb_user_ownership 메서드에서 수행됨
+            
             logging.debug("SMB 기본 설정 초기화 완료")
         except Exception as e:
             logging.error(f"SMB 기본 설정 초기화 실패: {e}")
@@ -97,9 +123,20 @@ class SMBManager:
     def start_samba_service(self) -> None:
         """Samba 서비스 시작"""
         try:
+            # 먼저 잔여 프로세스 확인 및 종료
+            self.stop_samba_service()
+            
             # Docker 환경에서는 직접 데몬 실행
             subprocess.run(['smbd', '--daemon'], check=False)
             subprocess.run(['nmbd', '--daemon'], check=False)
+            
+            # 서비스 시작 확인
+            time.sleep(1)
+            if self.check_smb_status():
+                logging.debug("Samba 서비스가 성공적으로 시작되었습니다.")
+            else:
+                logging.warning("Samba 서비스 시작 후에도 실행되지 않는 것으로 확인됩니다.")
+                
         except Exception as e:
             logging.error(f"Samba 서비스 시작 실패: {e}")
             raise
@@ -110,6 +147,28 @@ class SMBManager:
             # 프로세스 종료
             subprocess.run(['pkill', 'smbd'], check=False)
             subprocess.run(['pkill', 'nmbd'], check=False)
+            
+            # PID 파일 확인 및 제거
+            pid_files = ['/run/samba/smbd.pid', '/run/samba/nmbd.pid']
+            for pid_file in pid_files:
+                if os.path.exists(pid_file):
+                    try:
+                        os.remove(pid_file)
+                        logging.debug(f"PID 파일 제거됨: {pid_file}")
+                    except Exception as e:
+                        logging.warning(f"PID 파일 제거 실패 ({pid_file}): {e}")
+            
+            # 잔여 프로세스 확인 및 강제 종료
+            time.sleep(1)
+            for process in ['smbd', 'nmbd']:
+                try:
+                    check = subprocess.run(['pgrep', process], capture_output=True)
+                    if check.returncode == 0:
+                        logging.warning(f"{process} 프로세스가 여전히 실행 중입니다. 강제 종료를 시도합니다.")
+                        subprocess.run(['pkill', '-9', process], check=False)
+                except Exception as e:
+                    logging.error(f"프로세스 확인 중 오류: {e}")
+                    
         except Exception as e:
             logging.error(f"Samba 서비스 중지 실패: {e}")
 
@@ -183,17 +242,9 @@ class SMBManager:
    read only = yes
    create mask = 0644
    directory mask = 0755
-   force user = {self.config.SMB_USERNAME}
-   force group = {self.config.SMB_USERNAME}
    veto files = /@*
    hide dot files = yes
    delete veto files = no
-   follow symlinks = yes
-   wide links = yes
-   unix extensions = no
-   allow insecure wide links = yes
-   ntlm auth = yes
-   lanman auth = yes
 """
             # 새로운 공유 설정 추가
             final_lines.append(share_config)
@@ -216,6 +267,10 @@ class SMBManager:
 
             # SMB 설정 파일 업데이트
             self.update_smb_config()
+            
+            # SMB 사용자 및 비밀번호 설정 재확인
+            logging.debug("SMB 공유 활성화 시 사용자 설정 재확인")
+            self._set_smb_user_ownership(start_service=False)
             
             # 심볼릭 링크 소유권 수정
             self.fix_symlinks_ownership()
@@ -344,11 +399,21 @@ class SMBManager:
 
                     # SMB 패스워드 설정
                     if smb_password:
+                        # 시스템 사용자 패스워드 설정
                         proc = subprocess.Popen(
                             ['passwd', smb_username], stdin=subprocess.PIPE)
                         proc.communicate(
                             input=f"{smb_password}\n{smb_password}\n".encode())
-                        logging.debug(f"사용자 '{smb_username}' 패스워드 설정 완료")
+                        
+                        # Samba 사용자 패스워드 설정 (추가)
+                        passwd_cmd = f"{smb_password}\n{smb_password}\n".encode()
+                        smb_result = subprocess.run(['smbpasswd', '-a', '-s', smb_username],
+                                                 input=passwd_cmd, capture_output=True)
+                        if smb_result.returncode == 0:
+                            subprocess.run(['smbpasswd', '-e', smb_username], check=False)
+                            logging.debug(f"Samba 사용자 '{smb_username}' 패스워드 설정 및 활성화 완료")
+                        else:
+                            logging.error(f"Samba 사용자 패스워드 설정 실패: {smb_result.stderr.decode()}")
 
                     logging.debug(
                         f"사용자 '{smb_username}' 생성 완료 (UID={self.nfs_uid}, GID={self.nfs_gid})")
@@ -384,11 +449,49 @@ class SMBManager:
                         ['chown', '-R', f"{smb_username}:{group_name}", self.links_dir], check=False)
                     logging.debug(
                         f"사용자 '{smb_username}'의 UID/GID 수정 완료 (UID={self.nfs_uid}, GID={self.nfs_gid})")
+                    
+                    # SMB 패스워드 다시 설정 (추가)
+                    if smb_password:
+                        passwd_cmd = f"{smb_password}\n{smb_password}\n".encode()
+                        # 기존 사용자 삭제 후 다시 추가
+                        subprocess.run(['smbpasswd', '-x', smb_username], capture_output=True, check=False)
+                        smb_result = subprocess.run(['smbpasswd', '-a', '-s', smb_username],
+                                                 input=passwd_cmd, capture_output=True)
+                        if smb_result.returncode == 0:
+                            subprocess.run(['smbpasswd', '-e', smb_username], check=False)
+                            logging.debug(f"Samba 사용자 '{smb_username}' 패스워드 재설정 및 활성화 완료")
+                        else:
+                            logging.error(f"Samba 사용자 패스워드 재설정 실패: {smb_result.stderr.decode()}")
+                    
                 except Exception as e:
                     logging.error(f"사용자 UID/GID 수정 중 오류 발생: {e}")
             else:
-                # 3. 사용자가 있고 UID/GID도 일치함 - 작업 없음
+                # 3. 사용자가 있고 UID/GID도 일치함 - Samba 비밀번호 확인 및 재설정
                 logging.debug(f"사용자 '{smb_username}'의 UID/GID가 이미 NFS와 일치합니다.")
+                
+                # Samba 사용자 비밀번호 재설정 추가 (중요!)
+                if smb_password:
+                    try:
+                        # 기존 Samba 사용자 존재 여부 확인
+                        user_in_samba = subprocess.run(['pdbedit', '-L', smb_username], 
+                                                     capture_output=True).returncode == 0
+                        
+                        if user_in_samba:
+                            # Samba 사용자가 이미 존재하면 삭제 후 다시 생성
+                            subprocess.run(['smbpasswd', '-x', smb_username], capture_output=True, check=False)
+                        
+                        # Samba 사용자 추가 및 비밀번호 설정
+                        passwd_cmd = f"{smb_password}\n{smb_password}\n".encode()
+                        smb_result = subprocess.run(['smbpasswd', '-a', '-s', smb_username],
+                                                 input=passwd_cmd, capture_output=True)
+                        
+                        if smb_result.returncode == 0:
+                            subprocess.run(['smbpasswd', '-e', smb_username], check=False)
+                            logging.debug(f"Samba 사용자 '{smb_username}' 패스워드 재설정 및 활성화 완료")
+                        else:
+                            logging.error(f"Samba 사용자 패스워드 재설정 실패: {smb_result.stderr.decode()}")
+                    except Exception as e:
+                        logging.error(f"Samba 사용자 비밀번호 설정 중 오류 발생: {e}")
 
             # 서비스 시작 (요청된 경우)
             if start_service:
