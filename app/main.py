@@ -244,7 +244,7 @@ class FolderMonitor:
             # 실제 심볼릭 링크가 존재하는지 확인
             # SMBManager에서 사용하는 링크 경로 값 사용
             links_dir = self.smb_manager.links_dir
-            symlink_path = os.path.join(links_dir, path)
+            symlink_path = os.path.join(links_dir, path.replace(os.sep, '_'))
             is_mounted = os.path.exists(
                 symlink_path) and os.path.islink(symlink_path)
 

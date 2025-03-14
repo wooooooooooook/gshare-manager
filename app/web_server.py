@@ -485,7 +485,7 @@ class GshareWebServer:
 
             # 실제 심볼릭 링크가 존재하는지 확인
             links_dir = self.manager.smb_manager.links_dir
-            symlink_path = os.path.join(links_dir, folder)
+            symlink_path = os.path.join(links_dir, folder.replace(os.sep, '_'))
             is_mounted = os.path.exists(
                 symlink_path) and os.path.islink(symlink_path)
 
