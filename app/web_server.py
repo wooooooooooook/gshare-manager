@@ -13,6 +13,7 @@ import tempfile
 from config import GshareConfig  # type: ignore
 import time
 import traceback
+from flask_socketio import SocketIO  # type: ignore
 
 
 class GshareWebServer:
@@ -33,6 +34,8 @@ class GshareWebServer:
         self.config = None
         self.is_setup_complete = False
         self.log_file = os.path.join('/logs', 'gshare_manager.log')
+        # SocketIO 초기화
+        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
         self._setup_logging()
         self._register_routes()
 
@@ -135,6 +138,10 @@ class GshareWebServer:
         self.app.add_url_rule('/shutdown_vm', 'shutdown_vm', self.shutdown_vm)
         self.app.add_url_rule('/toggle_mount/<path:folder>',
                               'toggle_mount', self.toggle_mount)
+        # SMB 토글 엔드포인트를 두 개로 분리
+        self.app.add_url_rule('/activate_smb', 'activate_smb', self.activate_smb)
+        self.app.add_url_rule('/deactivate_smb', 'deactivate_smb', self.deactivate_smb)
+        self.app.add_url_rule('/remount_nfs', 'remount_nfs', self.remount_nfs)
         self.app.add_url_rule('/get_config', 'get_config', self.get_config)
         self.app.add_url_rule('/update_config', 'update_config',
                               self.update_config, methods=['POST'])
@@ -150,6 +157,9 @@ class GshareWebServer:
                               self.restart_app, methods=['POST'])
         self.app.add_url_rule('/check_restart_status',
                               'check_restart_status', self.check_restart_status)
+
+        # SocketIO 이벤트 핸들러 등록
+        self._register_socket_events()
 
         # 에러 핸들러 등록
         @self.app.errorhandler(Exception)
@@ -178,12 +188,34 @@ class GshareWebServer:
 
         @self.app.errorhandler(404)
         def page_not_found(e):
-            logging.warning(f"404 에러: {request.path}")
             return """
             <h1>페이지를 찾을 수 없습니다</h1>
             <p>요청하신 페이지가 존재하지 않습니다.</p>
             <p><a href="/">메인 페이지로 돌아가기</a></p>
             """, 404
+
+    def _register_socket_events(self):
+        """SocketIO 이벤트 핸들러 등록"""
+        @self.socketio.on('connect')
+        def handle_connect():
+            logging.debug("클라이언트가 WebSocket에 연결되었습니다.")
+            # 연결 시 즉시 현재 상태 전송
+            self.emit_state_update()
+            self.emit_log_update()
+
+        @self.socketio.on('request_state')
+        def handle_request_state():
+            logging.debug("클라이언트가 상태 정보를 요청했습니다.")
+            self.emit_state_update()
+
+        @self.socketio.on('request_log')
+        def handle_request_log():
+            logging.debug("클라이언트가 로그 정보를 요청했습니다.")
+            self.emit_log_update()
+            
+        @self.socketio.on('disconnect')
+        def handle_disconnect():
+            logging.debug("클라이언트가 WebSocket 연결을 종료했습니다.")
 
     def main_page(self):
         """메인 페이지 표시"""
@@ -345,6 +377,20 @@ class GshareWebServer:
             state = self._get_default_state()
             return jsonify(state.to_dict())
 
+    def emit_state_update(self):
+        """소켓을 통해 상태 업데이트 전송"""
+        try:
+            if self.manager is not None and hasattr(self.manager, 'current_state'):
+                if self.manager.current_state:
+                    state_dict = self.manager.current_state.to_dict()
+                    self.socketio.emit('state_update', state_dict)
+                    logging.debug(f"소켓을 통한 상태 업데이트 전송 - last_check_time: {state_dict.get('last_check_time')}")
+                    return True
+            return False
+        except Exception as e:
+            logging.error(f"소켓 상태 전송 중 오류: {e}")
+            return False
+
     def update_log(self):
         """로그 업데이트"""
         if os.path.exists(self.log_file):
@@ -353,6 +399,20 @@ class GshareWebServer:
                 return log_content
         else:
             return "Log file not found.", 404
+
+    def emit_log_update(self):
+        """소켓을 통해 로그 업데이트 전송"""
+        try:
+            if os.path.exists(self.log_file):
+                with open(self.log_file, 'r') as file:
+                    log_content = file.read()
+                    self.socketio.emit('log_update', log_content)
+                    logging.debug("소켓을 통한 로그 업데이트 전송")
+                    return True
+            return False
+        except Exception as e:
+            logging.error(f"소켓 로그 전송 중 오류: {e}")
+            return False
 
     def clear_log(self):
         """로그 지우기"""
@@ -492,19 +552,110 @@ class GshareWebServer:
             if is_mounted:
                 # 마운트 해제
                 if self.manager.smb_manager.remove_symlink(folder):
-                    self.manager._update_state()
                     return jsonify({"status": "success", "message": f"{folder} 마운트가 해제되었습니다."})
                 else:
                     return jsonify({"status": "error", "message": f"{folder} 마운트 해제 실패"}), 500
             else:
                 # 마운트 활성화
                 if self.manager.smb_manager.create_symlink(folder) and self.manager.smb_manager.activate_smb_share():
-                    self.manager._update_state()
                     return jsonify({"status": "success", "message": f"{folder} 마운트가 활성화되었습니다."})
                 else:
                     return jsonify({"status": "error", "message": f"{folder} 마운트 활성화 실패"}), 500
         except Exception as e:
             return jsonify({"status": "error", "message": f"마운트 상태 변경 실패: {str(e)}"}), 500
+
+    def activate_smb(self):
+        """SMB 활성화"""
+        try:
+            if self.manager is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
+                
+            # SMB 활성화
+            if self.manager.smb_manager.activate_smb_share():
+                return jsonify({"status": "success", "message": "SMB 공유가 활성화되었습니다."})
+            else:
+                return jsonify({"status": "error", "message": "SMB 공유 활성화 실패"}), 500
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"SMB 활성화 실패: {str(e)}"}), 500
+
+    def deactivate_smb(self):
+        """SMB 비활성화"""
+        try:
+            if self.manager is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
+                
+            # SMB 비활성화
+            if self.manager.smb_manager.deactivate_smb_share():
+                return jsonify({"status": "success", "message": "SMB 공유가 비활성화되었습니다."})
+            else:
+                return jsonify({"status": "error", "message": "SMB 공유 비활성화 실패"}), 500
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"SMB 비활성화 실패: {str(e)}"}), 500
+
+    def remount_nfs(self):
+        """NFS 재마운트"""
+        try:
+            if self.manager is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
+
+            # NFS 재마운트 시도
+            logging.info("NFS 재마운트 시도")
+            
+            # 마운트 경로 가져오기
+            if not hasattr(self.manager, 'config') or not hasattr(self.manager.config, 'MOUNT_PATH'):
+                return jsonify({"status": "error", "message": "NFS 마운트 경로 설정이 없습니다."}), 500
+                
+            mount_path = self.manager.config.MOUNT_PATH
+            
+            try:
+                # 현재 마운트 상태 확인
+                mount_check = subprocess.run(['mount'], capture_output=True, text=True)
+                is_mounted = False
+                
+                # 마운트 목록에서 해당 경로 검색
+                for line in mount_check.stdout.splitlines():
+                    if mount_path in line and ('nfs' in line or 'type nfs' in line):
+                        is_mounted = True
+                        break
+                        
+                if is_mounted:
+                    # NFS 마운트 해제 시도
+                    logging.debug(f"기존 NFS 마운트 해제 시도: {mount_path}")
+                    subprocess.run(["umount", "-f", mount_path], stderr=subprocess.PIPE, check=False)
+                    logging.debug(f"NFS 마운트 해제 명령 실행 완료")
+                else:
+                    logging.debug(f"NFS가 마운트되어 있지 않음: {mount_path}")
+            except Exception as e:
+                logging.warning(f"NFS 마운트 상태 확인 또는 해제 중 오류 발생 (계속 진행): {e}")
+            
+            # 잠시 대기
+            time.sleep(1)
+            
+            try:
+                # NFS 마운트 시도
+                logging.debug("NFS 마운트 시도")
+                self.manager._mount_nfs()
+                
+                # 마운트 상태 다시 확인
+                mount_check = subprocess.run(['mount'], capture_output=True, text=True)
+                is_mounted = False
+                
+                for line in mount_check.stdout.splitlines():
+                    if mount_path in line and ('nfs' in line or 'type nfs' in line):
+                        is_mounted = True
+                        break
+                
+                if is_mounted:
+                    return jsonify({"status": "success", "message": "NFS가 성공적으로 재마운트되었습니다."})
+                else:
+                    return jsonify({"status": "error", "message": "NFS 마운트 시도했으나 마운트 상태를 확인할 수 없습니다."}), 500
+            except Exception as e:
+                logging.error(f"NFS 재마운트 실패: {e}")
+                return jsonify({"status": "error", "message": f"NFS 재마운트 실패: {str(e)}"}), 500
+                
+        except Exception as e:
+            logging.error(f"NFS 재마운트 요청 처리 중 오류: {e}")
+            return jsonify({"status": "error", "message": f"NFS 재마운트 요청 실패: {str(e)}"}), 500
 
     def get_config(self):
         """설정 정보 제공"""
@@ -967,7 +1118,8 @@ class GshareWebServer:
 
             BaseWSGIServer.server_bind = custom_server_bind
 
-            self.app.run(host=host, port=port, debug=False, use_reloader=False)
+            # app.run 대신 socketio.run 사용 - allow_unsafe_werkzeug=True 추가
+            self.socketio.run(self.app, host=host, port=port, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
         except OSError as e:
             if e.errno == 98:
                 logging.warning(f"포트 {port} 이미 사용 중: 다른 포트로 시도합니다.")

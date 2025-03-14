@@ -18,13 +18,14 @@ from smb_manager import SMBManager
 import yaml  # type: ignore
 import traceback
 import urllib3  # type: ignore
+import json  # state를 JSON으로 직렬화하기 위해 추가
 
 # SSL 경고 메시지 비활성화
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 전역 변수로 상태와 관리자 객체 선언
 gshare_manager = None
-
+gshare_web_server = None
 
 @dataclass
 class State:
@@ -556,11 +557,15 @@ class GShareManager:
                     logging.error(f"VM 모니터링 중 오류: {e}")
 
                 try:
-                    # 상태 업데이트 (웹서버용)
-                    self.current_state = self._update_state()  # 인스턴스 변수와 전역 변수 모두 업데이트
-                    # 상태 업데이트 로깅 추가
-                    logging.debug(
-                        f"상태 업데이트 완료 - last_check_time: {self.current_state.last_check_time}")
+                    # 상태 업데이트
+                    self.current_state = self._update_state()
+                    
+                    # 웹 서버를 통해 소켓으로 상태 업데이트 전송
+                    if gshare_web_server:
+                        gshare_web_server.emit_state_update()
+                        # 로그도 주기적으로 업데이트 (모든 루프마다 업데이트)
+                        gshare_web_server.emit_log_update()
+                        
                 except Exception as e:
                     logging.error(f"상태 업데이트 중 오류: {e}")
 

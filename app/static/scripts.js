@@ -57,12 +57,12 @@ let checkInterval = 120; // 기본값
 let autoUpdateLog = true;
 let logHovered = false;
 let autoScrollLog = true; // 자동 스크롤 상태 변수 추가
+let socket = null; // Socket.IO 객체
 
 // state를 콘솔에 로깅하는 함수
 function logStateToConsole(state) {
     console.log('=== State 업데이트 ===');
-    console.log(`시간: ${new Date().toLocaleString()}`);
-    console.table(state);
+    console.log(state)
     // 마운트된 폴더 갯수 출력
     if (state.monitored_folders) {
         const mountedCount = Object.values(state.monitored_folders).filter(folder => folder.is_mounted).length;
@@ -110,44 +110,191 @@ function toggleLogAutoScroll() {
     }
 }
 
-// 페이지 로드 시 로그를 맨 아래로 스크롤
+// Socket.IO 초기화 및 이벤트 핸들러 등록
+function initSocketIO() {
+    // Socket.IO 클라이언트 초기화
+    socket = io();
+
+    // 소켓 연결 이벤트
+    socket.on('connect', function() {
+        console.log('Socket.IO 서버에 연결되었습니다.');
+        // 연결이 되면 상태 요청
+        socket.emit('request_state');
+        socket.emit('request_log');
+    });
+
+    // 연결 해제 이벤트
+    socket.on('disconnect', function() {
+        console.log('Socket.IO 서버와 연결이 끊어졌습니다.');
+    });
+
+    // 오류 이벤트
+    socket.on('connect_error', function(error) {
+        console.error('Socket.IO 연결 오류:', error);
+        // 연결 오류 시 폴백으로 HTTP 폴링 사용
+        startPolling();
+    });
+
+    // 상태 업데이트 이벤트
+    socket.on('state_update', function(data) {
+        updateUI(data);
+    });
+
+    // 로그 업데이트 이벤트
+    socket.on('log_update', function(logContent) {
+        updateLogContent(logContent);
+    });
+}
+
+// 상태 UI 업데이트 함수
+function updateUI(data) {
+    // state 업데이트를 콘솔에 로깅
+    logStateToConsole(data);
+    
+    // check_interval 업데이트
+    if (data.check_interval) {
+        checkInterval = data.check_interval;
+    }
+
+    // 필수 요소들 존재 여부 확인 및 업데이트
+    const elements = {
+        lastCheckTimeReadable: document.querySelector('.last-check-time .readable-time'),
+        lastCheckTimeString: document.querySelector('.last-check-time .time-string'),
+        lastAction: document.querySelector('.last-action'),
+        vmStatus: document.querySelector('.vm-status'),
+        smbStatus: document.querySelector('.smb-status'),
+        nfsStatus: document.querySelector('.nfs-status'),
+        cpuUsage: document.querySelector('.cpu-usage'),
+        lowCpuCount: document.querySelector('.low-cpu-count'),
+        uptime: document.querySelector('.uptime'),
+        lastShutdownTimeReadable: document.querySelector('.last-shutdown-time .readable-time'),
+        lastShutdownTimeString: document.querySelector('.last-shutdown-time .time-string')
+    };
+
+    // 각 요소가 존재할 때만 업데이트
+    if (elements.lastCheckTimeReadable) elements.lastCheckTimeReadable.innerText = get_time_ago(data.last_check_time);
+    if (elements.lastCheckTimeString) elements.lastCheckTimeString.innerText = data.last_check_time;
+    if (elements.lastAction) elements.lastAction.innerText = data.last_action;
+    
+    // VM 상태 업데이트
+    if (elements.vmStatus) {
+        updateVMStatus(data.vm_status);
+    }
+    
+    // SMB 상태 업데이트
+    if (elements.smbStatus) {
+        updateSMBStatus(data.smb_status);
+    }
+    
+    // NFS 상태 업데이트
+    if (elements.nfsStatus) {
+        updateNFSStatus(data.nfs_status);
+    }
+    
+    if (elements.cpuUsage) elements.cpuUsage.innerText = data.cpu_usage + '%';
+    if (elements.lowCpuCount) elements.lowCpuCount.innerText = data.low_cpu_count + '/' + data.threshold_count;
+    if (elements.uptime) elements.uptime.innerText = data.uptime;
+    if (elements.lastShutdownTimeReadable) {
+        elements.lastShutdownTimeReadable.innerText = data.last_shutdown_time !== '-' ? 
+            get_time_ago(data.last_shutdown_time) : '정보없음';
+    }
+    if (elements.lastShutdownTimeString) {
+        elements.lastShutdownTimeString.innerText = data.last_shutdown_time;
+    }
+
+    // 감시 중인 폴더 목록 업데이트 - 별도 함수 사용
+    if (data.monitored_folders) {
+        // 백그라운드로 폴더 목록 처리를 위해 requestAnimationFrame 사용
+        window.requestAnimationFrame(() => {
+            updateFolderList(data.monitored_folders);
+        });
+    }
+}
+
+// 로그 콘텐츠 업데이트 함수
+function updateLogContent(logContent) {
+    // 마우스가 로그 영역에 있거나 자동 업데이트가 비활성화된 경우 업데이트 중지
+    if (!autoUpdateLog || logHovered) return;
+    
+    const logElement = document.querySelector('#logContent');
+    if (!logElement) return;
+    
+    logElement.innerText = logContent;
+    
+    // 자동 스크롤이 활성화되고 사용자가 직접 스크롤하지 않은 경우에만 맨 아래로 스크롤
+    if (autoScrollLog && !userScrolled) {
+        logElement.scrollTop = logElement.scrollHeight;
+    }
+}
+
+// HTTP 폴링 시작 함수 (소켓 연결 실패 시 폴백)
+function startPolling() {
+    console.warn('Socket.IO 연결 실패, HTTP 폴링으로 전환합니다.');
+    
+    // 1초마다 상태 업데이트 요청
+    setInterval(function() {
+        fetch('/update_state')
+            .then(response => response.json())
+            .then(data => {
+                updateUI(data);
+            })
+            .catch(error => {
+                console.error('상태 업데이트 요청 실패:', error);
+            });
+
+        // 로그 업데이트 요청
+        if (autoUpdateLog && !logHovered) {
+            fetch('/update_log')
+                .then(response => response.text())
+                .then(logContent => {
+                    updateLogContent(logContent);
+                })
+                .catch(error => {
+                    console.error('로그 업데이트 요청 실패:', error);
+                });
+        }
+    }, 1000);
+}
+
 window.onload = function () {
     getCurrentLogLevel();
     const logContent = document.getElementById('logContent');
-    logContent.scrollTop = logContent.scrollHeight;
+    if (logContent) {
+        logContent.scrollTop = logContent.scrollHeight;
 
-    // 로그 영역에 마우스 진입/이탈 이벤트 리스너 추가
-    logContent.addEventListener('mouseenter', function() {
-        logHovered = true;
-    });
-    
-    logContent.addEventListener('mouseleave', function() {
-        logHovered = false;
-    });
-
-    // 로그 영역 스크롤 이벤트 감지
-    let userScrolled = false;
-    let scrollTimeout;
-    
-    logContent.addEventListener('scroll', function() {
-        // 사용자가 맨 아래까지 스크롤했는지 확인
-        const isAtBottom = logContent.scrollHeight - logContent.clientHeight <= logContent.scrollTop + 5;
+        // 로그 영역에 마우스 진입/이탈 이벤트 리스너 추가
+        logContent.addEventListener('mouseenter', function() {
+            logHovered = true;
+        });
         
-        // 맨 아래가 아니면 사용자가 스크롤했다고 표시
-        if (!isAtBottom) {
-            userScrolled = true;
-            clearTimeout(scrollTimeout);
+        logContent.addEventListener('mouseleave', function() {
+            logHovered = false;
+        });
+
+        // 로그 영역 스크롤 이벤트 감지
+        let userScrolled = false;
+        let scrollTimeout;
+        
+        logContent.addEventListener('scroll', function() {
+            // 사용자가 맨 아래까지 스크롤했는지 확인
+            const isAtBottom = logContent.scrollHeight - logContent.clientHeight <= logContent.scrollTop + 5;
             
-            // 5초 후 사용자 스크롤 상태 초기화
-            scrollTimeout = setTimeout(() => {
+            // 맨 아래가 아니면 사용자가 스크롤했다고 표시
+            if (!isAtBottom) {
+                userScrolled = true;
+                clearTimeout(scrollTimeout);
+                
+                // 5초 후 사용자 스크롤 상태 초기화
+                scrollTimeout = setTimeout(() => {
+                    userScrolled = false;
+                }, 5000);
+            } else {
+                // 맨 아래로 스크롤한 경우 사용자 스크롤 상태 초기화
                 userScrolled = false;
-            }, 5000);
-        } else {
-            // 맨 아래로 스크롤한 경우 사용자 스크롤 상태 초기화
-            userScrolled = false;
-            clearTimeout(scrollTimeout);
-        }
-    });
+                clearTimeout(scrollTimeout);
+            }
+        });
+    }
 
     let lastCheckTimeData = '';
 
@@ -204,88 +351,20 @@ window.onload = function () {
         });
     }, 1000);
 
-    // 1초마다 상태 업데이트 요청
-    setInterval(function () {
-        fetch('/update_state')
-            .then(response => response.json())
-            .then(data => {
-                // state 업데이트를 콘솔에 로깅
-                logStateToConsole(data);
-                
-                // check_interval 업데이트
-                if (data.check_interval) {
-                    checkInterval = data.check_interval;
-                }
-
-                // 필수 요소들 존재 여부 확인 및 업데이트
-                const elements = {
-                    lastCheckTimeReadable: document.querySelector('.last-check-time .readable-time'),
-                    lastCheckTimeString: document.querySelector('.last-check-time .time-string'),
-                    lastAction: document.querySelector('.last-action'),
-                    vmStatus: document.querySelector('.vm-status'),
-                    smbStatus: document.querySelector('.smb-status'),
-                    nfsStatus: document.querySelector('.nfs-status'),
-                    cpuUsage: document.querySelector('.cpu-usage'),
-                    lowCpuCount: document.querySelector('.low-cpu-count'),
-                    uptime: document.querySelector('.uptime'),
-                    lastShutdownTimeReadable: document.querySelector('.last-shutdown-time .readable-time'),
-                    lastShutdownTimeString: document.querySelector('.last-shutdown-time .time-string')
-                };
-
-                // 각 요소가 존재할 때만 업데이트
-                if (elements.lastCheckTimeReadable) elements.lastCheckTimeReadable.innerText = get_time_ago(data.last_check_time);
-                if (elements.lastCheckTimeString) elements.lastCheckTimeString.innerText = data.last_check_time;
-                if (elements.lastAction) elements.lastAction.innerText = data.last_action;
-                
-                // VM 상태 업데이트
-                if (elements.vmStatus) {
-                    updateVMStatus(data.vm_status);
-                }
-                
-                // SMB 상태 업데이트
-                if (elements.smbStatus) {
-                    updateSMBStatus(data.smb_status);
-                }
-                
-                // NFS 상태 업데이트
-                if (elements.nfsStatus) {
-                    updateNFSStatus(data.nfs_status);
-                }
-                
-                if (elements.cpuUsage) elements.cpuUsage.innerText = data.cpu_usage + '%';
-                if (elements.lowCpuCount) elements.lowCpuCount.innerText = data.low_cpu_count + '/' + data.threshold_count;
-                if (elements.uptime) elements.uptime.innerText = data.uptime;
-                if (elements.lastShutdownTimeReadable) {
-                    elements.lastShutdownTimeReadable.innerText = data.last_shutdown_time !== '-' ? 
-                        get_time_ago(data.last_shutdown_time) : '정보없음';
-                }
-                if (elements.lastShutdownTimeString) {
-                    elements.lastShutdownTimeString.innerText = data.last_shutdown_time;
-                }
-
-                // 감시 중인 폴더 목록 업데이트 - 별도 함수 사용
-                if (data.monitored_folders) {
-                    // 백그라운드로 폴더 목록 처리를 위해 requestAnimationFrame 사용
-                    window.requestAnimationFrame(() => {
-                        updateFolderList(data.monitored_folders);
-                    });
-                }
-            });
-
-        // update_log 부분 수정 - 마우스가 로그 영역에 있거나 자동 업데이트가 비활성화된 경우 업데이트 중지
-        if (autoUpdateLog && !logHovered) {
-            fetch('/update_log')
-                .then(response => response.text())
-                .then(logContent => {
-                    const logElement = document.querySelector('#logContent');
-                    logElement.innerText = logContent;
-                    // 자동 스크롤이 활성화되고 사용자가 직접 스크롤하지 않은 경우에만 맨 아래로 스크롤
-                    if (autoScrollLog && !userScrolled) {
-                        logElement.scrollTop = logElement.scrollHeight;
-                    }
-                });
+    // Socket.IO 초기화
+    try {
+        // Socket.IO 스크립트가 로드되었는지 확인
+        if (typeof io !== 'undefined') {
+            initSocketIO();
+        } else {
+            // Socket.IO 스크립트가 없으면 폴링으로 폴백
+            console.warn('Socket.IO 라이브러리가 로드되지 않았습니다. HTTP 폴링으로 전환합니다.');
+            startPolling();
         }
-    }, 1000);
+    } catch (error) {
+        console.error('Socket.IO 초기화 중 오류:', error);
+        startPolling();
+    }
 };
 
 function updateVMStatus(status) {
@@ -851,5 +930,155 @@ function updateFolderList(folders) {
     const statusIndicator = document.querySelector('.status-update-indicator');
     if (statusIndicator) {
         statusIndicator.classList.add('hidden');
+    }
+}
+
+// SMB 서비스 토글 함수 추가
+function toggleSMB() {
+    // 현재 SMB 상태 확인
+    const smbStatusSpan = document.querySelector('.smb-status span:first-child');
+    if (!smbStatusSpan) {
+        console.error('SMB 상태 요소를 찾을 수 없습니다.');
+        return;
+    }
+    
+    const currentStatus = smbStatusSpan.innerText;
+    console.log(`현재 SMB 상태: ${currentStatus}`);
+    
+    // 상태에 따라 다른 메시지 표시
+    const message = currentStatus === 'ON' 
+        ? 'SMB 서비스를 끄시겠습니까? 공유된 폴더에 접근할 수 없게 됩니다.' 
+        : 'SMB 서비스를 켜시겠습니까? 마운트된 폴더가 네트워크에 공유됩니다.';
+    
+    // 확인 대화상자 표시
+    if (confirm(message)) {
+        // 상태 표시기 표시
+        const smbStatusDiv = document.querySelector('.smb-status');
+        
+        // 클릭 불가능하게 만들기
+        if (smbStatusDiv) {
+            smbStatusDiv.style.pointerEvents = 'none';
+            smbStatusDiv.style.opacity = '0.5';
+        }
+        
+        console.log('SMB 토글 요청 시작');
+        
+        // 현재 상태에 따라 다른 엔드포인트 호출
+        const endpoint = currentStatus === 'ON' ? '/deactivate_smb' : '/activate_smb';
+        
+        // 서버에 SMB 토글 요청 보내기
+        fetch(endpoint)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    console.log(`SMB ${currentStatus === 'ON' ? '비활성화' : '활성화'} 성공: ${data.message}`);
+                    
+                    // 서버 상태 변경을 위한 충분한 지연 시간 추가 (2초)
+                    setTimeout(() => {
+                        // 상태를 업데이트하여 UI 반영
+                        updateFolderState();
+                        
+                        // 다시 클릭 가능하게 만들기
+                        if (smbStatusDiv) {
+                            smbStatusDiv.style.pointerEvents = 'auto';
+                            smbStatusDiv.style.opacity = '1';
+                        }
+                    }, 2000);
+                } else {
+                    alert('오류: ' + data.message);
+                    
+                    // 다시 클릭 가능하게 만들기
+                    if (smbStatusDiv) {
+                        smbStatusDiv.style.pointerEvents = 'auto';
+                        smbStatusDiv.style.opacity = '1';
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('SMB 토글 중 오류:', error);
+                alert('SMB 토글 중 오류가 발생했습니다.');
+                
+                // 다시 클릭 가능하게 만들기
+                if (smbStatusDiv) {
+                    smbStatusDiv.style.pointerEvents = 'auto';
+                    smbStatusDiv.style.opacity = '1';
+                }
+            });
+    }
+}
+
+// VM 토글 함수 추가
+function toggleVM() {
+    // 현재 VM 상태 확인
+    const vmStatusSpan = document.querySelector('.vm-status span:first-child');
+    if (!vmStatusSpan) {
+        console.error('VM 상태 요소를 찾을 수 없습니다.');
+        return;
+    }
+    
+    const currentStatus = vmStatusSpan.innerText;
+    console.log(`현재 VM 상태: ${currentStatus}`);
+    
+    // 상태에 따라 시작 또는 종료 함수 호출
+    if (currentStatus === 'OFF') {
+        startVM();
+    } else {
+        shutdownVM();
+    }
+}
+
+// NFS 서비스 토글 함수 추가
+function remountNFS() {
+    // 확인 대화상자 표시
+    if (confirm('NFS 연결을 다시 시도하시겠습니까? 현재 연결에 문제가 있는 경우 사용하세요.')) {
+        // 상태 표시기 표시
+        const nfsStatusDiv = document.querySelector('.nfs-status');
+        
+        // 클릭 불가능하게 만들기
+        if (nfsStatusDiv) {
+            nfsStatusDiv.style.pointerEvents = 'none';
+            nfsStatusDiv.style.opacity = '0.5';
+        }
+        
+        console.log('NFS remount 요청 시작');
+        
+        // 서버에 NFS remount 요청 보내기
+        fetch('/remount_nfs')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    console.log(`NFS remount 성공: ${data.message}`);
+                    
+                    // 서버 상태 변경을 위한 충분한 지연 시간 추가 (2초)
+                    setTimeout(() => {
+                        // 상태를 업데이트하여 UI 반영
+                        updateFolderState();
+                        
+                        // 다시 클릭 가능하게 만들기
+                        if (nfsStatusDiv) {
+                            nfsStatusDiv.style.pointerEvents = 'auto';
+                            nfsStatusDiv.style.opacity = '1';
+                        }
+                    }, 2000);
+                } else {
+                    alert('오류: ' + data.message);
+                    
+                    // 다시 클릭 가능하게 만들기
+                    if (nfsStatusDiv) {
+                        nfsStatusDiv.style.pointerEvents = 'auto';
+                        nfsStatusDiv.style.opacity = '1';
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('NFS remount 중 오류:', error);
+                alert('NFS remount 중 오류가 발생했습니다.');
+                
+                // 다시 클릭 가능하게 만들기
+                if (nfsStatusDiv) {
+                    nfsStatusDiv.style.pointerEvents = 'auto';
+                    nfsStatusDiv.style.opacity = '1';
+                }
+            });
     }
 }
