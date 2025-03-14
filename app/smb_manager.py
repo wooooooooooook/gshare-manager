@@ -216,6 +216,9 @@ class SMBManager:
 
             # SMB 설정 파일 업데이트
             self.update_smb_config()
+            
+            # 심볼릭 링크 소유권 수정
+            self.fix_symlinks_ownership()
 
             # 서비스 재시작/시작
             if is_running:
@@ -487,6 +490,28 @@ class SMBManager:
 
             # 심볼릭 링크 생성
             os.symlink(source_path, link_path)
+            
+            # SMB 사용자의 소유권으로 변경
+            try:
+                # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
+                existing_group = None
+                try:
+                    group_info = subprocess.run(['getent', 'group', str(
+                        self.nfs_gid)], capture_output=True, text=True)
+                    if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
+                        existing_group = group_info.stdout.strip().split(':')[0]
+                except Exception as e:
+                    logging.error(f"그룹 확인 중 오류: {e}")
+
+                # 적절한 그룹 이름 결정
+                group_name = existing_group if existing_group else self.config.SMB_USERNAME
+                
+                # 심볼릭 링크 소유권 변경
+                subprocess.run(
+                    ['chown', '-h', f"{self.config.SMB_USERNAME}:{group_name}", link_path], check=False)
+                logging.debug(f"심볼릭 링크 소유권 변경됨: {link_path}")
+            except Exception as e:
+                logging.warning(f"심볼릭 링크 소유권 변경 실패 ({link_path}): {e}")
 
             logging.debug(f"심볼릭 링크 생성됨: {link_path} -> {source_path}")
             return True
@@ -511,3 +536,37 @@ class SMBManager:
                 logging.debug(f"모든 심볼릭 링크 제거 완료: {self.links_dir}")
         except Exception as e:
             logging.error(f"심볼릭 링크 정리 중 오류 발생: {e}")
+            
+    def fix_symlinks_ownership(self) -> None:
+        """
+        기존 심볼릭 링크의 소유권을 SMB 사용자로 변경합니다.
+        """
+        try:
+            if os.path.exists(self.links_dir):
+                # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
+                existing_group = None
+                try:
+                    group_info = subprocess.run(['getent', 'group', str(
+                        self.nfs_gid)], capture_output=True, text=True)
+                    if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
+                        existing_group = group_info.stdout.strip().split(':')[0]
+                except Exception as e:
+                    logging.error(f"그룹 확인 중 오류: {e}")
+
+                # 적절한 그룹 이름 결정
+                group_name = existing_group if existing_group else self.config.SMB_USERNAME
+                
+                # 모든 심볼릭 링크 소유권 변경
+                for filename in os.listdir(self.links_dir):
+                    file_path = os.path.join(self.links_dir, filename)
+                    if os.path.islink(file_path):
+                        try:
+                            subprocess.run(
+                                ['chown', '-h', f"{self.config.SMB_USERNAME}:{group_name}", file_path], check=False)
+                            logging.debug(f"심볼릭 링크 소유권 변경됨: {file_path}")
+                        except Exception as e:
+                            logging.warning(f"심볼릭 링크 소유권 변경 실패 ({file_path}): {e}")
+                            
+                logging.debug(f"모든 심볼릭 링크 소유권 변경 완료: {self.links_dir}")
+        except Exception as e:
+            logging.error(f"심볼릭 링크 소유권 변경 중 오류 발생: {e}")
