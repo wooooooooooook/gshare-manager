@@ -22,6 +22,8 @@ class SMBManager:
         self.links_dir = self.config.SMB_LINKS_DIR
         self.nfs_uid = nfs_uid
         self.nfs_gid = nfs_gid
+        # 사용자 검증 완료 여부 플래그 추가
+        self.user_checked = False
 
         # 초기화 작업
         self._init_smb_config()
@@ -42,15 +44,14 @@ class SMBManager:
                                '/etc/samba/smb.conf.backup'], check=True)
 
             # 기본 설정 생성
-            base_config = """[global]
+            base_config = f"""[global]
    workgroup = WORKGROUP
    server string = Samba Server
    server role = standalone server
    log file = /var/log/samba/log.%m
    max log size = 50
    dns proxy = no
-   # 포트 설정
-   smb ports = {}
+   smb ports = {self.config.SMB_PORT}
    # SMB1 설정
    server min protocol = NT1
    server max protocol = NT1
@@ -65,7 +66,7 @@ class SMBManager:
    lanman auth = yes
    # 디버깅 설정
    log level = 3
-""".format(self.config.SMB_PORT)
+"""
             # 기본 설정 저장
             with open('/etc/samba/smb.conf', 'w') as f:
                 f.write(base_config)
@@ -148,27 +149,6 @@ class SMBManager:
             subprocess.run(['pkill', 'smbd'], check=False)
             subprocess.run(['pkill', 'nmbd'], check=False)
             
-            # PID 파일 확인 및 제거
-            pid_files = ['/run/samba/smbd.pid', '/run/samba/nmbd.pid']
-            for pid_file in pid_files:
-                if os.path.exists(pid_file):
-                    try:
-                        os.remove(pid_file)
-                        logging.debug(f"PID 파일 제거됨: {pid_file}")
-                    except Exception as e:
-                        logging.warning(f"PID 파일 제거 실패 ({pid_file}): {e}")
-            
-            # 잔여 프로세스 확인 및 강제 종료
-            time.sleep(1)
-            for process in ['smbd', 'nmbd']:
-                try:
-                    check = subprocess.run(['pgrep', process], capture_output=True)
-                    if check.returncode == 0:
-                        logging.warning(f"{process} 프로세스가 여전히 실행 중입니다. 강제 종료를 시도합니다.")
-                        subprocess.run(['pkill', '-9', process], check=False)
-                except Exception as e:
-                    logging.error(f"프로세스 확인 중 오류: {e}")
-                    
         except Exception as e:
             logging.error(f"Samba 서비스 중지 실패: {e}")
 
@@ -185,9 +165,10 @@ class SMBManager:
     def update_smb_config(self) -> None:
         """SMB 설정 파일 업데이트"""
         try:
-            # 먼저 SMB 사용자의 UID/GID 설정을 업데이트
-            self._set_smb_user_ownership(start_service=False)
-
+            # 사용자 체크가 필요한 경우에만 SMB 사용자 UID/GID 설정을 업데이트
+            if not self.user_checked:
+                self._set_smb_user_ownership(start_service=False)
+            
             share_name = self.config.SMB_SHARE_NAME
 
             # 설정 파일 읽기
@@ -268,9 +249,11 @@ class SMBManager:
             # SMB 설정 파일 업데이트
             self.update_smb_config()
             
-            # SMB 사용자 및 비밀번호 설정 재확인
-            logging.debug("SMB 공유 활성화 시 사용자 설정 재확인")
-            self._set_smb_user_ownership(start_service=False)
+            # SMB 사용자 및 비밀번호 설정 재확인 (첫 실행 시에만)
+            if not self.user_checked:
+                logging.debug("SMB 공유 활성화 시 사용자 설정 재확인")
+                self._set_smb_user_ownership(start_service=False)
+                self.user_checked = True
             
             # 심볼릭 링크 소유권 수정
             self.fix_symlinks_ownership()
@@ -325,6 +308,11 @@ class SMBManager:
     def _set_smb_user_ownership(self, start_service: bool = True) -> None:
         """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
         try:
+            # 이미 확인된 경우 건너뜀
+            if self.user_checked:
+                logging.debug("SMB 사용자 이미 확인됨. 사용자 설정 건너뜀")
+                return
+
             # 설정에서 SMB 사용자 이름과 비밀번호 가져오기
             smb_username = self.config.SMB_USERNAME
             smb_password = self.config.SMB_PASSWORD
@@ -502,6 +490,9 @@ class SMBManager:
                 except Exception as e:
                     logging.error(f"Samba 서비스 시작 중 오류 발생: {e}")
 
+            # 작업 완료 후 사용자 체크 플래그 설정
+            self.user_checked = True
+
         except Exception as e:
             logging.error(f"SMB 사용자의 UID/GID 설정 실패: {e}")
             raise
@@ -540,15 +531,6 @@ class SMBManager:
         except Exception as e:
             logging.error(f"공유용 링크 디렉토리 생성/설정 실패: {e}")
             raise
-
-    def cleanup(self) -> None:
-        """SMB 관련 리소스 정리"""
-        try:
-            # Samba 서비스 중지
-            self.stop_samba_service(timeout=30)
-            logging.debug("SMB 서비스 중지 완료")
-        except Exception as e:
-            logging.error(f"SMB 서비스 정리 중 오류 발생: {e}")
 
     def remove_symlink(self, subfolder: str) -> bool:
         """
