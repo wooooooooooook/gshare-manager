@@ -22,15 +22,13 @@ class SMBManager:
         self.links_dir = self.config.SMB_LINKS_DIR
         self.nfs_uid = nfs_uid
         self.nfs_gid = nfs_gid
-        # 사용자 검증 완료 여부 플래그 추가
-        self.user_checked = False
-
+        self.user_checked = False # 사용자 검증 완료 여부 
         # 초기화 작업
         self._init_smb_config()
-        self._set_smb_user_ownership(start_service=False)
+        self._set_smb_user_ownership()
 
         # 공유용 링크 디렉토리 생성 및 권한 설정
-        self.set_links_directory_permissions(self.links_dir)
+        self._set_links_directory_permissions(self.links_dir)
 
         # 시작 시 기존 심볼릭 링크 모두 제거
         self.cleanup_all_symlinks()
@@ -38,11 +36,6 @@ class SMBManager:
     def _init_smb_config(self) -> None:
         """기본 SMB 설정 초기화"""
         try:
-            # smb.conf 파일 백업
-            if not os.path.exists('/etc/samba/smb.conf.backup'):
-                subprocess.run(['cp', '/etc/samba/smb.conf',
-                               '/etc/samba/smb.conf.backup'], check=True)
-
             # 기본 설정 생성
             base_config = f"""[global]
    workgroup = WORKGROUP
@@ -121,11 +114,11 @@ class SMBManager:
             logging.error(f"SMB 상태 확인 중 오류: {e}")
             return False
 
-    def start_samba_service(self) -> None:
+    def _start_samba_service(self) -> None:
         """Samba 서비스 시작"""
         try:
             # 먼저 잔여 프로세스 확인 및 종료
-            self.stop_samba_service()
+            self._stop_samba_service()
             
             # Docker 환경에서는 직접 데몬 실행
             subprocess.run(['smbd', '--daemon'], check=False)
@@ -133,41 +126,38 @@ class SMBManager:
             
             # 서비스 시작 확인
             time.sleep(1)
-            if self.check_smb_status():
-                logging.debug("Samba 서비스가 성공적으로 시작되었습니다.")
-            else:
+            if not self.check_smb_status():
                 logging.warning("Samba 서비스 시작 후에도 실행되지 않는 것으로 확인됩니다.")
                 
         except Exception as e:
             logging.error(f"Samba 서비스 시작 실패: {e}")
             raise
 
-    def stop_samba_service(self, timeout=None) -> None:
+    def _stop_samba_service(self, timeout=None) -> None:
         """Samba 서비스 중지"""
         try:
             # 프로세스 종료
             subprocess.run(['pkill', 'smbd'], check=False)
             subprocess.run(['pkill', 'nmbd'], check=False)
-            
         except Exception as e:
             logging.error(f"Samba 서비스 중지 실패: {e}")
 
-    def restart_samba_service(self) -> None:
+    def _restart_samba_service(self) -> None:
         """Samba 서비스 재시작"""
         try:
-            self.stop_samba_service()
+            self._stop_samba_service()
             time.sleep(1)  # 잠시 대기
-            self.start_samba_service()
+            self._start_samba_service()
         except Exception as e:
             logging.error(f"Samba 서비스 재시작 실패: {e}")
             raise
 
-    def update_smb_config(self) -> None:
+    def _update_smb_config(self) -> None:
         """SMB 설정 파일 업데이트"""
         try:
             # 사용자 체크가 필요한 경우에만 SMB 사용자 UID/GID 설정을 업데이트
             if not self.user_checked:
-                self._set_smb_user_ownership(start_service=False)
+                self._set_smb_user_ownership()
             
             share_name = self.config.SMB_SHARE_NAME
 
@@ -247,28 +237,27 @@ class SMBManager:
             is_running = self.check_smb_status()
 
             # SMB 설정 파일 업데이트
-            self.update_smb_config()
+            self._update_smb_config()
             
             # SMB 사용자 및 비밀번호 설정 재확인 (첫 실행 시에만)
             if not self.user_checked:
                 logging.debug("SMB 공유 활성화 시 사용자 설정 재확인")
-                self._set_smb_user_ownership(start_service=False)
+                self._set_smb_user_ownership()
                 self.user_checked = True
             
             # 심볼릭 링크 소유권 수정
-            self.fix_symlinks_ownership()
+            self._fix_symlinks_ownership()
 
             # 서비스 재시작/시작
             if is_running:
                 logging.debug("SMB 서비스가 이미 실행 중입니다. 서비스를 재시작합니다.")
-                self.restart_samba_service()
+                self._restart_samba_service()
             else:
-                logging.debug("SMB 서비스를 시작합니다.")
-                self.start_samba_service()
+                self._start_samba_service()
 
             # 서비스 상태 확인
             if self.check_smb_status():
-                logging.debug("SMB 공유가 활성화되었습니다.")
+                logging.info("SMB 공유가 활성화되었습니다.")
                 return True
             else:
                 logging.error("SMB 서비스가 시작되지 않았습니다.")
@@ -297,15 +286,15 @@ class SMBManager:
                 f.writelines(new_lines)
 
             # Samba 서비스 중지
-            self.stop_samba_service()
+            self._stop_samba_service()
 
-            logging.debug(f"SMB 공유 비활성화 성공")
+            logging.info(f"SMB 공유 비활성화 성공")
             return True
         except Exception as e:
             logging.error(f"SMB 공유 비활성화 실패: {e}")
         return False
 
-    def _set_smb_user_ownership(self, start_service: bool = True) -> None:
+    def _set_smb_user_ownership(self) -> None:
         """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
         try:
             # 이미 확인된 경우 건너뜀
@@ -415,7 +404,7 @@ class SMBManager:
                 # Samba 서비스 중지
                 try:
                     logging.debug("Samba 서비스 중지...")
-                    self.stop_samba_service()
+                    self._stop_samba_service()
 
                     # 사용자 UID 수정
                     usermod_result = subprocess.run(
@@ -481,15 +470,6 @@ class SMBManager:
                     except Exception as e:
                         logging.error(f"Samba 사용자 비밀번호 설정 중 오류 발생: {e}")
 
-            # 서비스 시작 (요청된 경우)
-            if start_service:
-                try:
-                    logging.debug("Samba 서비스 시작...")
-                    self.start_samba_service()
-                    logging.debug("Samba 서비스 시작 완료")
-                except Exception as e:
-                    logging.error(f"Samba 서비스 시작 중 오류 발생: {e}")
-
             # 작업 완료 후 사용자 체크 플래그 설정
             self.user_checked = True
 
@@ -497,7 +477,7 @@ class SMBManager:
             logging.error(f"SMB 사용자의 UID/GID 설정 실패: {e}")
             raise
 
-    def set_links_directory_permissions(self, links_dir: str) -> None:
+    def _set_links_directory_permissions(self, links_dir: str) -> None:
         """공유용 링크 디렉토리 권한 설정"""
         try:
             if not os.path.exists(links_dir):
@@ -547,7 +527,7 @@ class SMBManager:
                 self.links_dir, subfolder.replace(os.sep, '_'))
             if os.path.exists(link_path):
                 os.remove(link_path)
-                logging.debug(f"심볼릭 링크 제거됨: {link_path}")
+                logging.info(f"심볼릭 링크 제거됨: {link_path}")
             return True
         except Exception as e:
             logging.error(f"심볼릭 링크 제거 실패 ({subfolder}): {e}")
@@ -598,7 +578,7 @@ class SMBManager:
             except Exception as e:
                 logging.warning(f"심볼릭 링크 소유권 변경 실패 ({link_path}): {e}")
 
-            logging.debug(f"심볼릭 링크 생성됨: {link_path} -> {source_path}")
+            logging.info(f"심볼릭 링크 생성됨: {link_path} -> {source_path}")
             return True
         except Exception as e:
             logging.error(f"심볼릭 링크 생성 실패 ({subfolder}): {e}")
@@ -618,11 +598,11 @@ class SMBManager:
                             logging.debug(f"심볼릭 링크 제거됨: {file_path}")
                         except Exception as e:
                             logging.error(f"심볼릭 링크 제거 실패 ({file_path}): {e}")
-                logging.debug(f"모든 심볼릭 링크 제거 완료: {self.links_dir}")
+                logging.info(f"모든 심볼릭 링크 제거 완료: {self.links_dir}")
         except Exception as e:
             logging.error(f"심볼릭 링크 정리 중 오류 발생: {e}")
             
-    def fix_symlinks_ownership(self) -> None:
+    def _fix_symlinks_ownership(self) -> None:
         """
         기존 심볼릭 링크의 소유권을 SMB 사용자로 변경합니다.
         """

@@ -62,14 +62,7 @@ let autoScrollLog = true; // 자동 스크롤 상태 변수 추가
 function logStateToConsole(state) {
     console.log('=== State 업데이트 ===');
     console.log(`시간: ${new Date().toLocaleString()}`);
-    console.log(`VM 상태: ${state.vm_status}`);
-    console.log(`SMB 상태: ${state.smb_status}`);
-    console.log(`NFS 상태: ${state.nfs_status}`);
-    console.log(`CPU 사용률: ${state.cpu_usage}%`);
-    console.log(`Low CPU 카운트: ${state.low_cpu_count}/${state.threshold_count}`);
-    console.log(`업타임: ${state.uptime}`);
-    console.log(`마지막 체크 시간: ${state.last_check_time}`);
-    
+    console.table(state);
     // 마운트된 폴더 갯수 출력
     if (state.monitored_folders) {
         const mountedCount = Object.values(state.monitored_folders).filter(folder => folder.is_mounted).length;
@@ -302,6 +295,11 @@ function updateVMStatus(status) {
     const vmStatusSpan = document.querySelector('.vm-status span:first-child');
     const statusIcon = document.querySelector('.vm-status span:last-child');
 
+    if (!vmStatusContainer) {
+        console.error('VM 상태 컨테이너를 찾을 수 없습니다.');
+        return;
+    }
+
     if (status === 'ON') {
         // VM 실행 중
         vmStatusContainer.classList.remove('bg-red-50', 'border-red-100');
@@ -312,12 +310,16 @@ function updateVMStatus(status) {
             vmStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
             vmStatusSpan.classList.add('bg-emerald-50', 'text-emerald-700');
             vmStatusSpan.innerText = 'ON';
+        } else {
+            console.warn('VM 상태 표시 요소를 찾을 수 없습니다.');
         }
         
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-red-500');
             statusIcon.classList.add('bg-green-500');
+        } else {
+            console.warn('VM 상태 아이콘을 찾을 수 없습니다.');
         }
 
         // 실행 중 요소들 표시
@@ -333,12 +335,16 @@ function updateVMStatus(status) {
             vmStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
             vmStatusSpan.classList.add('bg-slate-50', 'text-slate-700');
             vmStatusSpan.innerText = 'OFF';
+        } else {
+            console.warn('VM 상태 표시 요소를 찾을 수 없습니다.');
         }
         
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-green-500');
             statusIcon.classList.add('bg-red-500');
+        } else {
+            console.warn('VM 상태 아이콘을 찾을 수 없습니다.');
         }
 
         // 중지 시 요소들 표시
@@ -352,6 +358,11 @@ function updateSMBStatus(status) {
     const smbStatusSpan = document.querySelector('.smb-status span:first-child');
     const statusIcon = document.querySelector('.smb-status span:last-child');
 
+    if (!smbStatusContainer) {
+        console.error('SMB 상태 컨테이너를 찾을 수 없습니다.');
+        return;
+    }
+
     if (status === 'ON') {
         // SMB 실행 중
         smbStatusContainer.classList.remove('bg-red-50', 'border-red-100');
@@ -362,12 +373,16 @@ function updateSMBStatus(status) {
             smbStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
             smbStatusSpan.classList.add('bg-emerald-50', 'text-emerald-700');
             smbStatusSpan.innerText = 'ON';
+        } else {
+            console.warn('SMB 상태 표시 요소를 찾을 수 없습니다.');
         }
         
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-red-500');
             statusIcon.classList.add('bg-green-500');
+        } else {
+            console.warn('SMB 상태 아이콘을 찾을 수 없습니다.');
         }
     } else {
         // SMB 중지됨
@@ -379,12 +394,16 @@ function updateSMBStatus(status) {
             smbStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
             smbStatusSpan.classList.add('bg-slate-50', 'text-slate-700');
             smbStatusSpan.innerText = 'OFF';
+        } else {
+            console.warn('SMB 상태 표시 요소를 찾을 수 없습니다.');
         }
         
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-green-500');
             statusIcon.classList.add('bg-red-500');
+        } else {
+            console.warn('SMB 상태 아이콘을 찾을 수 없습니다.');
         }
     }
 }
@@ -393,6 +412,11 @@ function updateNFSStatus(status) {
     const nfsStatusContainer = document.querySelector('.nfs-status-container');
     const nfsStatusSpan = document.querySelector('.nfs-status span:first-child');
     const statusIcon = document.querySelector('.nfs-status span:last-child');
+
+    if (!nfsStatusContainer) {
+        console.error('NFS 상태 컨테이너를 찾을 수 없습니다.');
+        return;
+    }
 
     if (status === 'ON') {
         // NFS 마운트됨
@@ -404,12 +428,16 @@ function updateNFSStatus(status) {
             nfsStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
             nfsStatusSpan.classList.add('bg-emerald-50', 'text-emerald-700');
             nfsStatusSpan.innerText = 'ON';
+        } else {
+            console.warn('NFS 상태 표시 요소를 찾을 수 없습니다.');
         }
         
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-red-500');
             statusIcon.classList.add('bg-green-500');
+        } else {
+            console.warn('NFS 상태 아이콘을 찾을 수 없습니다.');
         }
     } else {
         // NFS 마운트 해제됨
@@ -421,12 +449,16 @@ function updateNFSStatus(status) {
             nfsStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
             nfsStatusSpan.classList.add('bg-slate-50', 'text-slate-700');
             nfsStatusSpan.innerText = 'OFF';
+        } else {
+            console.warn('NFS 상태 표시 요소를 찾을 수 없습니다.');
         }
         
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-green-500');
             statusIcon.classList.add('bg-red-500');
+        } else {
+            console.warn('NFS 상태 아이콘을 찾을 수 없습니다.');
         }
     }
 }
@@ -506,15 +538,14 @@ function startVM() {
                     
                     // VM 시작 후 즉시 state를 가져와서 콘솔에 로깅
                     console.log('=== VM 시작 요청 성공 ===');
-                    fetch('/update_state')
-                        .then(response => response.json())
-                        .then(stateData => {
-                            logStateToConsole(stateData);
-                        });
                     
+                    // VM 시작 후 서버 상태 변경을 위한 충분한 지연 시간 추가 (2초)
                     setTimeout(() => {
+                        // 상태를 업데이트하여 UI 반영
+                        updateFolderState();
+                        
                         statusDiv.classList.add('hidden');
-                    }, 3000);
+                    }, 2000);
                 } else {
                     throw new Error(data.message);
                 }
@@ -543,15 +574,14 @@ function shutdownVM() {
                     
                     // VM 종료 후 즉시 state를 가져와서 콘솔에 로깅
                     console.log('=== VM 종료 요청 성공 ===');
-                    fetch('/update_state')
-                        .then(response => response.json())
-                        .then(stateData => {
-                            logStateToConsole(stateData);
-                        });
                     
+                    // VM 종료 후 서버 상태 변경을 위한 충분한 지연 시간 추가 (2초)
                     setTimeout(() => {
+                        // 상태를 업데이트하여 UI 반영
+                        updateFolderState();
+                        
                         statusDiv.classList.add('hidden');
-                    }, 3000);
+                    }, 2000);
                 } else {
                     throw new Error(data.message);
                 }
@@ -572,7 +602,6 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
     
     // sortedFolders가 비어있거나 정의되지 않은 경우 처리
     if (!sortedFolders || (typeof sortedFolders === 'object' && Object.keys(sortedFolders).length === 0)) {
-        console.log('폴더 목록이 비어있음');
         return '<div class="text-center py-4"><p class="text-sm text-gray-600">폴더가 없습니다.</p></div>';
     }
     
@@ -584,11 +613,8 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
                 // 시간순 정렬
                 return new Date(b[1].mtime) - new Date(a[1].mtime);
             });
-        
-        console.log('변환된 foldersArray:', foldersArray);
-        
+                
         if (!foldersArray.length) {
-            console.log('변환 후 배열이 비어있음');
             return '<div class="text-center py-4"><p class="text-sm text-gray-600">폴더가 없습니다.</p></div>';
         }
         
@@ -626,7 +652,6 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
             `;
         }
         
-        console.log('생성된 HTML 길이:', foldersHtml.length);
         return foldersHtml;
     } catch (error) {
         console.error('generateFolderListHtml 오류:', error);
@@ -653,14 +678,15 @@ function toggleMount(folder, action = 'mount') {
             if (data.status === 'success') {
                 // 폴더 마운트 상태 변경 후 로깅
                 console.log(`=== 폴더 '${folder}' 마운트 상태 변경 성공 ===`);
-                fetch('/update_state')
-                    .then(response => response.json())
-                    .then(stateData => {
-                        logStateToConsole(stateData);
-                    });
                 
-                // 별도 함수로 분리하여 상태 업데이트 - 블록 방지
-                updateFolderState();
+                // 서버 상태 변경을 위한 충분한 지연 시간 추가 (1.5초)
+                setTimeout(() => {
+                    // 상태 업데이트 요청
+                    updateFolderState();
+                    
+                    // 버튼 상태 복원
+                    resetToggleButtons();
+                }, 1500);
             } else {
                 alert('오류: ' + data.message);
                 // 버튼 상태 복원
@@ -697,27 +723,30 @@ function updateFolderState() {
     fetch('/update_state')
         .then(response => response.json())
         .then(data => {
-            // VM과 SMB, NFS 상태 업데이트 - 중요한 UI 업데이트 먼저 처리
-            const vmStatusSpan = document.querySelector('.vm-status span');
+            // VM 상태 업데이트 - 선택자 수정
+            const vmStatusSpan = document.querySelector('.vm-status span:first-child');
             if (vmStatusSpan) {
-                vmStatusSpan.innerText = data.vm_status;
                 updateVMStatus(data.vm_status);
             }
-            const smbStatusSpan = document.querySelector('.smb-status span');
+            
+            // SMB 상태 업데이트 - 선택자 수정
+            const smbStatusSpan = document.querySelector('.smb-status span:first-child');
             if (smbStatusSpan) {
-                smbStatusSpan.innerText = data.smb_status;
                 updateSMBStatus(data.smb_status);
             }
-            const nfsStatusSpan = document.querySelector('.nfs-status span');
+            
+            // NFS 상태 업데이트 - 선택자 수정
+            const nfsStatusSpan = document.querySelector('.nfs-status span:first-child');
             if (nfsStatusSpan) {
-                nfsStatusSpan.innerText = data.nfs_status;
                 updateNFSStatus(data.nfs_status);
             }
 
-            // 백그라운드로 폴더 목록 처리를 위해 requestAnimationFrame 사용
-            window.requestAnimationFrame(() => {
-                updateFolderList(data.monitored_folders);
-            });
+            // 백그라운드로 폴더 목록 처리
+            if (data.monitored_folders && Object.keys(data.monitored_folders).length > 0) {
+                window.requestAnimationFrame(() => {
+                    updateFolderList(data.monitored_folders);
+                });
+            }
         })
         .catch(error => {
             console.error('상태 업데이트 오류:', error);
@@ -729,11 +758,8 @@ function updateFolderState() {
 
 // 폴더 목록만 업데이트하는 함수로 분리
 function updateFolderList(folders) {
-    console.log('updateFolderList 호출됨', folders);
-    
     // 폴더 목록이 비어있는 경우
     if (!folders || Object.keys(folders).length === 0) {
-        console.log('폴더 목록이 비어있음');
         document.getElementById('monitoredFoldersContainer').innerHTML = `
             <div class="text-center py-4">
                 <p class="text-sm text-gray-600">감시 중인 폴더가 없습니다.</p>
@@ -776,7 +802,6 @@ function updateFolderList(folders) {
 
     // NFS 패널에는 마운트되지 않은 폴더만 표시 (마운트 가능한 목록)
     const foldersContainer = document.getElementById('monitoredFoldersContainer');
-    console.log('NFS 폴더 컨테이너 요소:', foldersContainer);
     if (foldersContainer) {
         if (Object.keys(unmountedFolders).length === 0) {
             foldersContainer.innerHTML = `
@@ -800,20 +825,16 @@ function updateFolderList(folders) {
     
     // SMB 패널에는 마운트된 폴더만 표시 (언마운트 가능한 목록)
     const smbFoldersContainer = document.getElementById('smbFoldersContainer');
-    console.log('SMB 폴더 컨테이너 요소:', smbFoldersContainer);
     if (smbFoldersContainer) {
         if (Object.keys(mountedFolders).length === 0) {
-            console.log('마운트된 폴더가 없음');
             smbFoldersContainer.innerHTML = `
                 <div class="text-center py-4">
                     <p class="text-sm text-gray-600">현재 SMB로 공유 중인 폴더가 없습니다.</p>
                 </div>
             `;
         } else {
-            console.log('마운트된 폴더 있음, HTML 생성');
             // 언마운트 버튼 표시 (언마운트 기능만 활성화)
             const htmlContent = generateFolderListHtml(mountedFolders, true, 'unmount');
-            console.log('생성된 HTML:', htmlContent);
             smbFoldersContainer.innerHTML = htmlContent;
             
             // SMB 폴더 리스트에도 이벤트 리스너 추가
