@@ -27,6 +27,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 gshare_manager = None
 gshare_web_server = None
 
+
 @dataclass
 class State:
     last_check_time: str
@@ -559,13 +560,13 @@ class GShareManager:
                 try:
                     # 상태 업데이트
                     self.current_state = self._update_state()
-                    
+
                     # 웹 서버를 통해 소켓으로 상태 업데이트 전송
                     if gshare_web_server:
                         gshare_web_server.emit_state_update()
                         # 로그도 주기적으로 업데이트 (모든 루프마다 업데이트)
                         gshare_web_server.emit_log_update()
-                        
+
                 except Exception as e:
                     logging.error(f"상태 업데이트 중 오류: {e}")
 
@@ -679,6 +680,12 @@ def update_log_level():
     logging.getLogger('urllib3.util.retry').setLevel(logging.WARNING)
     logging.getLogger('requests').setLevel(logging.WARNING)
     logging.getLogger('requests.packages.urllib3').setLevel(logging.WARNING)
+
+    # socketIO와 engineIO의 로깅 레벨도 WARNING으로 설정
+    logging.getLogger('socketio').setLevel(logging.WARNING)
+    logging.getLogger('socketio.server').setLevel(logging.WARNING)
+    logging.getLogger('engineio').setLevel(logging.WARNING)
+    logging.getLogger('engineio.server').setLevel(logging.WARNING)
 
 
 def update_timezone(timezone='Asia/Seoul'):
