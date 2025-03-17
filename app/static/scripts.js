@@ -745,8 +745,8 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
             const folder = Array.isArray(sortedFolders) ? entry[0] : entry[0];
             const info = Array.isArray(sortedFolders) ? entry[1] : entry[1];
             
-            // 폴더 경로에서 안전한 ID 생성
-            const folderId = `folder-${btoa(folder).replace(/[+/=]/g, '_')}`;
+            // 폴더 경로에서 안전한 ID 생성 (한글 등 Latin1 범위 밖의 문자 처리)
+            const folderId = `folder-${encodeURIComponent(folder).replace(/%/g, '_')}`;
             
             // 버튼 텍스트와 스타일 결정
             let buttonText, buttonClass;
@@ -977,8 +977,8 @@ function updateFolderContainer(containerId, folderData, action) {
     
     // 각 폴더 항목 처리
     for (const [folder, info] of sortedFolders) {
-        // 폴더 ID 생성
-        const folderId = `folder-${btoa(folder).replace(/[+/=]/g, '_')}`;
+        // 폴더 경로에서 안전한 ID 생성 (한글 등 Latin1 범위 밖의 문자 처리)
+        const folderId = `folder-${encodeURIComponent(folder).replace(/%/g, '_')}`;
         
         // 이미 존재하는 폴더 항목인지 확인
         if (existingFolderMap.has(folder)) {
