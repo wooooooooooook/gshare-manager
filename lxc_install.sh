@@ -133,7 +133,7 @@ motd_ssh
 customize
 
 msg_info "설치 완료"
-IP=$(hostname -I | awk '{print $1}')
+IP=$(hostname -i | awk '{print $1}')
 echo -e "\n\nGshare가 설치되었습니다!\n"
 echo -e "웹 인터페이스 접속: http://$IP:$FLASK_PORT_INPUT\n" 
 echo -e "SMB 접속: \\\\$IP:$SMB_PORT_INPUT\n"

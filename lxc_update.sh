@@ -11,7 +11,7 @@ var_ram="512"
 var_disk="2"
 var_os="alpine"
 var_version="3.21"
-var_unprivileged="1"
+var_unprivileged="0"
 
 header_info "$APP"
 variables
