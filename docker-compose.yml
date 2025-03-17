@@ -13,7 +13,7 @@ services:
     environment:
       - TZ=Asia/Seoul
       - FLASK_PORT=5000
-      - SMB_PORT=1445
+      - SMB_PORT=445
       - LOG_LEVEL=DEBUG
     privileged: true
     cap_add:

@@ -543,6 +543,8 @@ function updateNFSStatus(status) {
     const nfsStatusContainer = document.querySelector('.nfs-status-container');
     const nfsStatusSpan = document.querySelector('.nfs-status span:first-child');
     const statusIcon = document.querySelector('.nfs-status span:last-child');
+    const smbPanel = document.querySelector('.smb-status-container').closest('.flex.flex-col');
+    const nfsWarning = document.querySelector('.bg-red-50.text-red-700.p-2.rounded-lg.mb-2.border.border-red-200');
 
     if (!nfsStatusContainer) {
         console.error('NFS 상태 컨테이너를 찾을 수 없습니다.');
@@ -570,6 +572,19 @@ function updateNFSStatus(status) {
         } else {
             console.warn('NFS 상태 아이콘을 찾을 수 없습니다.');
         }
+        
+        // NFS 경고 메시지 숨기기
+        if (nfsWarning) {
+            nfsWarning.classList.add('hidden');
+        }
+        
+        // SMB 패널 활성화
+        if (smbPanel) {
+            smbPanel.classList.remove('opacity-50', 'pointer-events-none');
+        }
+        
+        // 프로그레스 바 갱신 시작
+        updateProgressBar();
     } else {
         // NFS 마운트 해제됨
         nfsStatusContainer.classList.remove('bg-green-50', 'border-green-100');
@@ -590,6 +605,22 @@ function updateNFSStatus(status) {
             statusIcon.classList.add('bg-red-500');
         } else {
             console.warn('NFS 상태 아이콘을 찾을 수 없습니다.');
+        }
+        
+        // NFS 경고 메시지 표시
+        if (nfsWarning) {
+            nfsWarning.classList.remove('hidden');
+        }
+        
+        // SMB 패널 비활성화
+        if (smbPanel) {
+            smbPanel.classList.add('opacity-50', 'pointer-events-none');
+        }
+        
+        // 프로그레스 바 초기화
+        const progressBar = document.querySelector('.last-check-progress');
+        if (progressBar) {
+            progressBar.style.width = '0%';
         }
     }
 }
