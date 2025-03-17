@@ -44,8 +44,8 @@ msg_ok "Docker & Compose 설치 완료"
 
 msg_info "Gshare 프로젝트 클론"
 cd /opt
-git clone -b docker https://github.com/wooooooooooook/gshare-manager.git gshare
-cd gshare
+git clone -b docker https://github.com/wooooooooooook/gshare-manager.git
+cd gshare-manager
 msg_ok "Gshare 프로젝트 클론 완료"
 
 # 타임존 설정
