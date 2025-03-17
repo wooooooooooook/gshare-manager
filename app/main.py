@@ -340,7 +340,7 @@ class GShareManager:
         logging.debug("SMBManager 참조 완료")
 
         # 모든 속성이 초기화된 후에 상태 업데이트 수행
-        self.current_state = self._update_state()
+        self.current_state = self.update_state()
 
     def _load_last_shutdown_time(self) -> float:
         """VM 마지막 종료 시간을 로드 (UTC 기준)"""
@@ -434,13 +434,44 @@ class GShareManager:
         else:
             logging.info("종료 웹훅을 전송하려했지만 vm이 이미 종료상태입니다.")
 
-    def _update_state(self) -> State:
+    def update_folder_mount_state(self, folder_path: str, is_mounted: bool) -> None:
+        """특정 폴더의 마운트 상태만 업데이트 (효율적인 상태 업데이트)"""
         try:
-            # 매번 호출 시 현재 시간을 새로 계산
+            logging.debug(f"폴더 '{folder_path}'의 마운트 상태를 '{is_mounted}'로 업데이트합니다.")
+            
+            # 기존 monitored_folders가 있는지 확인
+            if hasattr(self, 'current_state') and self.current_state is not None:
+                # folder_path가 monitored_folders에 있는지 확인
+                if folder_path in self.current_state.monitored_folders:
+                    # 해당 폴더의 마운트 상태만 업데이트
+                    self.current_state.monitored_folders[folder_path]['is_mounted'] = is_mounted
+                    logging.debug(f"폴더 '{folder_path}'의 마운트 상태가 '{is_mounted}'로 업데이트되었습니다.")
+                else:
+                    logging.debug(f"폴더 '{folder_path}'가 monitored_folders에 없어 전체 상태를 업데이트합니다.")
+                    # 폴더가 monitored_folders에 없는 경우, 전체 상태 업데이트 (monitored_folders는 업데이트 안 함)
+                    self.current_state = self.update_state(update_monitored_folders=False)
+            else:
+                logging.debug("current_state가 초기화되지 않아 전체 상태를 업데이트합니다.")
+                # current_state가 초기화되지 않은 경우, 전체 상태 업데이트
+                self.current_state = self.update_state()
+                
+            # SMB 상태 업데이트
+            if hasattr(self, 'smb_manager'):
+                try:
+                    self.current_state.smb_running = self.smb_manager.check_smb_status()
+                except Exception as e:
+                    logging.error(f"SMB 상태 확인 실패: {e}")
+                    
+        except Exception as e:
+            logging.error(f"폴더 마운트 상태 업데이트 실패: {e}")
+            # 오류 발생 시 전체 상태 업데이트 (monitored_folders는 업데이트 안 함)
+            self.current_state = self.update_state(update_monitored_folders=False)
+
+    def update_state(self, update_monitored_folders=True) -> State:
+        try:
             current_time = datetime.now(pytz.timezone(self.config.TIMEZONE))
             current_time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
-            logging.debug(
-                f"상태 업데이트 - 현재 시간: {current_time_str}, 타임스탬프: {current_time.timestamp()}")
+            logging.debug(f"상태 업데이트")
 
             vm_running = self.proxmox_api.is_vm_running()
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
@@ -454,12 +485,21 @@ class GShareManager:
             smb_running = False
             nfs_mounted = False
 
-            if hasattr(self, 'folder_monitor'):
+            # monitored_folders 업데이트 여부 확인
+            if not update_monitored_folders and hasattr(self, 'current_state') and self.current_state is not None:
+                # 이전 monitored_folders 재사용
+                monitored_folders = getattr(self.current_state, 'monitored_folders', {})
+            elif hasattr(self, 'folder_monitor'):
                 try:
                     monitored_folders = self.folder_monitor.get_monitored_folders()
-                    nfs_mounted = self.folder_monitor.check_nfs_status()
                 except Exception as e:
                     logging.error(f"폴더 모니터 정보 가져오기 실패: {e}")
+
+            if hasattr(self, 'folder_monitor'):
+                try:
+                    nfs_mounted = self.folder_monitor.check_nfs_status()
+                except Exception as e:
+                    logging.error(f"NFS 상태 확인 실패: {e}")
 
             if hasattr(self, 'smb_manager'):
                 try:
@@ -508,6 +548,9 @@ class GShareManager:
         count = 0
         while True:
             try:
+                # 다음 실행 시간 계산 (현재 시간 + 체크 간격)
+                next_run_time = time.time() + self.config.CHECK_INTERVAL
+                
                 update_log_level()
                 logging.debug(f"모니터링 루프 Count:{count}")
                 count += 1
@@ -559,7 +602,7 @@ class GShareManager:
 
                 try:
                     # 상태 업데이트
-                    self.current_state = self._update_state()
+                    self.current_state = self.update_state(update_monitored_folders=True)
 
                     # 웹 서버를 통해 소켓으로 상태 업데이트 전송
                     if gshare_web_server:
@@ -569,12 +612,28 @@ class GShareManager:
 
                 except Exception as e:
                     logging.error(f"상태 업데이트 중 오류: {e}")
-
-                time.sleep(self.config.CHECK_INTERVAL)
+                
+                # 다음 실행 시간까지 남은 시간 계산
+                sleep_time = next_run_time - time.time()
+                
+                # 작업이 체크 간격보다 오래 걸린 경우 로그 기록
+                if sleep_time <= 0:
+                    logging.warning(f"체크 간격이 너무 짧습니다. 모니터링 작업이 체크 간격({self.config.CHECK_INTERVAL}초)보다 {abs(sleep_time):.2f}초 더 걸렸습니다.")
+                    continue  # 즉시 다음 루프 실행
+                
+                # 남은 시간만큼만 대기
+                time.sleep(sleep_time)
 
             except Exception as e:
                 logging.error(f"모니터링 루프에서 예상치 못한 오류 발생: {e}")
-                time.sleep(self.config.CHECK_INTERVAL)  # 오류 발생시에도 대기 후 계속 실행
+                
+                # 오류 발생 시에도 다음 스케줄 유지를 위해 남은 시간 계산
+                remaining_time = max(0, next_run_time - time.time())
+                if remaining_time > 0:
+                    time.sleep(remaining_time)
+                else:
+                    # 이미 다음 실행 시간이 지났다면 짧은 시간만 대기 후 재시도
+                    time.sleep(1)  # 1초 대기 후 재시도
 
     def save_last_shutdown_time(self) -> None:
         """현재 시간을 VM 마지막 종료 시간으로 저장 (UTC 기준)"""
@@ -896,5 +955,4 @@ if __name__ == "__main__":
             time.sleep(60)  # 1분마다 체크
 
 # 프로그램 종료 시 호출
-atexit.register(lambda: gshare_manager.folder_monitor.cleanup_resources(
-) if gshare_manager else None)
+atexit.register(lambda: gshare_manager.folder_monitor.cleanup_resources() if gshare_manager else None)

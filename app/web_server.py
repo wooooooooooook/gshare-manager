@@ -38,6 +38,11 @@ class GshareWebServer:
         self.socketio = SocketIO(self.app, cors_allowed_origins="*")
         self._setup_logging()
         self._register_routes()
+        
+        # 소켓 상태 업데이트를 위한 변수들
+        self.active_connections = 0
+        self.state_update_timer = None
+        self.timer_lock = threading.Lock()
 
     def set_manager(self, manager):
         self.manager = manager
@@ -202,6 +207,12 @@ class GshareWebServer:
             # 연결 시 즉시 현재 상태 전송
             self.emit_state_update()
             self.emit_log_update()
+            
+            # 활성 연결 수 증가 및 상태 업데이트 타이머 시작
+            with self.timer_lock:
+                self.active_connections += 1
+                if self.active_connections == 1 and self.state_update_timer is None:
+                    self._start_state_update_timer()
 
         @self.socketio.on('request_state')
         def handle_request_state():
@@ -216,6 +227,11 @@ class GshareWebServer:
         @self.socketio.on('disconnect')
         def handle_disconnect():
             logging.debug("클라이언트가 WebSocket 연결을 종료했습니다.")
+            # 활성 연결 수 감소 및 필요 시 타이머 중지
+            with self.timer_lock:
+                self.active_connections = max(0, self.active_connections - 1)
+                if self.active_connections == 0 and self.state_update_timer is not None:
+                    self._stop_state_update_timer()
 
     def main_page(self):
         """메인 페이지 표시"""
@@ -552,12 +568,18 @@ class GshareWebServer:
             if is_mounted:
                 # 마운트 해제
                 if self.manager.smb_manager.remove_symlink(folder):
+                    # 마운트 상태만 업데이트 (효율적인 상태 업데이트)
+                    self.manager.update_folder_mount_state(folder, False)
+                    self.emit_state_update()
                     return jsonify({"status": "success", "message": f"{folder} 마운트가 해제되었습니다."})
                 else:
                     return jsonify({"status": "error", "message": f"{folder} 마운트 해제 실패"}), 500
             else:
                 # 마운트 활성화
                 if self.manager.smb_manager.create_symlink(folder) and self.manager.smb_manager.activate_smb_share():
+                    # 마운트 상태만 업데이트 (효율적인 상태 업데이트)
+                    self.manager.update_folder_mount_state(folder, True)
+                    self.emit_state_update()
                     return jsonify({"status": "success", "message": f"{folder} 마운트가 활성화되었습니다."})
                 else:
                     return jsonify({"status": "error", "message": f"{folder} 마운트 활성화 실패"}), 500
@@ -1236,3 +1258,33 @@ class GshareWebServer:
                     logging.debug("오류 발생으로 재시작 플래그 파일 삭제됨")
             except Exception as ex:
                 logging.error(f"재시작 플래그 파일 삭제 중 오류: {ex}")
+
+    def _start_state_update_timer(self):
+        """5초마다 상태 업데이트를 수행하는 타이머 시작"""
+        logging.debug("5초 주기 상태 업데이트 타이머 시작")
+        self.state_update_timer = threading.Thread(
+            target=self._state_update_loop, daemon=True)
+        self.state_update_timer.start()
+        
+    def _stop_state_update_timer(self):
+        """상태 업데이트 타이머 중지"""
+        logging.debug("상태 업데이트 타이머 중지")
+        self.state_update_timer = None  # 데몬 스레드이므로 자동으로 종료됨
+        
+    def _state_update_loop(self):
+        """5초마다 상태 업데이트를 수행하는 루프"""
+        while self.state_update_timer is not None:
+            try:
+                # 연결이 없거나 manager가 없는 경우 종료
+                if self.active_connections == 0 or self.manager is None:
+                    break
+                    
+                # monitored_folders를 업데이트하지 않는 가벼운 상태 업데이트 수행
+                self.manager.current_state = self.manager.update_state(update_monitored_folders=False)
+                self.emit_state_update()
+                
+                # 5초 대기
+                time.sleep(5)
+            except Exception as e:
+                logging.error(f"상태 업데이트 루프 중 오류: {e}")
+                time.sleep(5)  # 오류 발생 시에도 계속 실행
