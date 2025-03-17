@@ -228,10 +228,20 @@ function updateUI(data) {
     }
 
     // 감시 중인 폴더 목록 업데이트 - 별도 함수 사용
-    if (data.monitored_folders) {
+    if (data.monitored_folders && Object.keys(data.monitored_folders).length > 0) {
+        // mtime 기준으로 정렬된 폴더 배열 생성
+        const sortedFolders = Object.entries(data.monitored_folders).sort((a, b) => {
+            return new Date(b[1].mtime) - new Date(a[1].mtime);
+        });
+        
         // 백그라운드로 폴더 목록 처리를 위해 requestAnimationFrame 사용
         window.requestAnimationFrame(() => {
-            updateFolderList(data.monitored_folders);
+            updateFolderList(sortedFolders);
+        });
+    } else if (data.monitored_folders) {
+        // 폴더가 없는 경우 빈 배열 전달
+        window.requestAnimationFrame(() => {
+            updateFolderList([]);
         });
     }
 }
@@ -763,26 +773,23 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
     let foldersHtml = '';
     
     // sortedFolders가 비어있거나 정의되지 않은 경우 처리
-    if (!sortedFolders || (typeof sortedFolders === 'object' && Object.keys(sortedFolders).length === 0)) {
+    if (!sortedFolders || (Array.isArray(sortedFolders) ? sortedFolders.length === 0 : Object.keys(sortedFolders).length === 0)) {
         return '<div class="text-center py-4"><p class="text-sm text-gray-600">폴더가 없습니다.</p></div>';
     }
     
     try {
-        // sortedFolders가 객체인 경우 배열로 변환하고 정렬
+        // sortedFolders가 객체인 경우 배열로 변환
         const foldersArray = Array.isArray(sortedFolders) 
             ? sortedFolders 
-            : Object.entries(sortedFolders).sort((a, b) => {
-                // 시간순 정렬
-                return new Date(b[1].mtime) - new Date(a[1].mtime);
-            });
+            : Object.entries(sortedFolders);
                 
         if (!foldersArray.length) {
             return '<div class="text-center py-4"><p class="text-sm text-gray-600">폴더가 없습니다.</p></div>';
         }
         
         for (const entry of foldersArray) {
-            const folder = Array.isArray(sortedFolders) ? entry[0] : entry[0];
-            const info = Array.isArray(sortedFolders) ? entry[1] : entry[1];
+            const folder = entry[0];
+            const info = entry[1];
             
             // 폴더 경로에서 안전한 ID 생성 (한글 등 Latin1 범위 밖의 문자 처리)
             const folderId = `folder-${encodeURIComponent(folder).replace(/%/g, '_')}`;
@@ -908,9 +915,36 @@ function updateFolderState() {
 
             // 백그라운드로 폴더 목록 처리
             if (data.monitored_folders && Object.keys(data.monitored_folders).length > 0) {
-                window.requestAnimationFrame(() => {
-                    updateFolderList(data.monitored_folders);
+                // mtime 기준으로 정렬된 폴더 배열 생성
+                const sortedFolders = Object.entries(data.monitored_folders).sort((a, b) => {
+                    return new Date(b[1].mtime) - new Date(a[1].mtime);
                 });
+                
+                // 대규모 폴더 리스트 처리 최적화
+                if (sortedFolders.length > 100) {
+                    console.log(`대용량 폴더 목록 처리: ${sortedFolders.length}개`);
+                    // 백그라운드에서 처리
+                    setTimeout(() => {
+                        window.requestAnimationFrame(() => {
+                            updateFolderList(sortedFolders);
+                        });
+                    }, 10);
+                } else {
+                    // 일반적인 크기는 즉시 처리
+                    window.requestAnimationFrame(() => {
+                        updateFolderList(sortedFolders);
+                    });
+                }
+            } else if (data.monitored_folders) {
+                // 폴더가 없는 경우 빈 배열 전달
+                window.requestAnimationFrame(() => {
+                    updateFolderList([]);
+                });
+            }
+            
+            // 상태 표시기 숨기기 (이 위치로 이동)
+            if (statusIndicator && (!data.monitored_folders || Object.keys(data.monitored_folders).length === 0)) {
+                statusIndicator.classList.add('hidden');
             }
         })
         .catch(error => {
@@ -922,9 +956,9 @@ function updateFolderState() {
 }
 
 // 폴더 목록만 업데이트하는 함수로 분리
-function updateFolderList(folders) {
+function updateFolderList(sortedFolders) {
     // 폴더 목록이 비어있는 경우
-    if (!folders || Object.keys(folders).length === 0) {
+    if (!sortedFolders || sortedFolders.length === 0) {
         document.getElementById('monitoredFoldersContainer').innerHTML = `
             <div class="text-center py-4">
                 <p class="text-sm text-gray-600">감시 중인 폴더가 없습니다.</p>
@@ -935,6 +969,12 @@ function updateFolderList(folders) {
                 <p class="text-sm text-gray-600">공유 중인 폴더가 없습니다.</p>
             </div>
         `;
+        
+        // 상태 표시기 숨기기
+        const statusIndicator = document.querySelector('.status-update-indicator');
+        if (statusIndicator) {
+            statusIndicator.classList.add('hidden');
+        }
         return;
     }
 
@@ -949,30 +989,59 @@ function updateFolderList(folders) {
         loadingSmbElement.style.display = 'none';
     }
 
-    // 마운트된 폴더와 마운트되지 않은 폴더 분류
-    const unmountedFolders = {};
-    const mountedFolders = {};
+    // 마운트된 폴더와 마운트되지 않은 폴더 분류 - 최적화 (한 번만 순회)
+    const unmountedFolders = [];
+    const mountedFolders = [];
     
-    // 각 폴더를 마운트 상태에 따라 분류
-    Object.entries(folders).forEach(([path, info]) => {
-        if (info.is_mounted) {
-            mountedFolders[path] = info;
+    // 메모리 사용량 최적화: 배열 미리 할당 (대략적인 크기 예측)
+    const estimatedSize = Math.min(1000, sortedFolders.length);
+    unmountedFolders.length = estimatedSize;
+    mountedFolders.length = estimatedSize;
+    let unmountedCount = 0;
+    let mountedCount = 0;
+    
+    // 각 폴더를 마운트 상태에 따라 분류 (정렬 순서 유지)
+    for (let i = 0; i < sortedFolders.length; i++) {
+        const folderEntry = sortedFolders[i];
+        if (folderEntry[1].is_mounted) {
+            mountedFolders[mountedCount++] = folderEntry;
         } else {
-            unmountedFolders[path] = info;
+            unmountedFolders[unmountedCount++] = folderEntry;
         }
-    });
+    }
     
-    console.log('마운트되지 않은 폴더 갯수:', Object.keys(unmountedFolders).length);
-    console.log('마운트된 폴더 갯수:', Object.keys(mountedFolders).length);
-
-    // 비동기적으로 컨테이너 업데이트 (타이밍 조정)
-    setTimeout(() => {
-        // NFS 패널에는 마운트되지 않은 폴더만 표시 (마운트 가능한 목록)
+    // 실제 사용된 크기로 배열 조정
+    unmountedFolders.length = unmountedCount;
+    mountedFolders.length = mountedCount;
+    
+    console.log('마운트되지 않은 폴더 갯수:', unmountedCount);
+    console.log('마운트된 폴더 갯수:', mountedCount);
+    
+    // 총 폴더 수가 많은 경우 비동기 처리 최적화
+    const isBatchProcessingNeeded = sortedFolders.length > 200;
+    
+    // 컨테이너 업데이트 함수 실행
+    if (isBatchProcessingNeeded) {
+        // 비동기적으로 컨테이너 업데이트 (타이밍 조정)
+        setTimeout(() => {
+            // NFS 패널에는 마운트되지 않은 폴더만 표시 (마운트 가능한 목록)
+            updateFolderContainer('monitoredFoldersContainer', unmountedFolders, 'mount');
+            
+            // 다음 프레임에서 SMB 패널 업데이트
+            setTimeout(() => {
+                // SMB 패널에는 마운트된 폴더만 표시 (언마운트 가능한 목록)
+                updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
+                
+                // 상태 표시기 숨기기
+                const statusIndicator = document.querySelector('.status-update-indicator');
+                if (statusIndicator) {
+                    statusIndicator.classList.add('hidden');
+                }
+            }, 50);
+        }, 0);
+    } else {
+        // 적은 수의 폴더는 일반적인 방식으로 처리
         updateFolderContainer('monitoredFoldersContainer', unmountedFolders, 'mount');
-    }, 0);
-    
-    setTimeout(() => {
-        // SMB 패널에는 마운트된 폴더만 표시 (언마운트 가능한 목록)
         updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
         
         // 상태 표시기 숨기기
@@ -980,7 +1049,7 @@ function updateFolderList(folders) {
         if (statusIndicator) {
             statusIndicator.classList.add('hidden');
         }
-    }, 10);
+    }
 }
 
 // 폴더 컨테이너 업데이트 함수
@@ -989,7 +1058,7 @@ function updateFolderContainer(containerId, folderData, action) {
     if (!container) return;
     
     // 폴더가 없는 경우 메시지 표시
-    if (!folderData || Object.keys(folderData).length === 0) {
+    if (!folderData || (Array.isArray(folderData) ? folderData.length === 0 : Object.keys(folderData).length === 0)) {
         const emptyMessage = action === 'mount' 
             ? '모든 폴더가 마운트되었습니다.' 
             : '현재 SMB로 공유 중인 폴더가 없습니다.';
@@ -1002,11 +1071,6 @@ function updateFolderContainer(containerId, folderData, action) {
         return;
     }
     
-    // 폴더 데이터를 시간순으로 정렬 (미리 한 번만 수행)
-    const sortedFolders = Object.entries(folderData).sort((a, b) => {
-        return new Date(b[1].mtime) - new Date(a[1].mtime);
-    });
-    
     // 현재 컨테이너에 있는 모든 폴더 항목 가져오기
     const existingFolderItems = container.querySelectorAll('.folder-item');
     const existingFolderMap = new Map();
@@ -1016,123 +1080,160 @@ function updateFolderContainer(containerId, folderData, action) {
         existingFolderMap.set(item.dataset.folder, item);
     });
     
-    // DOM 조작을 최소화하기 위한 DocumentFragment 사용
-    const fragment = document.createDocumentFragment();
+    // 폴더 데이터 준비 (정렬은 이미 완료됨)
+    const folders = Array.isArray(folderData) ? folderData : Object.entries(folderData);
     
-    // 한 번에 처리할 폴더 수 (청크 크기)
-    const CHUNK_SIZE = 20;  
+    // 처리된 폴더 경로 추적을 위한 Set
+    const processedFolders = new Set();
     
-    // 비동기 처리를 위한 청크 처리 함수
-    function processChunk(startIndex) {
-        return new Promise(resolve => {
-            // requestAnimationFrame을 사용하여 UI 스레드 최적화
-            requestAnimationFrame(() => {
-                const endIndex = Math.min(startIndex + CHUNK_SIZE, sortedFolders.length);
-                
-                // 현재 청크의 폴더 항목 처리
-                for (let i = startIndex; i < endIndex; i++) {
-                    const [folder, info] = sortedFolders[i];
-                    
-                    // 폴더 경로에서 안전한 ID 생성 (한글 등 Latin1 범위 밖의 문자 처리)
-                    const folderId = `folder-${encodeURIComponent(folder).replace(/%/g, '_')}`;
-                    
-                    // 이미 존재하는 폴더 항목인지 확인
-                    if (existingFolderMap.has(folder)) {
-                        // 기존 항목 업데이트
-                        const existingItem = existingFolderMap.get(folder);
-                        
-                        // 수정 시간 업데이트
-                        const timeString = existingItem.querySelector('.time-string');
-                        const readableTime = existingItem.querySelector('.readable-time');
-                        
-                        if (timeString && readableTime && timeString.innerText !== info.mtime) {
-                            timeString.innerText = info.mtime;
-                            readableTime.innerText = get_time_ago(info.mtime);
-                            existingItem.dataset.mtime = info.mtime;
-                        }
-                        
-                        // 프래그먼트에 추가
-                        fragment.appendChild(existingItem);
-                        
-                        // 처리된 항목은 Map에서 제거
-                        existingFolderMap.delete(folder);
-                    } else {
-                        // 새 항목 생성
-                        const newItem = document.createElement('div');
-                        newItem.id = folderId;
-                        newItem.className = 'folder-item flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50';
-                        newItem.dataset.folder = folder;
-                        newItem.dataset.mtime = info.mtime;
-                        newItem.dataset.action = action;
-                        
-                        // 버튼 텍스트와 스타일 결정
-                        let buttonText, buttonClass;
-                        if (action === 'mount') {
-                            buttonText = '마운트';
-                            buttonClass = 'bg-green-50 text-green-700 hover:bg-green-100';
-                        } else {
-                            buttonText = '마운트 해제';
-                            buttonClass = 'bg-red-50 text-red-700 hover:bg-red-100';
-                        }
-                        
-                        newItem.innerHTML = `
-                            <div class="flex-1 overflow-hidden">
-                                <div class="text-sm mb-1 font-medium text-gray-800 truncate">${folder}</div>
-                                <div class="flex items-center toggle-text text-xs text-gray-500">
-                                    <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-                                    </svg>
-                                    <span class="readable-time">${get_time_ago(info.mtime)}</span>
-                                    <span class="hidden time-string">${info.mtime}</span>
-                                </div>
-                            </div>
-                            <button onclick="toggleMount('${folder}', '${action}')" 
-                                class="toggle-btn text-xs px-2 py-1 rounded ${buttonClass} transition-colors duration-200">
-                                ${buttonText}
-                            </button>
-                        `;
-                        
-                        // 프래그먼트에 추가
-                        fragment.appendChild(newItem);
-                    }
-                }
-                
-                // 다음 청크 처리 또는 완료
-                if (endIndex < sortedFolders.length) {
-                    // 다음 청크를 처리할 때 시간을 주어 UI 반응성 유지
-                    setTimeout(() => {
-                        resolve(processChunk(endIndex));
-                    }, 0);
-                } else {
-                    // 남은 항목들은 제거 대상
-                    existingFolderMap.forEach(item => {
-                        item.remove();
-                    });
-                    
-                    // 컨테이너 비우기
-                    container.innerHTML = '';
-                    
-                    // 모든 항목을 한 번에 추가 (DOM 조작 최소화)
-                    container.appendChild(fragment);
-                    
-                    // 토글 텍스트 클릭 이벤트 리스너 추가
-                    container.querySelectorAll('.toggle-text').forEach(el => {
-                        el.addEventListener('click', () => {
-                            el.querySelector('.time-string').classList.toggle('hidden');
-                            el.querySelector('.readable-time').classList.toggle('hidden');
-                        });
-                    });
-                    
-                    resolve();
-                }
-            });
-        });
+    // 삭제할 항목을 담을 프래그먼트 (일괄 처리)
+    const removeFragment = document.createDocumentFragment();
+    const removeList = [];
+    
+    // 성능 최적화를 위한 청크 단위 처리
+    const CHUNK_SIZE = 50; // 한 번에 처리할 항목 수
+    let currentChunk = 0;
+    
+    // 시간 변환 결과 캐싱
+    const timeAgoCache = new Map();
+    function getCachedTimeAgo(timestamp) {
+        if (!timeAgoCache.has(timestamp)) {
+            timeAgoCache.set(timestamp, get_time_ago(timestamp));
+        }
+        return timeAgoCache.get(timestamp);
     }
     
-    // 처리 시작
-    processChunk(0).catch(error => {
-        console.error('폴더 목록 처리 중 오류:', error);
-    });
+    // 지연 렌더링 함수 정의
+    function processChunk() {
+        // 현재 청크의 범위 계산
+        const start = currentChunk * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, folders.length);
+        
+        // 해당 청크의 요소를 처리할 프래그먼트
+        const newItemsFragment = document.createDocumentFragment();
+        
+        // 현재 청크의 폴더들 처리
+        for (let i = start; i < end; i++) {
+            const entry = folders[i];
+            const folder = entry[0];
+            const info = entry[1];
+            
+            // 폴더 처리 완료 표시
+            processedFolders.add(folder);
+            
+            // 폴더 경로에서 안전한 ID 생성
+            const folderId = `folder-${encodeURIComponent(folder).replace(/%/g, '_')}`;
+            
+            // 이미 존재하는 폴더 항목인지 확인
+            if (existingFolderMap.has(folder)) {
+                // 기존 항목 업데이트
+                const existingItem = existingFolderMap.get(folder);
+                
+                // 수정 시간 업데이트 (변경된 경우에만)
+                const timeString = existingItem.querySelector('.time-string');
+                const readableTime = existingItem.querySelector('.readable-time');
+                
+                if (timeString && readableTime && timeString.innerText !== info.mtime) {
+                    timeString.innerText = info.mtime;
+                    readableTime.innerText = getCachedTimeAgo(info.mtime);
+                    existingItem.dataset.mtime = info.mtime;
+                }
+                
+                // 위치 이동 없이 그대로 유지
+            } else {
+                // 새 항목 생성
+                const newItem = document.createElement('div');
+                newItem.id = folderId;
+                newItem.className = 'folder-item flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50';
+                newItem.dataset.folder = folder;
+                newItem.dataset.mtime = info.mtime;
+                newItem.dataset.action = action;
+                
+                // 렌더링 성능 향상을 위한 속성 추가
+                newItem.style.contain = 'content';
+                newItem.style.willChange = 'transform';
+                
+                // 버튼 텍스트와 스타일 결정
+                let buttonText, buttonClass;
+                if (action === 'mount') {
+                    buttonText = '마운트';
+                    buttonClass = 'bg-green-50 text-green-700 hover:bg-green-100';
+                } else {
+                    buttonText = '마운트 해제';
+                    buttonClass = 'bg-red-50 text-red-700 hover:bg-red-100';
+                }
+                
+                // 캐시된 시간 가져오기
+                const cachedTimeAgo = getCachedTimeAgo(info.mtime);
+                
+                newItem.innerHTML = `
+                    <div class="flex-1 overflow-hidden">
+                        <div class="text-sm mb-1 font-medium text-gray-800 truncate">${folder}</div>
+                        <div class="flex items-center toggle-text text-xs text-gray-500">
+                            <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                            </svg>
+                            <span class="readable-time">${cachedTimeAgo}</span>
+                            <span class="hidden time-string">${info.mtime}</span>
+                        </div>
+                    </div>
+                    <button onclick="toggleMount('${folder}', '${action}')" 
+                        class="toggle-btn text-xs px-2 py-1 rounded ${buttonClass} transition-colors duration-200">
+                        ${buttonText}
+                    </button>
+                `;
+                
+                // 새 항목 프래그먼트에 추가
+                newItemsFragment.appendChild(newItem);
+            }
+        }
+        
+        // 새 항목들만 컨테이너에 추가 (기존 항목은 그대로 유지)
+        if (newItemsFragment.childNodes.length > 0) {
+            container.appendChild(newItemsFragment);
+            
+            // 새로 추가된 토글 텍스트에 클릭 이벤트 추가
+            const newToggleElements = container.querySelectorAll('.folder-item:not([data-event-attached]) .toggle-text');
+            newToggleElements.forEach(el => {
+                el.addEventListener('click', () => {
+                    el.querySelector('.time-string').classList.toggle('hidden');
+                    el.querySelector('.readable-time').classList.toggle('hidden');
+                });
+                // 이벤트 추가 표시
+                el.closest('.folder-item').dataset.eventAttached = 'true';
+            });
+        }
+        
+        // 다음 청크로 이동
+        currentChunk++;
+        
+        // 아직 처리할 청크가 남아있으면 다음 프레임에 스케줄링
+        if (currentChunk * CHUNK_SIZE < folders.length) {
+            // requestIdleCallback을 지원하면 사용, 아니면 requestAnimationFrame으로 폴백
+            if (window.requestIdleCallback) {
+                window.requestIdleCallback(processChunk, { timeout: 100 });
+            } else {
+                window.requestAnimationFrame(processChunk);
+            }
+        } else {
+            // 모든 청크 처리 완료 후 제거할 항목 처리
+            // 현재 데이터에 없는 기존 항목 제거
+            for (const [folder, element] of existingFolderMap.entries()) {
+                if (!processedFolders.has(folder)) {
+                    removeList.push(element);
+                }
+            }
+            
+            // 제거할 항목이 있으면 일괄 처리
+            if (removeList.length > 0) {
+                // 실제 DOM에서 제거
+                removeList.forEach(el => el.remove());
+            }
+        }
+    }
+    
+    // 첫 번째 청크 처리 시작
+    processChunk();
 }
 
 // SMB 서비스 토글 함수 추가
