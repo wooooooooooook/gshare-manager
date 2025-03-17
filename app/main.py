@@ -469,9 +469,8 @@ class GShareManager:
 
     def update_state(self, update_monitored_folders=True) -> State:
         try:
-            current_time = datetime.now(pytz.timezone(self.config.TIMEZONE))
-            current_time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
-            logging.debug(f"상태 업데이트")
+            logging.debug(f"상태 업데이트, update_monitored_folders: {update_monitored_folders}")
+            current_time_str = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S') if update_monitored_folders else getattr(self.current_state, 'last_check_time', '-')
 
             vm_running = self.proxmox_api.is_vm_running()
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0

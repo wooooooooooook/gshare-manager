@@ -528,6 +528,22 @@ class SMBManager:
             if os.path.exists(link_path):
                 os.remove(link_path)
                 logging.info(f"심볼릭 링크 제거됨: {link_path}")
+                
+            # 남은 심볼릭 링크 확인
+            remaining_symlinks = False
+            if os.path.exists(self.links_dir):
+                for filename in os.listdir(self.links_dir):
+                    file_path = os.path.join(self.links_dir, filename)
+                    if os.path.islink(file_path):
+                        remaining_symlinks = True
+                        break
+            
+            # 남은 심볼릭 링크가 없으면 5초 후 SMB 공유 비활성화
+            if not remaining_symlinks:
+                logging.info("남은 심볼릭 링크가 없습니다. 5초 후 SMB 공유를 비활성화합니다.")
+                time.sleep(5)
+                self.deactivate_smb_share()
+                
             return True
         except Exception as e:
             logging.error(f"심볼릭 링크 제거 실패 ({subfolder}): {e}")

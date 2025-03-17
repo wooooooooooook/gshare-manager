@@ -1107,20 +1107,6 @@ function updateFolderContainer(containerId, folderData, action) {
     const container = document.getElementById(containerId);
     if (!container) return;
     
-    // 폴더가 없는 경우 메시지 표시
-    if (!folderData || (Array.isArray(folderData) ? folderData.length === 0 : Object.keys(folderData).length === 0)) {
-        const emptyMessage = action === 'mount' 
-            ? '모든 폴더가 마운트되었습니다.' 
-            : '현재 SMB로 공유 중인 폴더가 없습니다.';
-            
-        container.innerHTML = `
-            <div class="text-center py-4">
-                <p class="text-sm text-gray-600">${emptyMessage}</p>
-            </div>
-        `;
-        return;
-    }
-    
     // 현재 컨테이너에 있는 모든 폴더 항목 가져오기
     const existingFolderItems = container.querySelectorAll('.folder-item');
     const existingFolderMap = new Map();
@@ -1136,8 +1122,7 @@ function updateFolderContainer(containerId, folderData, action) {
     // 처리된 폴더 경로 추적을 위한 Set
     const processedFolders = new Set();
     
-    // 삭제할 항목을 담을 프래그먼트 (일괄 처리)
-    const removeFragment = document.createDocumentFragment();
+    // 삭제할 항목을 담을 
     const removeList = [];
     
     // 성능 최적화를 위한 청크 단위 처리
