@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-source <(curl -s https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
+source <(curl -s https://raw.githubusercontent.com/wooooooooooook/gshare-manager/refs/heads/docker/build.func)
 # Copyright (c) 2021-2025 community-scripts ORG
 # Author: MickLesk (CanbiZ)
 # License: MIT | https://github.com/community-scripts/ProxmoxVED/raw/main/LICENSE
-# Source: https://github.com/ZoeyVid/NPMplus
 
 APP="Gshare"
 var_tags="gshare"
@@ -11,7 +10,7 @@ var_cpu="1"
 var_ram="512"
 var_disk="2"
 var_os="alpine"
-var_version="2.0"
+var_version="3.21"
 var_unprivileged="1"
 
 header_info "$APP"
@@ -38,4 +37,4 @@ description
 msg_ok "Completed Successfully!\n"
 echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
 echo -e "${INFO}${YW} Access it using the following URL:${CL}"
-echo -e "${TAB}${GATEWAY}${BGN}https://${IP}:5000${CL}"
+echo -e "${TAB}${GATEWAY}${BGN}https://${IP}:81${CL}"
