@@ -298,6 +298,54 @@ function startPolling() {
     }, 1000);
 }
 
+// 글로벌 변수로 observer 선언
+let folderTimeObserver = null;
+let visibleFolderElements = new Set();
+
+// Intersection Observer 초기화 함수
+function initFolderTimeObserver() {
+    // 기존 observer가 있으면 연결 해제
+    if (folderTimeObserver) {
+        folderTimeObserver.disconnect();
+    }
+    
+    // 새 observer 생성
+    folderTimeObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            const el = entry.target;
+            
+            if (entry.isIntersecting) {
+                // 화면에 보이게 되면 Set에 추가
+                visibleFolderElements.add(el);
+            } else {
+                // 화면에서 사라지면 Set에서 제거
+                visibleFolderElements.delete(el);
+            }
+        });
+    }, {
+        root: null, // viewport 기준
+        rootMargin: '50px', // viewport 여유공간
+        threshold: 0.1 // 10% 이상 보일 때 감지
+    });
+    
+    // 모든 폴더 타임라인 요소 감시 등록
+    document.querySelectorAll('.monitored-folders-grid .toggle-text, .smb-folders-grid .toggle-text').forEach(el => {
+        folderTimeObserver.observe(el);
+    });
+}
+
+// 화면에 보이는 폴더만 시간 업데이트
+function updateVisibleFolderTimes() {
+    // 화면에 보이는 요소만 업데이트
+    visibleFolderElements.forEach(el => {
+        const timeString = el.querySelector('.time-string');
+        const readableTime = el.querySelector('.readable-time');
+        if (timeString && readableTime) {
+            readableTime.innerText = get_time_ago(timeString.innerText);
+        }
+    });
+}
+
 window.onload = function () {
     getCurrentLogLevel();
     const logContent = document.getElementById('logContent');
@@ -369,6 +417,9 @@ window.onload = function () {
     // 프로그레스 바 업데이트 시작
     progressBarInterval = setInterval(updateProgressBar, 1000);  // 1000ms마다 업데이트
 
+    // Intersection Observer 초기화
+    initFolderTimeObserver();
+
     // 1초마다 시간 표시 업데이트
     timeUpdateInterval = setInterval(function () {
         // 마지막 체크 시간 업데이트
@@ -386,14 +437,8 @@ window.onload = function () {
                 get_time_ago(lastShutdownTime.innerText) : '정보없음';
         }
 
-        // 모든 폴더의 수정 시간 업데이트
-        document.querySelectorAll('.monitored-folders-grid .toggle-text, .smb-folders-grid .toggle-text').forEach(el => {
-            const timeString = el.querySelector('.time-string');
-            const readableTime = el.querySelector('.readable-time');
-            if (timeString && readableTime) {
-                readableTime.innerText = get_time_ago(timeString.innerText);
-            }
-        });
+        // 화면에 보이는 폴더 요소만 수정 시간 업데이트
+        updateVisibleFolderTimes();
     }, 1000);
 
     // 페이지 언로드 시 인터벌 정리
@@ -401,6 +446,11 @@ window.onload = function () {
         if (progressBarInterval) clearInterval(progressBarInterval);
         if (timeUpdateInterval) clearInterval(timeUpdateInterval);
         if (pollingInterval) clearInterval(pollingInterval);
+        
+        // Observer 연결 해제
+        if (folderTimeObserver) {
+            folderTimeObserver.disconnect();
+        }
         
         // 소켓 연결 정리
         if (socket) {
@@ -1229,11 +1279,40 @@ function updateFolderContainer(containerId, folderData, action) {
                 // 실제 DOM에서 제거
                 removeList.forEach(el => el.remove());
             }
+            
+            // 모든 처리가 완료되면 Observer에 새 요소 등록
+            if (typeof updateObserversAfterProcessing === 'function') {
+                updateObserversAfterProcessing();
+            }
         }
     }
     
     // 첫 번째 청크 처리 시작
     processChunk();
+    
+    // 폴더 목록이 변경되면 Observer 업데이트
+    function updateObserversAfterProcessing() {
+        // 이전에 등록된 Observer가 있으면 다시 등록
+        if (folderTimeObserver && currentChunk * CHUNK_SIZE >= folders.length) {
+            // 모든 폴더가 처리된 후 Observer 업데이트
+            setTimeout(() => {
+                // 새로 추가된 toggle-text 요소들 찾기
+                const newToggleElements = container.querySelectorAll('.folder-item:not([data-observer-attached]) .toggle-text');
+                
+                // 각 요소를 Observer에 등록
+                newToggleElements.forEach(el => {
+                    folderTimeObserver.observe(el);
+                    // 추적 중인 요소로 표시
+                    el.closest('.folder-item').dataset.observerAttached = 'true';
+                });
+            }, 0);
+        }
+    }
+    
+    // Observer 업데이트 예약
+    if (folders.length > 0) {
+        updateObserversAfterProcessing();
+    }
 }
 
 // SMB 서비스 토글 함수 추가
