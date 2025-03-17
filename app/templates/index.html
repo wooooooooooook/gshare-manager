@@ -27,9 +27,52 @@
 			</div>
 
 			<!-- 메인 컨텐츠 -->
+			<!-- 마지막 확인시간 카드 -->
+			<div class="mb-4">
+				<div
+					class="flex justify-between bg-white rounded-lg p-4 border border-gray-200 relative overflow-hidden"
+				>
+					<div class="absolute inset-0 bg-gray-50">
+						<div
+							class="last-check-progress h-full bg-blue-100 transition-all duration-1000"
+							style="width: 0%"
+						></div>
+					</div>
+					<div class="flex items-center gap-2 relative">
+						<svg
+							class="w-5 h-5 text-gray-500"
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="1.5"
+							stroke="currentColor"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+							/>
+						</svg>
+						<span class="text-sm text-gray-500"
+							>마지막 확인 (간격: {{state['check_interval']}}초)</span
+						>
+					</div>
+					<div
+						class="flex items-center gap-1 font-medium text-sm justify-end last-check-time relative text-gray-500"
+					>
+						<span class="text-right readable-time"
+							>{{state['last_check_time']}}</span
+						>
+						<span class="hidden text-right time-string"
+							>{{state['last_check_time']}}</span
+						>
+					</div>
+				</div>
+			</div>
+
 			<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
 				<!-- NFS 마운트 상태 패널 -->
-				<div class="border border-gray-200 rounded-md p-2 bg-white">
+				<div class="border border-gray-200 rounded-md p-2 bg-white flex flex-col h-full">
 					<h3 class="font-medium mb-2">From NAS</h3>
 					<div
 						onclick="remountNFS()"
@@ -69,49 +112,42 @@
 							></span>
 						</div>
 					</div>
-					<div
-						class="bg-white rounded-md border border-gray-200 p-4 text-gray-800"
-					>
-						<div class="max-h-[30vh] overflow-y-auto">
-							<div
-								class="monitored-folders-grid"
-								id="monitoredFoldersContainer"
-							>
-								<div
-									class="text-center py-4"
-									id="loadingFolders"
+					<div class="flex-1 overflow-y-auto">
+						<div
+							class="monitored-folders-grid"
+							id="monitoredFoldersContainer"
+						>
+							<div class="text-center py-4" id="loadingFolders">
+								<svg
+									class="animate-spin h-5 w-5 mx-auto text-gray-500"
+									xmlns="http://www.w3.org/2000/svg"
+									fill="none"
+									viewBox="0 0 24 24"
 								>
-									<svg
-										class="animate-spin h-5 w-5 mx-auto text-gray-500"
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-									>
-										<circle
-											class="opacity-25"
-											cx="12"
-											cy="12"
-											r="10"
-											stroke="currentColor"
-											stroke-width="4"
-										></circle>
-										<path
-											class="opacity-75"
-											fill="currentColor"
-											d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-										></path>
-									</svg>
-									<p class="mt-2 text-sm text-gray-600">
-										폴더 목록을 불러오는 중...
-									</p>
-								</div>
+									<circle
+										class="opacity-25"
+										cx="12"
+										cy="12"
+										r="10"
+										stroke="currentColor"
+										stroke-width="4"
+									></circle>
+									<path
+										class="opacity-75"
+										fill="currentColor"
+										d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+									></path>
+								</svg>
+								<p class="mt-2 text-sm text-gray-600">
+									폴더 목록을 불러오는 중...
+								</p>
 							</div>
 						</div>
 					</div>
 				</div>
 
 				<!-- SMB 상태 패널 -->
-				<div class="border border-gray-200 rounded-md p-2 bg-white">
+				<div class="border border-gray-200 rounded-md p-2 bg-white flex flex-col h-full">
 					<h3 class="font-medium mb-2">GShare</h3>
 					<div
 						onclick="toggleSMB()"
@@ -151,42 +187,35 @@
 							></span>
 						</div>
 					</div>
-					<div
-						class="bg-white rounded-md border border-gray-200 p-4 text-gray-800"
-					>
-						<div class="max-h-[30vh] overflow-y-auto">
+					<div class="flex-1 overflow-y-auto">
+						<div class="smb-folders-grid" id="smbFoldersContainer">
 							<div
-								class="smb-folders-grid"
-								id="smbFoldersContainer"
+								class="text-center py-4"
+								id="loadingSmbFolders"
 							>
-								<div
-									class="text-center py-4"
-									id="loadingSmbFolders"
+								<svg
+									class="animate-spin h-5 w-5 mx-auto text-gray-500"
+									xmlns="http://www.w3.org/2000/svg"
+									fill="none"
+									viewBox="0 0 24 24"
 								>
-									<svg
-										class="animate-spin h-5 w-5 mx-auto text-gray-500"
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-									>
-										<circle
-											class="opacity-25"
-											cx="12"
-											cy="12"
-											r="10"
-											stroke="currentColor"
-											stroke-width="4"
-										></circle>
-										<path
-											class="opacity-75"
-											fill="currentColor"
-											d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-										></path>
-									</svg>
-									<p class="mt-2 text-sm text-gray-600">
-										공유 폴더 목록을 불러오는 중...
-									</p>
-								</div>
+									<circle
+										class="opacity-25"
+										cx="12"
+										cy="12"
+										r="10"
+										stroke="currentColor"
+										stroke-width="4"
+									></circle>
+									<path
+										class="opacity-75"
+										fill="currentColor"
+										d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+									></path>
+								</svg>
+								<p class="mt-2 text-sm text-gray-600">
+									공유 폴더 목록을 불러오는 중...
+								</p>
 							</div>
 						</div>
 					</div>
@@ -317,19 +346,13 @@
 							<span class="text-right">{{state['uptime']}}</span>
 						</div>
 					</div>
-					<!-- 마지막 확인시간 카드 추가 -->
+					<!-- 마지막 종료시간 카드 추가 -->
 					<div
-						class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 mb-2 toggle-text relative overflow-hidden"
+						class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200"
 					>
-						<div class="absolute inset-0 bg-gray-50">
-							<div
-								class="last-check-progress h-full bg-blue-100 transition-all duration-1000"
-								style="width: 0%"
-							></div>
-						</div>
-						<div class="flex items-center gap-1 relative">
+						<div class="flex items-center gap-1">
 							<svg
-								class="w-4 h-4 text-gray-500"
+								class="w-4 h-4 text-gray-700"
 								xmlns="http://www.w3.org/2000/svg"
 								fill="none"
 								viewBox="0 0 24 24"
@@ -339,23 +362,16 @@
 								<path
 									stroke-linecap="round"
 									stroke-linejoin="round"
-									d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+									d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
 								/>
 							</svg>
-							<span class="text-xs text-gray-500"
-								>마지막 확인(간격:
-								{{state['check_interval']}}초)</span
-							>
+							<span class="text-xs text-gray-500">마지막 종료</span>
 						</div>
 						<div
-							class="flex items-center gap-1 font-medium text-sm justify-end last-check-time relative text-gray-500"
+							class="flex items-center gap-1 font-medium text-sm text-gray-800 last-shutdown-time toggle-text"
 						>
-							<span class="text-right readable-time"
-								>{{state['last_check_time']}}</span
-							>
-							<span class="hidden text-right time-string"
-								>{{state['last_check_time']}}</span
-							>
+							<span class="text-right readable-time">{{state['last_shutdown_time'] if state['last_shutdown_time'] != '-' else '정보없음'}}</span>
+							<span class="hidden text-right time-string">{{state['last_shutdown_time']}}</span>
 						</div>
 					</div>
 					<div

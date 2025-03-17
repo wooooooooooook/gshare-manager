@@ -58,6 +58,7 @@ let autoUpdateLog = true;
 let logHovered = false;
 let autoScrollLog = true; // 자동 스크롤 상태 변수 추가
 let socket = null; // Socket.IO 객체
+let userScrolled = false; // userScrolled 변수를 전역 변수로 이동
 
 // state를 콘솔에 로깅하는 함수
 function logStateToConsole(state) {
@@ -272,7 +273,6 @@ window.onload = function () {
         });
 
         // 로그 영역 스크롤 이벤트 감지
-        let userScrolled = false;
         let scrollTimeout;
         
         logContent.addEventListener('scroll', function() {
