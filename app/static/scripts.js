@@ -113,6 +113,16 @@ function toggleLogAutoScroll() {
 
 // Socket.IO 초기화 및 이벤트 핸들러 등록
 function initSocketIO() {
+    // 기존 소켓이 있으면 연결 해제 및 이벤트 리스너 제거
+    if (socket) {
+        socket.off('connect');
+        socket.off('disconnect');
+        socket.off('connect_error');
+        socket.off('state_update');
+        socket.off('log_update');
+        socket.disconnect();
+    }
+
     // Socket.IO 클라이언트 초기화
     socket = io();
 
@@ -122,6 +132,12 @@ function initSocketIO() {
         // 연결이 되면 상태 요청
         socket.emit('request_state');
         socket.emit('request_log');
+        
+        // 폴링이 실행 중이면 중지
+        if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
     });
 
     // 연결 해제 이벤트
@@ -229,11 +245,18 @@ function updateLogContent(logContent) {
 }
 
 // HTTP 폴링 시작 함수 (소켓 연결 실패 시 폴백)
+let pollingInterval = null; // 인터벌 ID를 저장할 변수 추가
+
 function startPolling() {
     console.warn('Socket.IO 연결 실패, HTTP 폴링으로 전환합니다.');
     
+    // 이미 실행 중인 폴링이 있으면 중지
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
+    }
+    
     // 1초마다 상태 업데이트 요청
-    setInterval(function() {
+    pollingInterval = setInterval(function() {
         fetch('/update_state')
             .then(response => response.json())
             .then(data => {
@@ -321,11 +344,15 @@ window.onload = function () {
     // 페이지 로드 시 즉시 폴더 상태 업데이트
     updateFolderState();
 
+    // 인터벌 ID를 저장할 변수들
+    let progressBarInterval;
+    let timeUpdateInterval;
+
     // 프로그레스 바 업데이트 시작
-    setInterval(updateProgressBar, 1000);  // 1000ms마다 업데이트
+    progressBarInterval = setInterval(updateProgressBar, 1000);  // 1000ms마다 업데이트
 
     // 1초마다 시간 표시 업데이트
-    setInterval(function () {
+    timeUpdateInterval = setInterval(function () {
         // 마지막 체크 시간 업데이트
         const lastCheckTime = document.querySelector('.last-check-time .time-string');
         if (lastCheckTime) {
@@ -350,6 +377,23 @@ window.onload = function () {
             }
         });
     }, 1000);
+
+    // 페이지 언로드 시 인터벌 정리
+    window.addEventListener('beforeunload', function() {
+        if (progressBarInterval) clearInterval(progressBarInterval);
+        if (timeUpdateInterval) clearInterval(timeUpdateInterval);
+        if (pollingInterval) clearInterval(pollingInterval);
+        
+        // 소켓 연결 정리
+        if (socket) {
+            socket.off('connect');
+            socket.off('disconnect');
+            socket.off('connect_error');
+            socket.off('state_update');
+            socket.off('log_update');
+            socket.disconnect();
+        }
+    });
 
     // Socket.IO 초기화
     try {
@@ -701,6 +745,9 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
             const folder = Array.isArray(sortedFolders) ? entry[0] : entry[0];
             const info = Array.isArray(sortedFolders) ? entry[1] : entry[1];
             
+            // 폴더 경로에서 안전한 ID 생성
+            const folderId = `folder-${btoa(folder).replace(/[+/=]/g, '_')}`;
+            
             // 버튼 텍스트와 스타일 결정
             let buttonText, buttonClass;
             if (action === 'mount') {
@@ -712,7 +759,7 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
             }
             
             foldersHtml += `
-                <div class="flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50">
+                <div id="${folderId}" class="folder-item flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50" data-folder="${folder}" data-mtime="${info.mtime}" data-action="${action}">
                     <div class="flex-1 overflow-hidden">
                         <div class="text-sm mb-1 font-medium text-gray-800 truncate">${folder}</div>
                         <div class="flex items-center toggle-text text-xs text-gray-500">
@@ -724,7 +771,7 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
                         </div>
                     </div>
                     ${showToggleButtons ? `<button onclick="toggleMount('${folder}', '${action}')" 
-                        class="text-xs px-2 py-1 rounded ${buttonClass} transition-colors duration-200">
+                        class="toggle-btn text-xs px-2 py-1 rounded ${buttonClass} transition-colors duration-200">
                         ${buttonText}
                     </button>` : ''}
                 </div>
@@ -880,57 +927,141 @@ function updateFolderList(folders) {
     console.log('마운트된 폴더 갯수:', Object.keys(mountedFolders).length);
 
     // NFS 패널에는 마운트되지 않은 폴더만 표시 (마운트 가능한 목록)
-    const foldersContainer = document.getElementById('monitoredFoldersContainer');
-    if (foldersContainer) {
-        if (Object.keys(unmountedFolders).length === 0) {
-            foldersContainer.innerHTML = `
-                <div class="text-center py-4">
-                    <p class="text-sm text-gray-600">모든 폴더가 마운트되었습니다.</p>
-                </div>
-            `;
-        } else {
-            // 마운트 버튼만 표시 (마운트 기능만 활성화)
-            foldersContainer.innerHTML = generateFolderListHtml(unmountedFolders, true, 'mount');
-            
-            // 필요한 이벤트 리스너 추가
-            foldersContainer.querySelectorAll('.toggle-text').forEach(el => {
-                el.addEventListener('click', () => {
-                    el.querySelector('.time-string').classList.toggle('hidden');
-                    el.querySelector('.readable-time').classList.toggle('hidden');
-                });
-            });
-        }
-    }
+    updateFolderContainer('monitoredFoldersContainer', unmountedFolders, 'mount');
     
     // SMB 패널에는 마운트된 폴더만 표시 (언마운트 가능한 목록)
-    const smbFoldersContainer = document.getElementById('smbFoldersContainer');
-    if (smbFoldersContainer) {
-        if (Object.keys(mountedFolders).length === 0) {
-            smbFoldersContainer.innerHTML = `
-                <div class="text-center py-4">
-                    <p class="text-sm text-gray-600">현재 SMB로 공유 중인 폴더가 없습니다.</p>
-                </div>
-            `;
-        } else {
-            // 언마운트 버튼 표시 (언마운트 기능만 활성화)
-            const htmlContent = generateFolderListHtml(mountedFolders, true, 'unmount');
-            smbFoldersContainer.innerHTML = htmlContent;
-            
-            // SMB 폴더 리스트에도 이벤트 리스너 추가
-            smbFoldersContainer.querySelectorAll('.toggle-text').forEach(el => {
-                el.addEventListener('click', () => {
-                    el.querySelector('.time-string').classList.toggle('hidden');
-                    el.querySelector('.readable-time').classList.toggle('hidden');
-                });
-            });
-        }
-    }
+    updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
     
     // 상태 표시기 숨기기
     const statusIndicator = document.querySelector('.status-update-indicator');
     if (statusIndicator) {
         statusIndicator.classList.add('hidden');
     }
+}
+
+// 폴더 컨테이너 업데이트 함수
+function updateFolderContainer(containerId, folderData, action) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    // 폴더가 없는 경우 메시지 표시
+    if (!folderData || Object.keys(folderData).length === 0) {
+        const emptyMessage = action === 'mount' 
+            ? '모든 폴더가 마운트되었습니다.' 
+            : '현재 SMB로 공유 중인 폴더가 없습니다.';
+            
+        container.innerHTML = `
+            <div class="text-center py-4">
+                <p class="text-sm text-gray-600">${emptyMessage}</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // 폴더 데이터를 시간순으로 정렬
+    const sortedFolders = Object.entries(folderData).sort((a, b) => {
+        return new Date(b[1].mtime) - new Date(a[1].mtime);
+    });
+    
+    // 현재 컨테이너에 있는 모든 폴더 항목 가져오기
+    const existingFolderItems = container.querySelectorAll('.folder-item');
+    const existingFolderMap = new Map();
+    
+    // 기존 폴더 항목을 Map에 저장
+    existingFolderItems.forEach(item => {
+        existingFolderMap.set(item.dataset.folder, item);
+    });
+    
+    // 새로운 폴더 순서를 저장할 배열
+    const newFolderOrder = [];
+    
+    // 각 폴더 항목 처리
+    for (const [folder, info] of sortedFolders) {
+        // 폴더 ID 생성
+        const folderId = `folder-${btoa(folder).replace(/[+/=]/g, '_')}`;
+        
+        // 이미 존재하는 폴더 항목인지 확인
+        if (existingFolderMap.has(folder)) {
+            // 기존 항목 업데이트
+            const existingItem = existingFolderMap.get(folder);
+            
+            // 수정 시간 업데이트
+            const timeString = existingItem.querySelector('.time-string');
+            const readableTime = existingItem.querySelector('.readable-time');
+            
+            if (timeString && readableTime && timeString.innerText !== info.mtime) {
+                timeString.innerText = info.mtime;
+                readableTime.innerText = get_time_ago(info.mtime);
+                existingItem.dataset.mtime = info.mtime;
+            }
+            
+            // 새 순서에 추가
+            newFolderOrder.push(existingItem);
+            
+            // 처리된 항목은 Map에서 제거
+            existingFolderMap.delete(folder);
+        } else {
+            // 새 항목 생성
+            const newItem = document.createElement('div');
+            newItem.id = folderId;
+            newItem.className = 'folder-item flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50';
+            newItem.dataset.folder = folder;
+            newItem.dataset.mtime = info.mtime;
+            newItem.dataset.action = action;
+            
+            // 버튼 텍스트와 스타일 결정
+            let buttonText, buttonClass;
+            if (action === 'mount') {
+                buttonText = '마운트';
+                buttonClass = 'bg-green-50 text-green-700 hover:bg-green-100';
+            } else {
+                buttonText = '마운트 해제';
+                buttonClass = 'bg-red-50 text-red-700 hover:bg-red-100';
+            }
+            
+            newItem.innerHTML = `
+                <div class="flex-1 overflow-hidden">
+                    <div class="text-sm mb-1 font-medium text-gray-800 truncate">${folder}</div>
+                    <div class="flex items-center toggle-text text-xs text-gray-500">
+                        <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                        </svg>
+                        <span class="readable-time">${get_time_ago(info.mtime)}</span>
+                        <span class="hidden time-string">${info.mtime}</span>
+                    </div>
+                </div>
+                <button onclick="toggleMount('${folder}', '${action}')" 
+                    class="toggle-btn text-xs px-2 py-1 rounded ${buttonClass} transition-colors duration-200">
+                    ${buttonText}
+                </button>
+            `;
+            
+            // 새 순서에 추가
+            newFolderOrder.push(newItem);
+            
+            // 토글 텍스트 클릭 이벤트 리스너 추가
+            const toggleText = newItem.querySelector('.toggle-text');
+            if (toggleText) {
+                toggleText.addEventListener('click', () => {
+                    toggleText.querySelector('.time-string').classList.toggle('hidden');
+                    toggleText.querySelector('.readable-time').classList.toggle('hidden');
+                });
+            }
+        }
+    }
+    
+    // 남은 항목들은 제거 대상
+    existingFolderMap.forEach(item => {
+        item.remove();
+    });
+    
+    // 컨테이너 비우기
+    container.innerHTML = '';
+    
+    // 새 순서대로 항목 추가
+    newFolderOrder.forEach(item => {
+        container.appendChild(item);
+    });
 }
 
 // SMB 서비스 토글 함수 추가
