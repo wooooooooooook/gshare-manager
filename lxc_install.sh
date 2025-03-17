@@ -44,7 +44,7 @@ msg_ok "Docker & Compose 설치 완료"
 
 msg_info "Gshare 프로젝트 클론"
 cd /opt
-git clone -b docker https://github.com/wooooooooooook/gshare-manager.git
+git clone -b docker https://github.com/wooooooooooook/gshare-manager.git gshare
 cd gshare
 msg_ok "Gshare 프로젝트 클론 완료"
 
@@ -72,8 +72,8 @@ done
 read -r -p "Flask 포트를 입력하세요 (기본값: 5000): " FLASK_PORT_INPUT
 FLASK_PORT_INPUT=${FLASK_PORT_INPUT:-5000}
 
-read -r -p "SMB 포트를 입력하세요 (기본값: 1445): " SMB_PORT_INPUT
-SMB_PORT_INPUT=${SMB_PORT_INPUT:-1445}
+read -r -p "SMB 포트를 입력하세요 (기본값: 445): " SMB_PORT_INPUT
+SMB_PORT_INPUT=${SMB_PORT_INPUT:-445}
 
 # 로그 레벨 설정
 PS3="로그 레벨을 선택하세요: "
