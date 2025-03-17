@@ -80,6 +80,14 @@ function logStateToConsole(state) {
 function updateProgressBar() {
     const progressBar = document.querySelector('.last-check-progress');
     if (!progressBar) return;
+    
+    // NFS 상태 확인
+    const nfsStatusSpan = document.querySelector('.nfs-status span:first-child');
+    if (nfsStatusSpan && nfsStatusSpan.innerText === 'OFF') {
+        // NFS가 마운트되지 않은 경우 progress bar를 0%로 설정하고 함수 종료
+        progressBar.style.width = '0%';
+        return;
+    }
 
     const now = new Date();
     const lastCheckTime = new Date(document.querySelector('.last-check-time .time-string').innerText.replace(' ', 'T') + '+09:00');
@@ -926,17 +934,22 @@ function updateFolderList(folders) {
     console.log('마운트되지 않은 폴더 갯수:', Object.keys(unmountedFolders).length);
     console.log('마운트된 폴더 갯수:', Object.keys(mountedFolders).length);
 
-    // NFS 패널에는 마운트되지 않은 폴더만 표시 (마운트 가능한 목록)
-    updateFolderContainer('monitoredFoldersContainer', unmountedFolders, 'mount');
+    // 비동기적으로 컨테이너 업데이트 (타이밍 조정)
+    setTimeout(() => {
+        // NFS 패널에는 마운트되지 않은 폴더만 표시 (마운트 가능한 목록)
+        updateFolderContainer('monitoredFoldersContainer', unmountedFolders, 'mount');
+    }, 0);
     
-    // SMB 패널에는 마운트된 폴더만 표시 (언마운트 가능한 목록)
-    updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
-    
-    // 상태 표시기 숨기기
-    const statusIndicator = document.querySelector('.status-update-indicator');
-    if (statusIndicator) {
-        statusIndicator.classList.add('hidden');
-    }
+    setTimeout(() => {
+        // SMB 패널에는 마운트된 폴더만 표시 (언마운트 가능한 목록)
+        updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
+        
+        // 상태 표시기 숨기기
+        const statusIndicator = document.querySelector('.status-update-indicator');
+        if (statusIndicator) {
+            statusIndicator.classList.add('hidden');
+        }
+    }, 10);
 }
 
 // 폴더 컨테이너 업데이트 함수
@@ -958,7 +971,7 @@ function updateFolderContainer(containerId, folderData, action) {
         return;
     }
     
-    // 폴더 데이터를 시간순으로 정렬
+    // 폴더 데이터를 시간순으로 정렬 (미리 한 번만 수행)
     const sortedFolders = Object.entries(folderData).sort((a, b) => {
         return new Date(b[1].mtime) - new Date(a[1].mtime);
     });
@@ -972,95 +985,122 @@ function updateFolderContainer(containerId, folderData, action) {
         existingFolderMap.set(item.dataset.folder, item);
     });
     
-    // 새로운 폴더 순서를 저장할 배열
-    const newFolderOrder = [];
+    // DOM 조작을 최소화하기 위한 DocumentFragment 사용
+    const fragment = document.createDocumentFragment();
     
-    // 각 폴더 항목 처리
-    for (const [folder, info] of sortedFolders) {
-        // 폴더 경로에서 안전한 ID 생성 (한글 등 Latin1 범위 밖의 문자 처리)
-        const folderId = `folder-${encodeURIComponent(folder).replace(/%/g, '_')}`;
-        
-        // 이미 존재하는 폴더 항목인지 확인
-        if (existingFolderMap.has(folder)) {
-            // 기존 항목 업데이트
-            const existingItem = existingFolderMap.get(folder);
-            
-            // 수정 시간 업데이트
-            const timeString = existingItem.querySelector('.time-string');
-            const readableTime = existingItem.querySelector('.readable-time');
-            
-            if (timeString && readableTime && timeString.innerText !== info.mtime) {
-                timeString.innerText = info.mtime;
-                readableTime.innerText = get_time_ago(info.mtime);
-                existingItem.dataset.mtime = info.mtime;
-            }
-            
-            // 새 순서에 추가
-            newFolderOrder.push(existingItem);
-            
-            // 처리된 항목은 Map에서 제거
-            existingFolderMap.delete(folder);
-        } else {
-            // 새 항목 생성
-            const newItem = document.createElement('div');
-            newItem.id = folderId;
-            newItem.className = 'folder-item flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50';
-            newItem.dataset.folder = folder;
-            newItem.dataset.mtime = info.mtime;
-            newItem.dataset.action = action;
-            
-            // 버튼 텍스트와 스타일 결정
-            let buttonText, buttonClass;
-            if (action === 'mount') {
-                buttonText = '마운트';
-                buttonClass = 'bg-green-50 text-green-700 hover:bg-green-100';
-            } else {
-                buttonText = '마운트 해제';
-                buttonClass = 'bg-red-50 text-red-700 hover:bg-red-100';
-            }
-            
-            newItem.innerHTML = `
-                <div class="flex-1 overflow-hidden">
-                    <div class="text-sm mb-1 font-medium text-gray-800 truncate">${folder}</div>
-                    <div class="flex items-center toggle-text text-xs text-gray-500">
-                        <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-                        </svg>
-                        <span class="readable-time">${get_time_ago(info.mtime)}</span>
-                        <span class="hidden time-string">${info.mtime}</span>
-                    </div>
-                </div>
-                <button onclick="toggleMount('${folder}', '${action}')" 
-                    class="toggle-btn text-xs px-2 py-1 rounded ${buttonClass} transition-colors duration-200">
-                    ${buttonText}
-                </button>
-            `;
-            
-            // 새 순서에 추가
-            newFolderOrder.push(newItem);
-            
-            // 토글 텍스트 클릭 이벤트 리스너 추가
-            const toggleText = newItem.querySelector('.toggle-text');
-            if (toggleText) {
-                toggleText.addEventListener('click', () => {
-                    toggleText.querySelector('.time-string').classList.toggle('hidden');
-                    toggleText.querySelector('.readable-time').classList.toggle('hidden');
-                });
-            }
-        }
+    // 한 번에 처리할 폴더 수 (청크 크기)
+    const CHUNK_SIZE = 20;  
+    
+    // 비동기 처리를 위한 청크 처리 함수
+    function processChunk(startIndex) {
+        return new Promise(resolve => {
+            // requestAnimationFrame을 사용하여 UI 스레드 최적화
+            requestAnimationFrame(() => {
+                const endIndex = Math.min(startIndex + CHUNK_SIZE, sortedFolders.length);
+                
+                // 현재 청크의 폴더 항목 처리
+                for (let i = startIndex; i < endIndex; i++) {
+                    const [folder, info] = sortedFolders[i];
+                    
+                    // 폴더 경로에서 안전한 ID 생성 (한글 등 Latin1 범위 밖의 문자 처리)
+                    const folderId = `folder-${encodeURIComponent(folder).replace(/%/g, '_')}`;
+                    
+                    // 이미 존재하는 폴더 항목인지 확인
+                    if (existingFolderMap.has(folder)) {
+                        // 기존 항목 업데이트
+                        const existingItem = existingFolderMap.get(folder);
+                        
+                        // 수정 시간 업데이트
+                        const timeString = existingItem.querySelector('.time-string');
+                        const readableTime = existingItem.querySelector('.readable-time');
+                        
+                        if (timeString && readableTime && timeString.innerText !== info.mtime) {
+                            timeString.innerText = info.mtime;
+                            readableTime.innerText = get_time_ago(info.mtime);
+                            existingItem.dataset.mtime = info.mtime;
+                        }
+                        
+                        // 프래그먼트에 추가
+                        fragment.appendChild(existingItem);
+                        
+                        // 처리된 항목은 Map에서 제거
+                        existingFolderMap.delete(folder);
+                    } else {
+                        // 새 항목 생성
+                        const newItem = document.createElement('div');
+                        newItem.id = folderId;
+                        newItem.className = 'folder-item flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50';
+                        newItem.dataset.folder = folder;
+                        newItem.dataset.mtime = info.mtime;
+                        newItem.dataset.action = action;
+                        
+                        // 버튼 텍스트와 스타일 결정
+                        let buttonText, buttonClass;
+                        if (action === 'mount') {
+                            buttonText = '마운트';
+                            buttonClass = 'bg-green-50 text-green-700 hover:bg-green-100';
+                        } else {
+                            buttonText = '마운트 해제';
+                            buttonClass = 'bg-red-50 text-red-700 hover:bg-red-100';
+                        }
+                        
+                        newItem.innerHTML = `
+                            <div class="flex-1 overflow-hidden">
+                                <div class="text-sm mb-1 font-medium text-gray-800 truncate">${folder}</div>
+                                <div class="flex items-center toggle-text text-xs text-gray-500">
+                                    <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                                    </svg>
+                                    <span class="readable-time">${get_time_ago(info.mtime)}</span>
+                                    <span class="hidden time-string">${info.mtime}</span>
+                                </div>
+                            </div>
+                            <button onclick="toggleMount('${folder}', '${action}')" 
+                                class="toggle-btn text-xs px-2 py-1 rounded ${buttonClass} transition-colors duration-200">
+                                ${buttonText}
+                            </button>
+                        `;
+                        
+                        // 프래그먼트에 추가
+                        fragment.appendChild(newItem);
+                    }
+                }
+                
+                // 다음 청크 처리 또는 완료
+                if (endIndex < sortedFolders.length) {
+                    // 다음 청크를 처리할 때 시간을 주어 UI 반응성 유지
+                    setTimeout(() => {
+                        resolve(processChunk(endIndex));
+                    }, 0);
+                } else {
+                    // 남은 항목들은 제거 대상
+                    existingFolderMap.forEach(item => {
+                        item.remove();
+                    });
+                    
+                    // 컨테이너 비우기
+                    container.innerHTML = '';
+                    
+                    // 모든 항목을 한 번에 추가 (DOM 조작 최소화)
+                    container.appendChild(fragment);
+                    
+                    // 토글 텍스트 클릭 이벤트 리스너 추가
+                    container.querySelectorAll('.toggle-text').forEach(el => {
+                        el.addEventListener('click', () => {
+                            el.querySelector('.time-string').classList.toggle('hidden');
+                            el.querySelector('.readable-time').classList.toggle('hidden');
+                        });
+                    });
+                    
+                    resolve();
+                }
+            });
+        });
     }
     
-    // 남은 항목들은 제거 대상
-    existingFolderMap.forEach(item => {
-        item.remove();
-    });
-    
-    // 컨테이너 비우기
-    container.innerHTML = '';
-    
-    // 새 순서대로 항목 추가
-    newFolderOrder.forEach(item => {
-        container.appendChild(item);
+    // 처리 시작
+    processChunk(0).catch(error => {
+        console.error('폴더 목록 처리 중 오류:', error);
     });
 }
 
