@@ -41,6 +41,17 @@ GShare Manager는 Proxmox 환경에서 Android VM을 효율적으로 관리하�
 4. 안내되는 주소로 (예: 192.168.1.10:5000) 접속하여 초기설정을 완료하면 모니터링이 시작됩니다.
 
 
+## 업데이트
+
+도커 호스트 쉘에서 root계정으로 `update`실행 (아마 안될겁니다)
+안되면 아래 커맨드 직접 실행행
+```
+cd /opt/gshare-manager
+git pull
+docker compose down
+docker compose up -d --build
+```
+
 ## 라이선스
 
 MIT License
