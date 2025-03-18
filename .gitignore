@@ -1,2 +1,15 @@
 .cursorrules
 .cursorrule
+__pycache__
+*.log
+*.log.*
+*.log.*.*
+*.log.*.*.*
+*.log.*.*.*.*
+*.log.*.*.*.*.*
+.vscode/
+config.yaml
+config.yaml.secret
+.init_complete
+.cursor/rules/custom-rule.mdc
+config/.last_shutdown

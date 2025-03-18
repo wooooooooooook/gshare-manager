@@ -1,0 +1,27 @@
+services:
+  gshare:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gshare_manager
+    restart: unless-stopped
+    ports:
+      - "${FLASK_PORT:-5000}:${FLASK_PORT:-5000}"
+      - "${SMB_PORT:-445}:445"
+    volumes:
+      - ./config:/config
+    environment:
+      - TZ=Asia/Seoul
+      - FLASK_PORT=5000
+      - SMB_PORT=445
+      - LOG_LEVEL=DEBUG
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+    networks:
+      - gshare_network
+
+networks:
+  gshare_network:
+    driver: bridge

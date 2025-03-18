@@ -4,132 +4,34 @@ GShare Manager는 Proxmox 환경에서 Android VM을 효율적으로 관리하�
 
 ## 주요 기능
 
-- 공유 폴더 용량 모니터링
-- 폴더 내용 변경 시 자동 VM 시작
-- VM CPU 사용량 모니터링
-- 저사용량 감지 시 자동 종료 웹훅 전송
+- NAS로부터 NFS로 폴더를 공유받아 개별 폴더의 수정 시간 모니터링
+- 최근 수정 감지 시 자동 Android VM 시작 및 해당 폴더만 SMB 공유 시작
+- VM CPU 사용량 모니터링하여 Idle상태 시 자동 종료 웹훅 전송 및 SMB 공유 중단
 - 상태 모니터링 웹 인터페이스
 
 ## 사전 준비사항
 
-1. Proxmox에 설치된 Android VM
-2. Android VM에 설치된 Macrodroid
-   - `/shutdown` 엔드포인트로 웹훅 수신 시 VM이 종료되도록 설정
-3. 모니터링할 NAS 폴더
-4. Python 3.8 이상
+- Proxmox에 설치된 Android VM (구글포토, Macrodroid 설치)
+- Proxmox API tocken, secret 준비 (Proxmox api 준비_추후 링크)[]
+- Macrodroid에서 `/shutdown` 엔드포인트로 웹훅 수신 시 VM이 종료되도록 설정. 웹훅주소 (예: http://192.168.1.9:8080/shutdown)
 
 ## 설치 방법
+### 자동 설치
+- proxmox node shell에 입력
+- `bash -c "$(wget -qLO - https://raw.githubusercontent.com/wooooooooooook/gshare-manager/refs/heads/docker/lxc_update.sh)"`
+- proxmox community script로 만들었습니다. apline linux CT에 docker환경으로 설치됩니다.
 
-1. 저장소 클론
-   ```bash
-   git clone https://github.com/yourusername/gshare-manager.git
-   cd gshare-manager
-   ```
+### 수동 설치
+- SMB포트(445) 사용이 가능한 도커환경
+- 본 저장소를 clone후 `git clone -b docker https://github.com/wooooooooooook/gshare-manager.git`
+- `cd gshare-manager && docker compse up -d --build`
 
-2. NAS 폴더 마운트
-   ```bash
-   # NFS 마운트 예시
-   sudo mount -t nfs 192.168.0.100:/volume1/photos /mnt/gshare
-
-   # CIFS/SMB 마운트 예시
-   sudo mount -t cifs //192.168.0.100/photos /mnt/gshare -o username=user,password=pass
-   ```
-
-3. 설정 파일 구성
-   ```bash
-   cp .env.example .env
-   # .env 파일을 편집하여 필요한 설정 입력
-
-   cp config.example.py config.py
-   # config.py 파일을 편집하여 필요한 설정 입력
-   ```
-
-4. 서비스 등록 (root 권한 필요)
-   ```bash
-   # 서비스 파일 생성
-   sudo nano /etc/systemd/system/gshare_manager.service
-   ```
-   
-   gshare_manager.service 내용:
-   ```ini
-   [Unit]
-   Description=GShare Manager Service
-   After=network.target
-
-   [Service]
-   Type=simple
-   User=root
-   WorkingDirectory=/설치경로/gshare-manager
-   ExecStart=/usr/bin/python3 /설치경로/gshare-manager/gshare_manager.py
-   Restart=always
-   RestartSec=3
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-   웹 인터페이스용 서비스 파일 생성:
-   ```bash
-   sudo nano /etc/systemd/system/gshare_web.service
-   ```
-
-   gshare_web.service 내용:
-   ```ini
-   [Unit]
-   Description=GShare Web Interface
-   After=network.target
-
-   [Service]
-   Type=simple
-   User=root
-   WorkingDirectory=/설치경로/gshare-manager
-   ExecStart=/usr/bin/python3 /설치경로/gshare-manager/app.py
-   Restart=always
-   RestartSec=3
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-   서비스 등록 및 시작:
-   ```bash
-   # 서비스 파일 권한 설정
-   sudo chmod 644 /etc/systemd/system/gshare_manager.service
-   sudo chmod 644 /etc/systemd/system/gshare_web.service
-
-   # systemd 데몬 리로드
-   sudo systemctl daemon-reload
-
-   # 서비스 등록 및 시작
-   sudo systemctl enable gshare_manager
-   sudo systemctl start gshare_manager
-   sudo systemctl enable gshare_web
-   sudo systemctl start gshare_web
-
-   # 서비스 상태 확인
-   sudo systemctl status gshare_manager
-   sudo systemctl status gshare_web
-   ```
-
-## 설정 파일
-
-### config.py 주요 설정
-- `NODE_NAME`: Proxmox 노드 이름
-- `VM_ID`: Android VM의 ID
-- `MOUNT_PATH`: 마운트된 공유 폴더 경로 (기본값: /mnt/gshare)
-- `CPU_THRESHOLD`: VM 종료 판단을 위한 CPU 사용률 임계값
-- `THRESHOLD_COUNT`: 종료 판단을 위한 연속 저사용량 감지 횟수
-
-### .env 파일 설정
-- `PROXMOX_HOST`: Proxmox API 주소
-- `TOKEN_ID`: Proxmox API 토큰 ID
-- `SECRET`: Proxmox API 시크릿
-- `SHUTDOWN_WEBHOOK_URL`: VM 종료 웹훅 URL
-
-## 모니터링
-
-웹 인터페이스를 통해 현재 상태를 확인할 수 있습니다:
-- http://localhost:5000
+## 설치 후
+1. Android VM에 설치된 Macrodroid에서
+   - 부팅후 `su --mount-master -c mount -t cifs //{도커호스트주소}/gshare /mnt/runtime/default/emulated/0/DCIM/1 -o username={SMB유저},password={SMB비번},ro,iocharset=utf8` 스크립트 실행으로 마운트 시키는 자동화
+2. 모니터링할 NAS 폴더를 도커호스트에 NFS 공유하기
+   ![NFS 설정 예시](/docs/img/nfs.png)
+3. 안내되는 주소로 (예: 192.168.1.10:5000) 접속하여 초기설정을 완료하면 모니터링이 시작됩니다.
 
 
 ## 라이선스

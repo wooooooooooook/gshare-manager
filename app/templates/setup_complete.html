@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GShare 설정 완료</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Noto Sans KR', sans-serif;
+        }
+        .container {
+            max-width: 800px;
+            margin-top: 50px;
+        }
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .card-header {
+            background-color: #007bff;
+            color: white;
+            border-radius: 15px 15px 0 0 !important;
+            padding: 20px;
+        }
+        .btn-primary {
+            background-color: #007bff;
+            border-color: #007bff;
+        }
+        .btn-primary:hover {
+            background-color: #0069d9;
+            border-color: #0062cc;
+        }
+        .success-icon {
+            font-size: 5rem;
+            color: #28a745;
+            margin-bottom: 20px;
+        }
+        #countdown {
+            font-weight: bold;
+            color: #dc3545;
+        }
+        .spinner-border {
+            width: 1.5rem;
+            height: 1.5rem;
+            margin-right: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h2 class="mb-0">설정 완료</h2>
+            </div>
+            <div class="card-body text-center py-5">
+                <div class="success-icon">✓</div>
+                <h3 class="mb-4">GShare 설정이 성공적으로 저장되었습니다!</h3>
+                <p class="lead mb-4">잠시 후 애플리케이션이 재시작됩니다.</p>
+                
+                <div class="alert alert-info" role="alert">
+                    <div class="d-flex align-items-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">로딩중...</span>
+                        </div>
+                        <span>&nbsp;서버가 재시작 중입니다. 잠시만 기다려주세요...</span>
+                    </div>
+                </div>
+                
+                <div class="mt-4 text-muted">
+                    <small>자동으로 이동하지 않는 경우, <a href="#" id="check-status-link">여기</a>를 클릭해보세요.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let redirectInProgress = false; // 리디렉션 진행 중 여부
+        
+        // 앱 재시작 요청
+        async function restartApp() {
+            try {
+                // 알림 메시지 업데이트
+                document.querySelector('.alert-info').innerHTML = '<div class="d-flex align-items-center">' +
+                    '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">로딩중...</span></div>' +
+                    '<span>&nbsp;서버 재시작 요청 중입니다...</span></div>';
+                
+                // 재시작 요청 전송
+                const response = await fetch('/restart_app', { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                // 응답 확인
+                if (response.ok) {
+                    console.log('앱 재시작 요청 성공');
+                    
+                    // 알림 메시지 업데이트
+                    document.querySelector('.alert-info').innerHTML = '<div class="d-flex align-items-center">' +
+                        '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">로딩중...</span></div>' +
+                        '<span>&nbsp;서버가 재시작 중입니다. 잠시만 기다려주세요...</span></div>';
+                    
+                    // 서버 재시작 상태 확인 시작
+                    setTimeout(() => {
+                        checkServerStatus();
+                    }, 2000);
+                    
+                } else {
+                    // 오류 표시
+                    console.error('앱 재시작 실패');
+                    document.querySelector('.alert-info').classList.remove('alert-info');
+                    document.querySelector('.alert-info').classList.add('alert-danger');
+                    document.querySelector('.alert-info').innerHTML = '앱 재시작 실패. 수동으로 페이지를 새로고침하거나 컨테이너를 재시작해보세요.';
+                }
+            } catch (error) {
+                console.error('앱 재시작 요청 중 오류 발생:', error);
+                
+                // 오류 메시지 표시
+                document.querySelector('.alert-info').classList.remove('alert-info');
+                document.querySelector('.alert-info').classList.add('alert-danger');
+                document.querySelector('.alert-info').innerHTML = '앱 재시작 중 오류가 발생했습니다: ' + error.message;
+            }
+        }
+        
+        // 서버 재시작 상태 확인
+        function checkServerStatus() {
+            fetch('/', { method: 'HEAD' })
+                .then(response => {
+                    if (response.ok) {
+                        // 서버 응답이 있으나, 재시작 중일 수 있으므로 재시작 완료 플래그 확인
+                        checkRestartCompleteFlag();
+                    } else {
+                        // 서버가 아직 응답하지 않음, 1초 후 다시 시도
+                        setTimeout(checkServerStatus, 1000);
+                    }
+                })
+                .catch(error => {
+                    console.log('서버가 아직 재시작 중입니다...', error);
+                    // 서버 연결 실패, 1초 후 다시 시도
+                    setTimeout(checkServerStatus, 1000);
+                });
+        }
+        
+        // 재시작 완료 플래그 확인
+        function checkRestartCompleteFlag() {
+            fetch('/check_restart_status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.restart_complete) {
+                        console.log('서버 재시작 완료 확인, 메인 페이지로 이동합니다.');
+                        document.querySelector('.alert-info').innerHTML = '<div class="d-flex align-items-center">' +
+                            '<div class="spinner-border text-success" role="status"><span class="visually-hidden">로딩중...</span></div>' +
+                            '<span>&nbsp;서버 재시작이 완료되었습니다. 메인 페이지로 이동합니다...</span></div>';
+                        
+                        // 메인 페이지로 리디렉션
+                        setTimeout(() => {
+                            window.location.href = '/';
+                        }, 1000);
+                    } else {
+                        // 아직 재시작이 완료되지 않음, 1초 후 다시 확인
+                        setTimeout(checkRestartCompleteFlag, 1000);
+                    }
+                })
+                .catch(error => {
+                    console.log('재시작 상태 확인 중 오류 발생:', error);
+                    // 오류 발생, 잠시 후 다시 시도
+                    setTimeout(checkRestartCompleteFlag, 2000);
+                });
+        }
+        
+        // 상태 확인 링크 이벤트 핸들러
+        document.getElementById('check-status-link').addEventListener('click', function(e) {
+            e.preventDefault();
+            
+            // 상태 확인 요청
+            fetch('/check_restart_status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.restart_complete) {
+                        // 재시작 완료된 경우 메인 페이지로 이동
+                        console.log('서버 재시작 완료 확인, 메인 페이지로 이동합니다.');
+                        document.querySelector('.alert-info').innerHTML = '<div class="d-flex align-items-center">' +
+                            '<div class="spinner-border text-success" role="status"><span class="visually-hidden">로딩중...</span></div>' +
+                            '<span>&nbsp;서버 재시작이 완료되었습니다. 메인 페이지로 이동합니다...</span></div>';
+                        
+                        setTimeout(() => {
+                            window.location.href = '/';
+                        }, 1000);
+                    } else {
+                        // 재시작 중인 경우 메시지 표시
+                        console.log('서버가 아직 재시작 중입니다.');
+                        document.querySelector('.alert-info').innerHTML = '<div class="d-flex align-items-center">' +
+                            '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">로딩중...</span></div>' +
+                            '<span>&nbsp;서버가 아직 재시작 중입니다. 잠시만 기다려주세요...</span></div>';
+                    }
+                })
+                .catch(error => {
+                    console.log('상태 확인 요청 중 오류 발생:', error);
+                    // 서버가 재시작 중이거나 오류가 발생한 경우 메시지 표시
+                    document.querySelector('.alert-info').innerHTML = '<div class="d-flex align-items-center">' +
+                        '<div class="spinner-border text-warning" role="status"><span class="visually-hidden">로딩중...</span></div>' +
+                        '<span>&nbsp;서버와 연결할 수 없습니다. 재시작 중이거나 오류가 발생했을 수 있습니다.</span></div>';
+                    
+                    // 연결 실패 시 자동으로 계속 시도
+                    setTimeout(checkServerStatus, 3000);
+                });
+        });
+        
+        // 페이지 로드 시 즉시 서버 재시작 요청
+        document.addEventListener('DOMContentLoaded', function() {
+            // 즉시 재시작 요청 보내기
+            redirectInProgress = true;
+            restartApp();
+        });
+    </script>
+</body>
+</html> 
