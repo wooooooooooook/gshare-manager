@@ -426,7 +426,13 @@ class GShareManager:
                 self.save_last_shutdown_time()
 
                 # VM 종료 시 모든 SMB 공유 비활성화
-                self.smb_manager.deactivate_smb_share()
+                if self.smb_manager.deactivate_smb_share():
+                    # SMB 비활성화 후 상태 즉시 업데이트
+                    if hasattr(self, 'current_state') and self.current_state is not None:
+                        self.current_state.smb_running = False
+                    logging.info("SMB 공유 비활성화 완료 및 상태 업데이트")
+                else:
+                    logging.error("SMB 공유 비활성화 실패")
 
                 logging.info(f"종료 웹훅 전송 성공, 업타임: {uptime_str}")
             except Exception as e:
@@ -458,7 +464,13 @@ class GShareManager:
             # SMB 상태 업데이트
             if hasattr(self, 'smb_manager'):
                 try:
-                    self.current_state.smb_running = self.smb_manager.check_smb_status()
+                    # SMB 실제 상태 확인
+                    smb_status = self.smb_manager.check_smb_status()
+                    # 현재 상태와 다른 경우에만 로그 출력 및 업데이트
+                    if hasattr(self.current_state, 'smb_running') and self.current_state.smb_running != smb_status:
+                        logging.debug(f"SMB 상태가 '{self.current_state.smb_running}'에서 '{smb_status}'로 변경되었습니다.")
+                    # 상태 업데이트
+                    self.current_state.smb_running = smb_status
                 except Exception as e:
                     logging.error(f"SMB 상태 확인 실패: {e}")
                     
@@ -505,6 +517,9 @@ class GShareManager:
                     smb_running = self.smb_manager.check_smb_status()
                 except Exception as e:
                     logging.error(f"SMB 상태 확인 실패: {e}")
+                    # 오류 발생 시 상태 유지 (이전 상태가 있으면 사용)
+                    if hasattr(self, 'current_state') and self.current_state is not None:
+                        smb_running = getattr(self.current_state, 'smb_running', False)
 
             current_state = State(
                 last_check_time=current_time_str,
@@ -559,7 +574,13 @@ class GShareManager:
                 # VM 상태가 변경되었고, 현재 종료 상태인 경우
                 if last_vm_status is not None and last_vm_status != current_vm_status and not current_vm_status:
                     logging.info("VM이 종료되어 SMB 공유를 비활성화합니다.")
-                    self.smb_manager.deactivate_smb_share()
+                    if self.smb_manager.deactivate_smb_share():
+                        # SMB 비활성화 후 상태 즉시 업데이트
+                        if hasattr(self, 'current_state') and self.current_state is not None:
+                            self.current_state.smb_running = False
+                        logging.info("SMB 공유 비활성화 완료 및 상태 업데이트")
+                    else:
+                        logging.error("SMB 공유 비활성화 실패")
 
                 last_vm_status = current_vm_status
 

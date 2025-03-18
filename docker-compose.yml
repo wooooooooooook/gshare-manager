@@ -1,6 +1,8 @@
 services:
   gshare:
-    image: nubiz/gshare:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: gshare_manager
     restart: unless-stopped
     ports:

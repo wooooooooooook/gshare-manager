@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 source <(curl -s https://raw.githubusercontent.com/wooooooooooook/gshare-manager/refs/heads/docker/build.func)
 # Copyright (c) 2021-2025 community-scripts ORG
-# Author: MickLesk (CanbiZ)
 # License: MIT | https://github.com/community-scripts/ProxmoxVED/raw/main/LICENSE
 
 APP="Gshare"
@@ -25,7 +24,10 @@ function update_script() {
 
     header_info
     if [ "$UPD" == "1" ]; then
-        apk update && apk upgrade
+        cd /opt/gshare-manager
+        git pull
+        docker compose down
+        docker compose up -d --build
         exit
     fi
 }
@@ -37,4 +39,4 @@ description
 msg_ok "Completed Successfully!\n"
 echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
 echo -e "${INFO}${YW} Access it using the following URL:${CL}"
-echo -e "${TAB}${GATEWAY}${BGN}https://${IP}:81${CL}"
+echo -e "${TAB}${GATEWAY}${BGN}https://${IP}:5000${CL}"

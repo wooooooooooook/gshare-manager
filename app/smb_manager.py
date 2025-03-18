@@ -103,13 +103,24 @@ class SMBManager:
             raise
 
     def check_smb_status(self) -> bool:
-        """SMB 서비스가 실행 중인지 확인"""
+        """SMB 서비스가 실행 중인지 확인 - 설정 파일 공유 설정 여부만 확인"""
         try:
-            smbd_running = subprocess.run(
-                ['pgrep', 'smbd'], capture_output=True).returncode == 0
-            nmbd_running = subprocess.run(
-                ['pgrep', 'nmbd'], capture_output=True).returncode == 0
-            return smbd_running and nmbd_running
+            # SMB 설정 파일 확인 (공유 설정이 있는지 확인)
+            try:
+                with open('/etc/samba/smb.conf', 'r') as f:
+                    content = f.read()
+                    share_name = self.config.SMB_SHARE_NAME
+                    has_share_config = f"[{share_name}]" in content
+                    
+                    if has_share_config:
+                        logging.debug(f"SMB 설정 파일에 공유 설정이 있음: [{share_name}]")
+                        return True
+                    else:
+                        logging.debug("SMB 설정 파일에 공유 설정이 없음")
+                        return False
+            except Exception as e:
+                logging.error(f"SMB 설정 파일 읽기 실패: {e}")
+                return False
         except Exception as e:
             logging.error(f"SMB 상태 확인 중 오류: {e}")
             return False
@@ -165,43 +176,15 @@ class SMBManager:
             with open('/etc/samba/smb.conf', 'r') as f:
                 lines = f.readlines()
 
-            # [global] 섹션을 찾아서 포트 설정 추가/업데이트
-            global_section_found = False
-            port_set = False
-            new_lines = []
-
+            # 빈 줄 제거
+            lines = [line for line in lines if line.strip()]
+            
+            # global 섹션만 유지하고 다른 섹션은 제거
+            global_section_lines = []
             for line in lines:
-                # [global] 섹션 감지
-                if line.strip() == '[global]':
-                    global_section_found = True
-                    new_lines.append(line)
-                # 다른 섹션 시작 감지
-                elif line.strip().startswith('[') and line.strip() != '[global]':
-                    global_section_found = False
-                    # 포트 설정이 없었다면 여기서 추가
-                    if not port_set:
-                        new_lines.append(
-                            f"   smb ports = {self.config.SMB_PORT}\n")
-                        port_set = True
-                    new_lines.append(line)
-                # global 섹션 내에서 포트 설정 업데이트
-                elif global_section_found and "smb ports" in line.lower():
-                    new_lines.append(
-                        f"   smb ports = {self.config.SMB_PORT}\n")
-                    port_set = True
-                else:
-                    new_lines.append(line)
-
-            # [global] 섹션만 있고 다른 섹션이 없는 경우를 처리
-            if global_section_found and not port_set:
-                new_lines.append(f"   smb ports = {self.config.SMB_PORT}\n")
-
-            # 여기부터는 기존 코드 - 여기까지의 코드로 [global] 섹션까지만 유지하고 포트 설정도 업데이트
-            final_lines = []
-            for line in new_lines:
-                if line.strip().startswith('[') and not line.strip() == '[global]':
+                if line.strip().startswith('[') and line.strip() != '[global]':
                     break
-                final_lines.append(line)
+                global_section_lines.append(line)
 
             # 공유 설정 생성
             share_config = f"""
@@ -217,15 +200,15 @@ class SMBManager:
    hide dot files = yes
    delete veto files = no
 """
-            # 새로운 공유 설정 추가
-            final_lines.append(share_config)
+            # global 섹션 + 공유 설정
+            final_lines = global_section_lines + [share_config]
 
             # 설정 파일 저장
             with open('/etc/samba/smb.conf', 'w') as f:
-                f.writelines(final_lines)
+                f.writelines([line for line in final_lines if line.strip()])
 
             logging.debug(
-                f"SMB 설정 파일이 업데이트 되었습니다: {share_name}, 포트: {self.config.SMB_PORT}")
+                f"SMB 설정 파일이 업데이트 되었습니다: {share_name}")
         except Exception as e:
             logging.error(f"SMB 설정 파일 업데이트 실패: {e}")
             raise
@@ -283,7 +266,7 @@ class SMBManager:
 
             # 설정 파일 저장
             with open('/etc/samba/smb.conf', 'w') as f:
-                f.writelines(new_lines)
+                f.writelines([line for line in new_lines if line.strip()])
 
             # Samba 서비스 중지
             self._stop_samba_service()
