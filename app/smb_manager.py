@@ -270,12 +270,15 @@ class SMBManager:
 
             # Samba 서비스 중지
             self._stop_samba_service()
+            
+            # 심볼릭 링크 제거
+            self.cleanup_all_symlinks()
 
             logging.info(f"SMB 공유 비활성화 성공")
             return True
         except Exception as e:
             logging.error(f"SMB 공유 비활성화 실패: {e}")
-        return False
+            return False
 
     def _set_smb_user_ownership(self) -> None:
         """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
@@ -595,6 +598,7 @@ class SMBManager:
                         try:
                             os.remove(file_path)
                             logging.debug(f"심볼릭 링크 제거됨: {file_path}")
+                            self.remove_symlink(file_path.replace(self.links_dir,'').replace('_',os.sep).replace(os.sep,'',1))
                         except Exception as e:
                             logging.error(f"심볼릭 링크 제거 실패 ({file_path}): {e}")
                 logging.info(f"모든 심볼릭 링크 제거 완료: {self.links_dir}")
