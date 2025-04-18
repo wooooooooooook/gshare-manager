@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-source <(curl -s https://raw.githubusercontent.com/wooooooooooook/gshare-manager/refs/heads/docker/build.func)
+source <(curl -s https://raw.githubusercontent.com/wooooooooooook/gshare-manager/refs/heads/main/build.func)
 # Copyright (c) 2021-2025 community-scripts ORG
 # License: MIT | https://github.com/community-scripts/ProxmoxVED/raw/main/LICENSE
 
