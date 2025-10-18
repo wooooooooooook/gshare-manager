@@ -817,6 +817,35 @@ function shutdownVM() {
     }
 }
 
+function updateFolderNameScrolling(root = document) {
+    const targetRoot = root && typeof root.querySelectorAll === 'function' ? root : document;
+    const elements = targetRoot.querySelectorAll('.folder-name-text');
+
+    if (!elements.length) {
+        return;
+    }
+
+    window.requestAnimationFrame(() => {
+        elements.forEach(element => {
+            const wrapper = element.closest('.folder-name-wrapper');
+            if (!wrapper) {
+                return;
+            }
+
+            const scrollAmount = element.scrollWidth - wrapper.clientWidth;
+
+            if (scrollAmount > 0) {
+                element.style.setProperty('--scroll-distance', `${scrollAmount}px`);
+                element.classList.add('is-scrollable');
+            } else {
+                element.classList.remove('is-scrollable');
+                element.style.removeProperty('--scroll-distance');
+                element.style.removeProperty('transform');
+            }
+        });
+    });
+}
+
 // 폴더 목록 HTML 생성 함수 추가
 function generateFolderListHtml(sortedFolders, showToggleButtons = true, action = 'mount') {
     
@@ -857,7 +886,9 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
             foldersHtml += `
                 <div id="${folderId}" class="folder-item flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50" data-folder="${folder}" data-mtime="${info.mtime}" data-action="${action}">
                     <div class="flex-1 overflow-hidden">
-                        <div class="text-sm mb-1 font-medium text-gray-800 truncate">${folder}</div>
+                        <div class="folder-name-wrapper min-w-0 text-sm mb-1 font-medium text-gray-800">
+                            <span class="folder-name-text">${folder}</span>
+                        </div>
                         <div class="flex items-center toggle-text text-xs text-gray-500">
                             <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
@@ -1203,7 +1234,9 @@ function updateFolderContainer(containerId, folderData, action) {
                 
                 newItem.innerHTML = `
                     <div class="flex-1 overflow-hidden">
-                        <div class="text-sm mb-1 font-medium text-gray-800 truncate">${folder}</div>
+                        <div class="folder-name-wrapper min-w-0 text-sm mb-1 font-medium text-gray-800">
+                            <span class="folder-name-text">${folder}</span>
+                        </div>
                         <div class="flex items-center toggle-text text-xs text-gray-500">
                             <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
@@ -1226,7 +1259,9 @@ function updateFolderContainer(containerId, folderData, action) {
         // 새 항목들만 컨테이너에 추가 (기존 항목은 그대로 유지)
         if (newItemsFragment.childNodes.length > 0) {
             container.appendChild(newItemsFragment);
-            
+
+            updateFolderNameScrolling(container);
+
             // 새로 추가된 토글 텍스트에 클릭 이벤트 추가
             const newToggleElements = container.querySelectorAll('.folder-item:not([data-event-attached]) .toggle-text');
             newToggleElements.forEach(el => {

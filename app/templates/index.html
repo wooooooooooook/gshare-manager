@@ -2,14 +2,41 @@
 <html>
 	<!-- Flask 템플릿 파일입니다 -->
 
-	<head>
-		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<script src="https://cdn.tailwindcss.com"></script>
-		<!-- Socket.IO 클라이언트 라이브러리 추가 -->
-		<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-		<title>GShare Manager</title>
-	</head>
+        <head>
+                <meta charset="UTF-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                <script src="https://cdn.tailwindcss.com"></script>
+                <!-- Socket.IO 클라이언트 라이브러리 추가 -->
+                <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+                <title>GShare Manager</title>
+                <style>
+                        .folder-name-wrapper {
+                                position: relative;
+                                overflow: hidden;
+                                min-width: 0;
+                        }
+
+                        .folder-name-text {
+                                display: inline-block;
+                                white-space: nowrap;
+                                --scroll-distance: 0px;
+                        }
+
+                        .folder-name-text.is-scrollable {
+                                animation: folder-name-marquee 3s linear infinite alternate;
+                        }
+
+                        @keyframes folder-name-marquee {
+                                0% {
+                                        transform: translateX(0);
+                                }
+
+                                100% {
+                                        transform: translateX(calc(-1 * var(--scroll-distance)));
+                                }
+                        }
+                </style>
+        </head>
 
 	<body class="bg-gray-100 p-4">
 		<div class="max-w-7xl mx-auto">
