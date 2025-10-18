@@ -90,7 +90,7 @@ yq -i "
   .services.gshare.environment = [
     \"TZ=$TZ_INPUT\",
     \"FLASK_PORT=$FLASK_PORT_INPUT\",
-    \"SMB_PORT=445\",
+    \"SMB_PORT=$SMB_PORT_INPUT\",
     \"LOG_LEVEL=$LOG_LEVEL_INPUT\"
   ] |
   .services.gshare.ports = [
