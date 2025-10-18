@@ -43,8 +43,8 @@ GShare Manager는 Proxmox 환경에서 Android VM을 효율적으로 관리하�
 
 ## 업데이트
 
-도커 호스트 쉘에서 root계정으로 `update`실행 (아마 안될겁니다)
-안되면 아래 커맨드 직접 실행행
+도커 호스트 쉘에서 root계정으로 `update`실행 또는 설치 스크립트를 다시 실행한 뒤 `Update existing GShare installation`을 선택하면 자동으로 업데이트가 진행됩니다.
+직접 업데이트하려면 아래 커맨드를 실행하세요.
 ```
 cd /opt/gshare-manager
 git pull

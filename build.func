@@ -1024,45 +1024,80 @@ start() {
   mkdir -p "$LOGDIR"
 
   if command -v pveversion >/dev/null 2>&1; then
-    if ! (whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --yesno "This will create a New ${APP} LXC. Proceed?" 10 58); then
+    CHOICE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --menu "Choose an action:" \
+      12 58 3 \
+      "1" "Create a new ${APP} LXC" \
+      "2" "Update existing ${APP} installation" \
+      "3" "Exit" --default-item "1" 3>&1 1>&2 2>&3)
+    MENU_STATUS=$?
+    if [ "$MENU_STATUS" -ne 0 ]; then
       clear
       exit_script
       exit
     fi
-    SPINNER_PID=""
-    install_script
-  fi
-
-  if ! command -v pveversion >/dev/null 2>&1; then
-    CHOICE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC Update/Setting" --menu \
-      "Support/Update functions for ${APP} LXC. Choose an option:" \
-      12 60 3 \
-      "1" "YES (Silent Mode)" \
-      "2" "YES (Verbose Mode)" \
-      "3" "NO (Cancel Update)" --nocancel --default-item "1" 3>&1 1>&2 2>&3)
 
     case "$CHOICE" in
     1)
-      VERB="no"
-      set_std_mode
-      log_message "INFO" "Update started (Silent Mode)"
+      if ! (whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --yesno "This will create a New ${APP} LXC. Proceed?" 10 58); then
+        clear
+        exit_script
+        exit
+      fi
+      SPINNER_PID=""
+      install_script
+      return
       ;;
     2)
-      VERB="yes"
-      set_std_mode
-      log_message "INFO" "Update started (Verbose Mode)"
+      run_update_menu
+      return
       ;;
     3)
       clear
-      log_message "INFO" "Update aborted."
+      exit_script
+      exit
+      ;;
+    *)
+      clear
       exit_script
       exit
       ;;
     esac
-
-    SPINNER_PID=""
-    update_script
   fi
+
+  if ! command -v pveversion >/dev/null 2>&1; then
+    run_update_menu
+  fi
+}
+
+run_update_menu() {
+  CHOICE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC Update/Setting" --menu \
+    "Support/Update functions for ${APP} LXC. Choose an option:" \
+    12 60 3 \
+    "1" "YES (Silent Mode)" \
+    "2" "YES (Verbose Mode)" \
+    "3" "NO (Cancel Update)" --nocancel --default-item "1" 3>&1 1>&2 2>&3)
+
+  case "$CHOICE" in
+  1)
+    VERB="no"
+    set_std_mode
+    log_message "INFO" "Update started (Silent Mode)"
+    ;;
+  2)
+    VERB="yes"
+    set_std_mode
+    log_message "INFO" "Update started (Verbose Mode)"
+    ;;
+  3)
+    clear
+    log_message "INFO" "Update aborted."
+    exit_script
+    exit
+    ;;
+  esac
+
+  SPINNER_PID=""
+  update_script
 }
 
 # This function collects user settings and integrates all the collected information.
