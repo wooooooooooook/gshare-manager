@@ -1024,11 +1024,20 @@ start() {
   mkdir -p "$LOGDIR"
 
   if command -v pveversion >/dev/null 2>&1; then
-    CHOICE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --menu "Choose an action:" \
-      12 58 3 \
-      "1" "Create a new ${APP} LXC" \
-      "2" "Update existing ${APP} installation" \
-      "3" "Exit" --default-item "1" 3>&1 1>&2 2>&3)
+    local has_update_menu=0
+    if declare -f update_script >/dev/null 2>&1; then
+      has_update_menu=1
+      CHOICE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --menu "Choose an action:" \
+        12 58 3 \
+        "1" "Create a new ${APP} LXC" \
+        "2" "Update existing ${APP} installation" \
+        "3" "Exit" --default-item "1" 3>&1 1>&2 2>&3)
+    else
+      CHOICE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --menu "Choose an action:" \
+        10 58 2 \
+        "1" "Create a new ${APP} LXC" \
+        "2" "Exit" --default-item "1" 3>&1 1>&2 2>&3)
+    fi
     MENU_STATUS=$?
     if [ "$MENU_STATUS" -ne 0 ]; then
       clear
@@ -1048,8 +1057,13 @@ start() {
       return
       ;;
     2)
-      run_update_menu
-      return
+      if [ "$has_update_menu" -eq 1 ]; then
+        run_update_menu
+        return
+      fi
+      clear
+      exit_script
+      exit
       ;;
     3)
       clear
