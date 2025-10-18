@@ -200,10 +200,9 @@
                         <div class="card-body">
                             <div class="alert alert-info">
                                 <i class="fas fa-info-circle"></i>
-                                현재 도커 컨테이너의 IP 주소: <strong>{{ container_ip }}</strong><br>
-                                <small class="text-muted">※ NFS 서버 설정 시 도커 호스트의 IP 주소를 사용해야 할 수 있습니다.</small><br>
-                                NFS 서버 설정 시 이 IP 주소를 사용하여 NFS 클라이언트를 설정할 수 있습니다.<br>
-                                예시: <code>{{ container_ip }}:/mnt/gshare *(rw,sync,no_subtree_check)</code>
+                                NAS NFS 허용 IP에는 이 컨테이너를 실행 중인 도커 호스트(LXC 등)의 실제 LAN 주소를 등록하세요.<br>
+                                <small class="text-muted">※ 도커 브리지(예: 172.17.x.x)나 컨테이너 내부 IP가 아니라, NAS에서 직접 접근 가능한 호스트/LXC의 LAN 주소입니다.</small><br>
+                                예시: <code>192.168.x.x:/mnt/gshare *(rw,sync,no_subtree_check)</code>
                             </div>
                             <div class="alert alert-warning">
                                 <i class="fas fa-exclamation-triangle"></i>
