@@ -886,7 +886,7 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
             foldersHtml += `
                 <div id="${folderId}" class="folder-item flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50" data-folder="${folder}" data-mtime="${info.mtime}" data-action="${action}">
                     <div class="flex-1 overflow-hidden">
-                        <div class="folder-name-wrapper text-sm mb-1 font-medium text-gray-800">
+                        <div class="folder-name-wrapper min-w-0 text-sm mb-1 font-medium text-gray-800">
                             <span class="folder-name-text">${folder}</span>
                         </div>
                         <div class="flex items-center toggle-text text-xs text-gray-500">
@@ -1234,7 +1234,7 @@ function updateFolderContainer(containerId, folderData, action) {
                 
                 newItem.innerHTML = `
                     <div class="flex-1 overflow-hidden">
-                        <div class="folder-name-wrapper text-sm mb-1 font-medium text-gray-800">
+                        <div class="folder-name-wrapper min-w-0 text-sm mb-1 font-medium text-gray-800">
                             <span class="folder-name-text">${folder}</span>
                         </div>
                         <div class="flex items-center toggle-text text-xs text-gray-500">
