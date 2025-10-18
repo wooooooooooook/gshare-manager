@@ -1131,14 +1131,17 @@ run_host_update() {
     exit 1
   fi
 
-  if ! container_json=$(pvesh get /cluster/resources --type lxc --output-format json 2>/dev/null); then
-    msg_error "Unable to query existing LXC containers from the host."
-    echo -e "\nExiting..."
-    sleep 2
-    exit 1
+  local fallback_used=0
+
+  if container_json=$(pvesh get /cluster/resources --type lxc --output-format json 2>/dev/null); then
+    :
+  else
+    echo -e "${INFO}${HOLD} Unable to query existing LXC containers via pvesh; attempting fallback detection.${CL}"
+    fallback_used=1
   fi
 
-  container_lines=$(CONTAINER_JSON="$container_json" python3 - "$var_tags" "$NSAPP" <<'PY'
+  if [ $fallback_used -eq 0 ]; then
+    container_lines=$(CONTAINER_JSON="$container_json" python3 - "$var_tags" "$NSAPP" <<'PY'
 import json
 import os
 import sys
@@ -1178,6 +1181,36 @@ for _, vmid, name, tags in sorted(results, key=lambda row: row[0]):
 PY
 )
   local parser_status=$?
+  else
+    container_lines=$(PCT_LIST="$(pct list 2>/dev/null)" python3 - <<'PY'
+import os
+import sys
+
+lines = os.environ.get("PCT_LIST", "").splitlines()
+results = []
+
+for line in lines:
+    parts = line.split()
+    if not parts:
+        continue
+    if parts[0].lower() == "vmid":
+        continue
+    if not parts[0].isdigit():
+        continue
+    vmid = parts[0]
+    name = ""
+    if len(parts) >= 4:
+        name = parts[3]
+    elif len(parts) >= 3:
+        name = parts[2]
+    results.append((int(vmid), vmid, name))
+
+for _, vmid, name in sorted(results, key=lambda row: row[0]):
+    print(f"{vmid}|{name}|")
+PY
+)
+    local parser_status=$?
+  fi
 
   if [ $parser_status -ne 0 ]; then
     echo -e "${INFO}${HOLD} Unable to auto-detect ${APP} containers automatically; manual selection will be required.${CL}"
