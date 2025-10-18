@@ -1131,14 +1131,17 @@ run_host_update() {
     exit 1
   fi
 
-  if ! container_json=$(pvesh get /cluster/resources --type lxc --output-format json 2>/dev/null); then
-    msg_error "Unable to query existing LXC containers from the host."
-    echo -e "\nExiting..."
-    sleep 2
-    exit 1
+  local fallback_used=0
+
+  if container_json=$(pvesh get /cluster/resources --type lxc --output-format json 2>/dev/null); then
+    :
+  else
+    echo -e "${INFO}${HOLD} Unable to query existing LXC containers via pvesh; attempting fallback detection.${CL}"
+    fallback_used=1
   fi
 
-  container_lines=$(CONTAINER_JSON="$container_json" python3 - "$var_tags" "$NSAPP" <<'PY'
+  if [ $fallback_used -eq 0 ]; then
+    container_lines=$(CONTAINER_JSON="$container_json" python3 - "$var_tags" "$NSAPP" <<'PY'
 import json
 import os
 import sys
@@ -1178,6 +1181,83 @@ for _, vmid, name, tags in sorted(results, key=lambda row: row[0]):
 PY
 )
   local parser_status=$?
+  else
+    container_lines=$(PCT_LIST="$(pct list 2>/dev/null)" VAR_TAGS="${var_tags:-}" NSAPP="$NSAPP" python3 - <<'PY'
+import os
+import subprocess
+import sys
+
+lines = os.environ.get("PCT_LIST", "").splitlines()
+requested_tags = {
+    entry.strip().lower()
+    for entry in os.environ.get("VAR_TAGS", "").split(";")
+    if entry.strip()
+}
+nsapp = os.environ.get("NSAPP", "").strip().lower()
+
+def get_config_details(vmid):
+    try:
+        output = subprocess.check_output(["pct", "config", vmid], text=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        return "", ""
+
+    hostname = ""
+    tags = ""
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("hostname:"):
+            hostname = line.split(":", 1)[1].strip()
+        elif line.startswith("tags:"):
+            tags = line.split(":", 1)[1].strip()
+    return hostname, tags
+
+results = []
+
+for line in lines:
+    parts = line.split()
+    if not parts:
+        continue
+    if parts[0].lower() == "vmid":
+        continue
+    if not parts[0].isdigit():
+        continue
+
+    vmid = parts[0]
+    name = ""
+    if len(parts) >= 4:
+        name = parts[3]
+    elif len(parts) >= 3:
+        name = parts[2]
+
+    hostname, tags = get_config_details(vmid)
+
+    tag_set = {
+        entry.strip().lower()
+        for entry in tags.split(";")
+        if entry.strip()
+    }
+
+    include = False
+    if "community-script" in tag_set:
+        if not requested_tags or requested_tags.intersection(tag_set):
+            include = True
+
+    if nsapp:
+        if (name and name.lower() == nsapp) or (hostname and hostname.lower() == nsapp):
+            include = True
+
+    if include:
+        display_name = name or hostname
+        results.append((int(vmid), vmid, display_name or "", tags))
+
+for _, vmid, display_name, tags in sorted(results, key=lambda row: row[0]):
+    print(f"{vmid}|{display_name}|{tags}")
+PY
+)
+    local parser_status=$?
+  fi
 
   if [ $parser_status -ne 0 ]; then
     echo -e "${INFO}${HOLD} Unable to auto-detect ${APP} containers automatically; manual selection will be required.${CL}"
@@ -1272,11 +1352,19 @@ build_container() {
 
   TEMP_DIR=$(mktemp -d)
   pushd $TEMP_DIR >/dev/null
+  local functions_source
   if [ "$var_os" == "alpine" ]; then
-    export FUNCTIONS_FILE_PATH="$(curl -s https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/alpine-install.func)"
+    if ! functions_source=$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/alpine-install.func); then
+      msg_error "Failed to download required Alpine helper functions."
+      exit 1
+    fi
   else
-    export FUNCTIONS_FILE_PATH="$(curl -s https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/install.func)"
+    if ! functions_source=$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/install.func); then
+      msg_error "Failed to download required Debian/Ubuntu helper functions."
+      exit 1
+    fi
   fi
+  export FUNCTIONS_FILE_PATH="$functions_source"
   export RANDOM_UUID="$RANDOM_UUID"
   export CACHER="$APT_CACHER"
   export CACHER_IP="$APT_CACHER_IP"
@@ -1307,7 +1395,21 @@ build_container() {
     $PW
   "
   # This executes create_lxc.sh and creates the container and .conf file
-  bash -c "$(wget -qLO - https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/create_lxc.sh)" || exit $?
+  local create_script_path
+  create_script_path=$(mktemp)
+  if ! curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/create_lxc.sh -o "$create_script_path"; then
+    msg_error "Failed to download the container creation helper script."
+    rm -f "$create_script_path"
+    exit 1
+  fi
+
+  if ! bash "$create_script_path"; then
+    local exit_code=$?
+    rm -f "$create_script_path"
+    exit $exit_code
+  fi
+
+  rm -f "$create_script_path"
 
   LXC_CONFIG=/etc/pve/lxc/${CTID}.conf
   if [ "$CT_TYPE" == "0" ]; then
