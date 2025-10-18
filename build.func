@@ -1024,45 +1024,236 @@ start() {
   mkdir -p "$LOGDIR"
 
   if command -v pveversion >/dev/null 2>&1; then
-    if ! (whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --yesno "This will create a New ${APP} LXC. Proceed?" 10 58); then
+    local has_update_menu=0
+    if declare -f update_script >/dev/null 2>&1; then
+      has_update_menu=1
+      CHOICE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --menu "Choose an action:" \
+        12 58 3 \
+        "1" "Create a new ${APP} LXC" \
+        "2" "Update existing ${APP} installation" \
+        "3" "Exit" --default-item "1" 3>&1 1>&2 2>&3)
+    else
+      CHOICE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --menu "Choose an action:" \
+        10 58 2 \
+        "1" "Create a new ${APP} LXC" \
+        "2" "Exit" --default-item "1" 3>&1 1>&2 2>&3)
+    fi
+    MENU_STATUS=$?
+    if [ "$MENU_STATUS" -ne 0 ]; then
       clear
       exit_script
       exit
     fi
-    SPINNER_PID=""
-    install_script
-  fi
-
-  if ! command -v pveversion >/dev/null 2>&1; then
-    CHOICE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC Update/Setting" --menu \
-      "Support/Update functions for ${APP} LXC. Choose an option:" \
-      12 60 3 \
-      "1" "YES (Silent Mode)" \
-      "2" "YES (Verbose Mode)" \
-      "3" "NO (Cancel Update)" --nocancel --default-item "1" 3>&1 1>&2 2>&3)
 
     case "$CHOICE" in
     1)
-      VERB="no"
-      set_std_mode
-      log_message "INFO" "Update started (Silent Mode)"
+      if ! (whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --yesno "This will create a New ${APP} LXC. Proceed?" 10 58); then
+        clear
+        exit_script
+        exit
+      fi
+      SPINNER_PID=""
+      install_script
+      return
       ;;
     2)
-      VERB="yes"
-      set_std_mode
-      log_message "INFO" "Update started (Verbose Mode)"
+      if [ "$has_update_menu" -eq 1 ]; then
+        run_update_menu
+        return
+      fi
+      clear
+      exit_script
+      exit
       ;;
     3)
       clear
-      log_message "INFO" "Update aborted."
+      exit_script
+      exit
+      ;;
+    *)
+      clear
       exit_script
       exit
       ;;
     esac
-
-    SPINNER_PID=""
-    update_script
   fi
+
+  if ! command -v pveversion >/dev/null 2>&1; then
+    run_update_menu
+  fi
+}
+
+run_update_menu() {
+  if command -v pveversion >/dev/null 2>&1; then
+    run_host_update
+    return
+  fi
+
+  CHOICE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC Update/Setting" --menu \
+    "Support/Update functions for ${APP} LXC. Choose an option:" \
+    12 60 3 \
+    "1" "YES (Silent Mode)" \
+    "2" "YES (Verbose Mode)" \
+    "3" "NO (Cancel Update)" --nocancel --default-item "1" 3>&1 1>&2 2>&3)
+
+  case "$CHOICE" in
+  1)
+    VERB="no"
+    set_std_mode
+    log_message "INFO" "Update started (Silent Mode)"
+    ;;
+  2)
+    VERB="yes"
+    set_std_mode
+    log_message "INFO" "Update started (Verbose Mode)"
+    ;;
+  3)
+    clear
+    log_message "INFO" "Update aborted."
+    exit_script
+    exit
+    ;;
+  esac
+
+  SPINNER_PID=""
+  update_script
+}
+
+run_host_update() {
+  local container_json
+  local container_lines
+  local -a containers
+
+  if ! command -v pct >/dev/null 2>&1; then
+    msg_error "pct command is required on the Proxmox host to run updates."
+    echo -e "\nExiting..."
+    sleep 2
+    exit 1
+  fi
+
+  if ! container_json=$(pvesh get /cluster/resources --type lxc --output-format json 2>/dev/null); then
+    msg_error "Unable to query existing LXC containers from the host."
+    echo -e "\nExiting..."
+    sleep 2
+    exit 1
+  fi
+
+  container_lines=$(CONTAINER_JSON="$container_json" python3 - "$var_tags" "$NSAPP" <<'PY'
+import json
+import os
+import sys
+
+tag = sys.argv[1]
+nsapp = sys.argv[2].strip().lower()
+
+try:
+    data = json.loads(os.environ.get("CONTAINER_JSON", "[]"))
+except json.JSONDecodeError:
+    sys.exit(1)
+
+results = []
+for item in data:
+    if item.get("type") != "lxc":
+        continue
+    vmid = str(item.get("vmid", ""))
+    if not vmid.isdigit():
+        continue
+    name = (item.get("name") or "").strip()
+    name_lower = name.lower()
+    tags = (item.get("tags") or "")
+    tag_set = [entry for entry in tags.split(";") if entry]
+
+    include = False
+    if "community-script" in tag_set:
+        if not tag or tag in tag_set:
+            include = True
+    if nsapp and name_lower == nsapp:
+        include = True
+
+    if include:
+        results.append((int(vmid), vmid, name, tags))
+
+for _, vmid, name, tags in sorted(results, key=lambda row: row[0]):
+    print(f"{vmid}|{name}|{tags}")
+PY
+)
+  local parser_status=$?
+
+  if [ $parser_status -ne 0 ]; then
+    echo -e "${INFO}${HOLD} Unable to auto-detect ${APP} containers automatically; manual selection will be required.${CL}"
+  fi
+
+  if [ $parser_status -eq 0 ] && [ -n "$container_lines" ]; then
+    mapfile -t containers <<<"$container_lines"
+  else
+    containers=()
+  fi
+
+  local selected_ctid=""
+
+  if [ "${#containers[@]}" -eq 0 ]; then
+    if ! selected_ctid=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --inputbox "Enter the CT ID of the ${APP} container" 8 58 "" 3>&1 1>&2 2>&3); then
+      clear
+      exit_script
+      exit
+    fi
+    selected_ctid=$(echo "$selected_ctid" | tr -d '[:space:]')
+  elif [ "${#containers[@]}" -eq 1 ]; then
+    IFS='|' read -r selected_ctid _ <<<"${containers[0]}"
+  else
+    local menu_items=()
+    local entry
+    for entry in "${containers[@]}"; do
+      [ -z "$entry" ] && continue
+      IFS='|' read -r ctid cname ctags <<<"$entry"
+      local desc="${cname:-Unnamed}"
+      if [ -n "$ctags" ]; then
+        desc+=" [${ctags}]"
+      fi
+      menu_items+=("$ctid" "$desc")
+    done
+
+    if ! selected_ctid=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --menu "Select the container to update" 16 70 6 "${menu_items[@]}" 3>&1 1>&2 2>&3); then
+      clear
+      exit_script
+      exit
+    fi
+  fi
+
+  if [[ ! "$selected_ctid" =~ ^[0-9]+$ ]]; then
+    msg_error "Invalid CT ID supplied for the update operation."
+    echo -e "\nExiting..."
+    sleep 2
+    exit 1
+  fi
+
+  if ! pct status "$selected_ctid" | grep -q "status: running"; then
+    echo -e "${INFO}${HOLD} Starting container ${selected_ctid} for update...${CL}"
+    if ! pct start "$selected_ctid" >/dev/null 2>&1; then
+      msg_error "Failed to start container ${selected_ctid} before running the update."
+      echo -e "\nExiting..."
+      sleep 2
+      exit 1
+    fi
+    sleep 2
+  fi
+
+  clear
+  echo -e "${INFO}${HOLD} Launching update inside container ${selected_ctid}.${CL}"
+  log_message "INFO" "Delegating update to CT ${selected_ctid}"
+
+  pct exec "$selected_ctid" -- bash -lc "wget -qLO - https://raw.githubusercontent.com/wooooooooooook/gshare-manager/refs/heads/main/lxc_update.sh | bash"
+  local update_status=$?
+
+  if [ $update_status -eq 0 ]; then
+    msg_ok "Update completed for container ${selected_ctid}."
+  else
+    msg_error "Update failed inside container ${selected_ctid}."
+  fi
+
+  (exit $update_status)
+  exit_script
+  exit $update_status
 }
 
 # This function collects user settings and integrates all the collected information.
