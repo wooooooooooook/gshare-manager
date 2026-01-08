@@ -122,7 +122,7 @@ class FolderMonitor:
             raise RuntimeError(error_msg)
 
     def _get_subfolders(self) -> list[str]:
-        """마운트 경로의 모든 서브폴더를 재귀적으로 반환"""
+        """마운트 경로의 파일이 있는 서브폴더를 재귀적으로 반환"""
         start_time = time.time()
         try:
             if not os.path.exists(self.config.MOUNT_PATH):
@@ -133,26 +133,18 @@ class FolderMonitor:
             subfolders = []
 
             try:
-                for root, dirs, _ in os.walk(self.config.MOUNT_PATH, followlinks=True):
-                    # @로 시작하는 폴더 제외
-                    dirs[:] = [d for d in dirs if not d.startswith('@')]
+                for root, dirs, files in os.walk(self.config.MOUNT_PATH, followlinks=True):
+                    # @ 또는 . 으로 시작하는 폴더 제외
+                    dirs[:] = [d for d in dirs if not d.startswith('@') and not d.startswith('.')]
 
-                    for dir_name in dirs:
-                        try:
-                            full_path = os.path.join(root, dir_name)
-                            # 마운트 경로로부터의 상대 경로 계산
-                            rel_path = os.path.relpath(
-                                full_path, self.config.MOUNT_PATH)
+                    rel_path = os.path.relpath(root, self.config.MOUNT_PATH)
 
-                            # 마운트 경로와 같은 경우 또는 숨김 폴더인 경우 제외
-                            if rel_path == '.' or rel_path.startswith('.') or '/..' in rel_path:
-                                continue
+                    # 마운트 경로와 같은 경우 또는 숨김 폴더인 경우 제외
+                    if rel_path == '.' or rel_path.startswith('.') or '/..' in rel_path:
+                        continue
 
-                            # 중복 방지
-                            if rel_path not in subfolders:
-                                subfolders.append(rel_path)
-                        except Exception as e:
-                            logging.error(f"서브폴더 처리 중 오류 발생 ({dir_name}): {e}")
+                    if files and rel_path not in subfolders:
+                        subfolders.append(rel_path)
             except Exception as e:
                 logging.error(f"마운트 경로 스캔 중 오류 발생: {e}")
 
@@ -218,13 +210,15 @@ class FolderMonitor:
                 changed_folders.append(path)
                 self.previous_mtimes[path] = current_mtime
 
-                # 심볼릭 링크 생성
-                self.smb_manager.create_symlink(path)
-
                 # VM 마지막 시작 시간보다 수정 시간이 더 최근인 경우
                 if current_mtime > self.last_shutdown_time:
                     should_start_vm = True
                     logging.info(f"VM 시작 조건 충족 - 수정 시간: {last_modified}")
+
+        mount_targets = self._filter_mount_targets(changed_folders)
+        for path in mount_targets:
+            # 심볼릭 링크 생성
+            self.smb_manager.create_symlink(path)
 
         elapsed_time = time.time() - start_time
         logging.debug(
@@ -268,10 +262,11 @@ class FolderMonitor:
                         self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
                     logging.info(f"최근 수정된 폴더 감지 ({path}): {last_modified}")
 
-            if recently_modified:
+            mount_targets = self._filter_mount_targets(recently_modified)
+            if mount_targets:
                 logging.info(
-                    f"마지막 VM 종료({datetime.fromtimestamp(self.last_shutdown_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(recently_modified)}개의 링크를 생성합니다.")
-                for folder in recently_modified:
+                    f"마지막 VM 종료({datetime.fromtimestamp(self.last_shutdown_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(mount_targets)}개의 링크를 생성합니다.")
+                for folder in mount_targets:
                     if self.smb_manager.create_symlink(folder):
                         logging.debug(f"초기 링크 생성 성공: {folder}")
                     else:
@@ -289,6 +284,31 @@ class FolderMonitor:
                         logging.error("VM 시작 실패")
         except Exception as e:
             logging.error(f"최근 수정된 폴더 링크 생성 중 오류 발생: {e}")
+
+    def _filter_mount_targets(self, folders: list[str]) -> list[str]:
+        """변경된 폴더 중 중복 마운트를 방지할 대상만 반환"""
+        if not folders:
+            return []
+
+        folder_set = set(folders)
+        sorted_folders = sorted(folders, key=lambda path: len(path.split(os.sep)))
+        mount_targets = []
+
+        for path in sorted_folders:
+            if self._has_changed_parent(path, folder_set):
+                continue
+            mount_targets.append(path)
+
+        return mount_targets
+
+    def _has_changed_parent(self, path: str, folder_set: set[str]) -> bool:
+        """상위 폴더가 변경 목록에 포함되어 있는지 확인"""
+        parts = path.split(os.sep)
+        for i in range(1, len(parts)):
+            parent = os.sep.join(parts[:i])
+            if parent in folder_set:
+                return True
+        return False
 
     def check_nfs_status(self) -> bool:
         """NFS 마운트가 되어 있는지 확인"""
