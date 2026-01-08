@@ -11,6 +11,7 @@ GShare Manager는 Proxmox 환경에서 Android VM을 효율적으로 관리하�
 
 ## 사전 준비사항
 
+- Proxmox VE 8.1 이상(9.x 포함)
 - Proxmox에 설치된 Android VM (구글포토, Macrodroid 설치)
 - Proxmox API token, secret 준비, 권한은 androidVM에 대해서만 주면 됩니다. (아래 예시)
 - ![예시](https://github.com/user-attachments/assets/b38d3cdc-65c4-4762-bb57-2dd20b6279ca)
