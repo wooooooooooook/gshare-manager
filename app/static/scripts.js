@@ -820,6 +820,7 @@ function shutdownVM() {
 function updateFolderNameScrolling(root = document) {
     const targetRoot = root && typeof root.querySelectorAll === 'function' ? root : document;
     const elements = targetRoot.querySelectorAll('.folder-name-text');
+    const isTouchDevice = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 
     if (!elements.length) {
         return;
@@ -829,6 +830,13 @@ function updateFolderNameScrolling(root = document) {
         elements.forEach(element => {
             const wrapper = element.closest('.folder-name-wrapper');
             if (!wrapper) {
+                return;
+            }
+
+            if (isTouchDevice) {
+                element.classList.remove('is-scrollable');
+                element.style.removeProperty('--scroll-distance');
+                element.style.removeProperty('transform');
                 return;
             }
 
