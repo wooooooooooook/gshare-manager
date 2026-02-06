@@ -60,6 +60,20 @@ class GshareConfig:
     ## NFS 공유 경로
     NFS_PATH: Optional[str] = None
 
+    # MQTT 설정
+    ## MQTT 브로커 호스트
+    MQTT_BROKER: str = ''
+    ## MQTT 포트
+    MQTT_PORT: int = 1883
+    ## MQTT 사용자 이름
+    MQTT_USERNAME: str = ''
+    ## MQTT 비밀번호
+    MQTT_PASSWORD: str = ''
+    ## MQTT 토픽 접두사
+    MQTT_TOPIC_PREFIX: str = 'gshare'
+    ## Home Assistant Discovery 접두사
+    HA_DISCOVERY_PREFIX: str = 'homeassistant'
+
     @classmethod
     def load_config(cls) -> 'GshareConfig':
         """설정 파일에서 설정 로드"""
@@ -80,7 +94,7 @@ class GshareConfig:
         # 필수 필드 확인
         required_fields = [
             'proxmox', 'mount', 'smb', 'timezone',
-            'credentials'
+            'credentials', 'mqtt'
         ]
         
         for field in required_fields:
@@ -137,7 +151,13 @@ class GshareConfig:
             'SMB_LINKS_DIR': yaml_config['smb'].get('links_dir', '/mnt/gshare_links'),
             'SMB_PORT': yaml_config['smb'].get('port', 445),
             'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
-            'LOG_LEVEL': log_level
+            'LOG_LEVEL': log_level,
+            'MQTT_BROKER': yaml_config['mqtt'].get('broker', ''),
+            'MQTT_PORT': yaml_config['mqtt'].get('port', 1883),
+            'MQTT_USERNAME': yaml_config['credentials'].get('mqtt_username', ''),
+            'MQTT_PASSWORD': yaml_config['credentials'].get('mqtt_password', ''),
+            'MQTT_TOPIC_PREFIX': yaml_config['mqtt'].get('topic_prefix', 'gshare'),
+            'HA_DISCOVERY_PREFIX': yaml_config['mqtt'].get('ha_discovery_prefix', 'homeassistant')
         }
 
         # NFS 설정 추가
@@ -166,6 +186,7 @@ class GshareConfig:
                     'smb': {},
                     'credentials': {},
                     'nfs': {},
+                    'mqtt': {},
                     'timezone': 'Asia/Seoul',
                     'log_level': 'INFO'
                 }
@@ -177,6 +198,7 @@ class GshareConfig:
                 'smb': {},
                 'credentials': {},
                 'nfs': {},
+                'mqtt': {},
                 'timezone': 'Asia/Seoul',
                 'log_level': 'INFO'
             }
@@ -214,6 +236,16 @@ class GshareConfig:
         if 'LOG_LEVEL' in config_dict:
             yaml_config['log_level'] = config_dict['LOG_LEVEL']
         
+        # MQTT 설정 업데이트
+        if 'MQTT_BROKER' in config_dict:
+            yaml_config['mqtt']['broker'] = config_dict['MQTT_BROKER']
+        if 'MQTT_PORT' in config_dict:
+            yaml_config['mqtt']['port'] = int(config_dict['MQTT_PORT'])
+        if 'MQTT_TOPIC_PREFIX' in config_dict:
+            yaml_config['mqtt']['topic_prefix'] = config_dict['MQTT_TOPIC_PREFIX']
+        if 'HA_DISCOVERY_PREFIX' in config_dict:
+            yaml_config['mqtt']['ha_discovery_prefix'] = config_dict['HA_DISCOVERY_PREFIX']
+
         # 민감한 정보(자격 증명) 업데이트
         if 'PROXMOX_HOST' in config_dict:
             yaml_config['credentials']['proxmox_host'] = config_dict['PROXMOX_HOST']
@@ -227,6 +259,10 @@ class GshareConfig:
             yaml_config['credentials']['smb_username'] = config_dict['SMB_USERNAME']
         if 'SMB_PASSWORD' in config_dict:
             yaml_config['credentials']['smb_password'] = config_dict['SMB_PASSWORD']
+        if 'MQTT_USERNAME' in config_dict:
+            yaml_config['credentials']['mqtt_username'] = config_dict['MQTT_USERNAME']
+        if 'MQTT_PASSWORD' in config_dict:
+            yaml_config['credentials']['mqtt_password'] = config_dict['MQTT_PASSWORD']
         
         # NFS 설정 저장
         if 'NFS_PATH' in config_dict:
@@ -258,7 +294,7 @@ class GshareConfig:
                     yaml_config['credentials'] = {}
                 
                 # 필요한 항목이 없으면 빈 값 추가
-                for section in ['proxmox', 'mount', 'smb', 'nfs']:
+                for section in ['proxmox', 'mount', 'smb', 'nfs', 'mqtt']:
                     if section not in yaml_config:
                         yaml_config[section] = {}
                 
@@ -275,7 +311,8 @@ class GshareConfig:
             'mount': {'path': '/mnt/gshare', 'folder_size_timeout': 30},
             'smb': {'share_name': 'gshare', 'comment': 'GShare SMB 공유', 'guest_ok': False, 'read_only': True, 'links_dir': '/mnt/gshare_links', 'port': 445},
             'nfs': {'path': ''},
-            'credentials': {'proxmox_host': '', 'token_id': '', 'secret': '', 'shutdown_webhook_url': '', 'smb_username': '', 'smb_password': ''},
+            'mqtt': {'broker': '', 'port': 1883, 'topic_prefix': 'gshare', 'ha_discovery_prefix': 'homeassistant'},
+            'credentials': {'proxmox_host': '', 'token_id': '', 'secret': '', 'shutdown_webhook_url': '', 'smb_username': '', 'smb_password': '', 'mqtt_username': '', 'mqtt_password': ''},
             'timezone': 'Asia/Seoul'
         }
 

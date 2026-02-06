@@ -15,6 +15,7 @@ from config import GshareConfig  # type: ignore
 from proxmox_api import ProxmoxAPI
 from web_server import GshareWebServer
 from smb_manager import SMBManager
+from mqtt_manager import MQTTManager
 import yaml  # type: ignore
 import traceback
 import urllib3  # type: ignore
@@ -334,9 +335,10 @@ class FolderMonitor:
 
 
 class GShareManager:
-    def __init__(self, config: GshareConfig, proxmox_api: ProxmoxAPI):
+    def __init__(self, config: GshareConfig, proxmox_api: ProxmoxAPI, mqtt_manager: Optional[MQTTManager] = None):
         self.config = config
         self.proxmox_api = proxmox_api
+        self.mqtt_manager = mqtt_manager
         self.low_cpu_count = 0
         self.last_action = "프로그램 시작"
         self.restart_required = False
@@ -650,6 +652,10 @@ class GShareManager:
                         # 로그도 주기적으로 업데이트 (모든 루프마다 업데이트)
                         gshare_web_server.emit_log_update()
 
+                    # MQTT 상태 업데이트 전송
+                    if self.mqtt_manager:
+                        self.mqtt_manager.publish_state(self.current_state)
+
                 except Exception as e:
                     logging.error(f"상태 업데이트 중 오류: {e}")
                 
@@ -920,9 +926,19 @@ if __name__ == "__main__":
                 logging.error(f"Proxmox API 객체 초기화 중 오류 발생: {api_error}")
                 logging.error(f"상세 오류: {traceback.format_exc()}")
                 raise
+
+            logging.debug("MQTT Manager 초기화 중...")
+            mqtt_manager = None
+            try:
+                mqtt_manager = MQTTManager(config)
+                logging.debug("MQTT Manager 초기화 완료")
+            except Exception as mqtt_error:
+                logging.error(f"MQTT Manager 초기화 중 오류 발생: {mqtt_error}")
+                # MQTT 오류는 치명적이지 않음
+
             logging.debug("GShareManager 객체 초기화 중...")
             try:
-                gshare_manager = GShareManager(config, proxmox_api)
+                gshare_manager = GShareManager(config, proxmox_api, mqtt_manager)
                 logging.debug("GShareManager 객체 초기화 완료")
             except Exception as manager_error:
                 logging.error(f"GShareManager 객체 초기화 중 오류 발생: {manager_error}")
@@ -995,4 +1011,10 @@ if __name__ == "__main__":
             time.sleep(60)  # 1분마다 체크
 
 # 프로그램 종료 시 호출
-atexit.register(lambda: gshare_manager.folder_monitor.cleanup_resources() if gshare_manager else None)
+def on_exit():
+    if gshare_manager:
+        gshare_manager.folder_monitor.cleanup_resources()
+        if gshare_manager.mqtt_manager:
+            gshare_manager.mqtt_manager.disconnect()
+
+atexit.register(on_exit)
