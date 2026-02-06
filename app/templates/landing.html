@@ -149,6 +149,9 @@
                     <a class="nav-link" id="smb-tab" data-toggle="tab" href="#smb" role="tab">SMB 설정</a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link" id="mqtt-tab" data-toggle="tab" href="#mqtt" role="tab">MQTT 설정</a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link" id="other-tab" data-toggle="tab" href="#other" role="tab">기타 설정</a>
                 </li>
             </ul>
@@ -319,6 +322,46 @@
                             <input type="text" class="form-control" id="smb_links_dir" name="SMB_LINKS_DIR" value="{{ form_data.get('SMB_LINKS_DIR', '/mnt/gshare_links') }}">
                         </div>
                         <button type="button" class="btn btn-secondary" onclick="prevTab('monitoring-tab')">이전</button>
+                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('mqtt-tab')">다음</button>
+                    </div>
+                </div>
+
+                <!-- MQTT 설정 -->
+                <div class="tab-pane fade" id="mqtt" role="tabpanel" aria-labelledby="mqtt-tab">
+                    <div class="form-section">
+                        <h3>MQTT 설정</h3>
+                        <div class="form-group">
+                            <label for="mqtt_broker">브로커 호스트</label>
+                            <input type="text" class="form-control" id="mqtt_broker" name="MQTT_BROKER" placeholder="예: 192.168.1.100" value="{{ form_data.get('MQTT_BROKER', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="mqtt_port">포트</label>
+                            <input type="number" class="form-control" id="mqtt_port" name="MQTT_PORT" value="{{ form_data.get('MQTT_PORT', 1883) }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="mqtt_username">사용자 이름</label>
+                            <input type="text" class="form-control" id="mqtt_username" name="MQTT_USERNAME" value="{{ form_data.get('MQTT_USERNAME', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="mqtt_password">비밀번호</label>
+                            <input type="password" class="form-control" id="mqtt_password" name="MQTT_PASSWORD" value="{{ form_data.get('MQTT_PASSWORD', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="mqtt_topic_prefix">토픽 접두사</label>
+                            <input type="text" class="form-control" id="mqtt_topic_prefix" name="MQTT_TOPIC_PREFIX" value="{{ form_data.get('MQTT_TOPIC_PREFIX', 'gshare') }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="ha_discovery_prefix">Home Assistant Discovery 접두사</label>
+                            <input type="text" class="form-control" id="ha_discovery_prefix" name="HA_DISCOVERY_PREFIX" value="{{ form_data.get('HA_DISCOVERY_PREFIX', 'homeassistant') }}">
+                        </div>
+                        <div class="form-group">
+                            <button type="button" class="btn btn-info" onclick="testMQTT()">
+                                <span id="test-mqtt-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                                연결 테스트
+                            </button>
+                            <div id="mqtt-test-result" class="mt-2" style="display: none;"></div>
+                        </div>
+                        <button type="button" class="btn btn-secondary" onclick="prevTab('smb-tab')">이전</button>
                         <button type="button" class="btn btn-primary btn-next" onclick="nextTab('other-tab')">다음</button>
                     </div>
                 </div>
@@ -345,7 +388,7 @@
                                 <option value="ERROR" {% if form_data.get('LOG_LEVEL') == 'ERROR' %}selected{% endif %}>ERROR</option>
                             </select>
                         </div>
-                        <button type="button" class="btn btn-secondary" onclick="prevTab('smb-tab')">이전</button>
+                        <button type="button" class="btn btn-secondary" onclick="prevTab('mqtt-tab')">이전</button>
                         <button type="submit" class="btn btn-success">설정 완료</button>
                     </div>
                 </div>
@@ -384,7 +427,7 @@
         }
         
         function updateProgressBar(tabId) {
-            const tabs = ['proxmox-tab', 'nfs-tab', 'vm-tab', 'monitoring-tab', 'smb-tab', 'other-tab'];
+            const tabs = ['proxmox-tab', 'nfs-tab', 'vm-tab', 'monitoring-tab', 'smb-tab', 'mqtt-tab', 'other-tab'];
             const currentIndex = tabs.indexOf(tabId);
             const progressPercentage = ((currentIndex + 1) / tabs.length) * 100;
             
@@ -663,6 +706,55 @@
         
         async function testNFS() {
             return await runNfsTest();
+        }
+
+        async function testMQTT() {
+            const broker = document.getElementById('mqtt_broker').value;
+            const port = document.getElementById('mqtt_port').value;
+            const username = document.getElementById('mqtt_username').value;
+            const password = document.getElementById('mqtt_password').value;
+
+            if (!broker) {
+                alert('브로커 호스트를 입력해주세요.');
+                return;
+            }
+
+            const spinner = document.getElementById('test-mqtt-spinner');
+            const resultDiv = document.getElementById('mqtt-test-result');
+            spinner.classList.remove('d-none');
+            resultDiv.style.display = 'none';
+
+            try {
+                const formData = new FormData();
+                formData.append('mqtt_broker', broker);
+                formData.append('mqtt_port', port);
+                formData.append('mqtt_username', username);
+                formData.append('mqtt_password', password);
+
+                const response = await fetch('/test_mqtt', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'mt-2 alert';
+
+                if (result.status === 'success') {
+                    resultDiv.classList.add('alert-success');
+                } else {
+                    resultDiv.classList.add('alert-danger');
+                }
+
+                resultDiv.textContent = result.message;
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'mt-2 alert alert-danger';
+                resultDiv.textContent = '테스트 중 오류가 발생했습니다: ' + error.message;
+            } finally {
+                spinner.classList.add('d-none');
+            }
         }
         
         // 탭별 다음 버튼 상태 업데이트

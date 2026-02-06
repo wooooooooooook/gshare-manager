@@ -154,6 +154,8 @@ class GshareWebServer:
             '/test_proxmox_api', 'test_proxmox_api', self.test_proxmox_api, methods=['POST'])
         self.app.add_url_rule('/test_nfs', 'test_nfs',
                               self.test_nfs, methods=['POST'])
+        self.app.add_url_rule('/test_mqtt', 'test_mqtt',
+                              self.test_mqtt, methods=['POST'])
         self.app.add_url_rule('/import-config', 'import_config',
                               self.import_config, methods=['POST'])
         self.app.add_url_rule(
@@ -291,7 +293,13 @@ class GshareWebServer:
                     'SMB_GUEST_OK': yaml_config.get('smb', {}).get('guest_ok', 'no'),
                     'SMB_READ_ONLY': yaml_config.get('smb', {}).get('read_only', 'yes'),
                     'SMB_LINKS_DIR': yaml_config.get('smb', {}).get('links_dir', '/mnt/gshare_links'),
-                    'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul')
+                    'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
+                    'MQTT_BROKER': yaml_config.get('mqtt', {}).get('broker', ''),
+                    'MQTT_PORT': yaml_config.get('mqtt', {}).get('port', 1883),
+                    'MQTT_USERNAME': yaml_config.get('credentials', {}).get('mqtt_username', ''),
+                    'MQTT_PASSWORD': yaml_config.get('credentials', {}).get('mqtt_password', ''),
+                    'MQTT_TOPIC_PREFIX': yaml_config.get('mqtt', {}).get('topic_prefix', 'gshare'),
+                    'HA_DISCOVERY_PREFIX': yaml_config.get('mqtt', {}).get('ha_discovery_prefix', 'homeassistant')
                 }
                 logging.debug("기존 설정 파일 로드 성공")
             except Exception as e:
@@ -332,6 +340,12 @@ class GshareWebServer:
                 'SMB_LINKS_DIR': form_data.get('SMB_LINKS_DIR', '/mnt/gshare_links'),
                 'TIMEZONE': form_data.get('TIMEZONE', 'Asia/Seoul'),
                 'LOG_LEVEL': form_data.get('LOG_LEVEL', 'INFO'),
+                'MQTT_BROKER': form_data.get('MQTT_BROKER', ''),
+                'MQTT_PORT': form_data.get('MQTT_PORT', 1883),
+                'MQTT_USERNAME': form_data.get('MQTT_USERNAME', ''),
+                'MQTT_PASSWORD': form_data.get('MQTT_PASSWORD', ''),
+                'MQTT_TOPIC_PREFIX': form_data.get('MQTT_TOPIC_PREFIX', 'gshare'),
+                'HA_DISCOVERY_PREFIX': form_data.get('HA_DISCOVERY_PREFIX', 'homeassistant'),
                 'SAVE_TIME': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
 
@@ -709,7 +723,11 @@ class GshareWebServer:
                 'SMB_GUEST_OK': 'yes' if yaml_config.get('smb', {}).get('guest_ok', False) else 'no',
                 'SMB_READ_ONLY': 'yes' if yaml_config.get('smb', {}).get('read_only', True) else 'no',
                 'SMB_LINKS_DIR': yaml_config.get('smb', {}).get('links_dir', '/mnt/gshare_links'),
-                'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul')
+                'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
+                'MQTT_BROKER': yaml_config.get('mqtt', {}).get('broker', ''),
+                'MQTT_PORT': yaml_config.get('mqtt', {}).get('port', 1883),
+                'MQTT_TOPIC_PREFIX': yaml_config.get('mqtt', {}).get('topic_prefix', 'gshare'),
+                'HA_DISCOVERY_PREFIX': yaml_config.get('mqtt', {}).get('ha_discovery_prefix', 'homeassistant')
             }
 
             if 'TOKEN_ID' in yaml_config.get('credentials', {}):
@@ -720,6 +738,10 @@ class GshareWebServer:
                 config_data['SMB_USERNAME'] = yaml_config['credentials']['smb_username']
             if 'SMB_PASSWORD' in yaml_config.get('credentials', {}):
                 config_data['SMB_PASSWORD'] = '********'
+            if 'MQTT_USERNAME' in yaml_config.get('credentials', {}):
+                config_data['MQTT_USERNAME'] = yaml_config['credentials']['mqtt_username']
+            if 'MQTT_PASSWORD' in yaml_config.get('credentials', {}):
+                config_data['MQTT_PASSWORD'] = '********'
 
             return jsonify(config_data)
         except Exception as e:
@@ -911,6 +933,66 @@ class GshareWebServer:
                 "message": f"NFS 테스트 실패: {str(e)}"
             }), 500
 
+    def test_mqtt(self):
+        """MQTT 연결 테스트"""
+        try:
+            broker = request.form.get('mqtt_broker')
+            try:
+                port = int(request.form.get('mqtt_port', 1883))
+            except ValueError:
+                return jsonify({
+                    "status": "error",
+                    "message": "포트는 숫자여야 합니다."
+                }), 400
+
+            username = request.form.get('mqtt_username')
+            password = request.form.get('mqtt_password')
+
+            if not broker:
+                return jsonify({
+                    "status": "error",
+                    "message": "브로커 주소가 입력되지 않았습니다."
+                }), 400
+
+            import paho.mqtt.client as mqtt
+            import queue
+
+            # 결과 큐
+            result_queue = queue.Queue()
+
+            def on_connect(client, userdata, flags, rc):
+                if rc == 0:
+                    result_queue.put({"status": "success", "message": "MQTT 브로커 연결 성공!"})
+                else:
+                    result_queue.put({"status": "error", "message": f"MQTT 연결 실패 (코드: {rc})"})
+
+            client = mqtt.Client()
+            if username and password:
+                client.username_pw_set(username, password)
+
+            client.on_connect = on_connect
+
+            try:
+                client.connect(broker, port, 5)
+                client.loop_start()
+
+                try:
+                    result = result_queue.get(timeout=5)
+                    return jsonify(result)
+                except queue.Empty:
+                    return jsonify({"status": "error", "message": "MQTT 연결 시간 초과"}), 500
+                finally:
+                    client.loop_stop()
+                    client.disconnect()
+            except Exception as e:
+                 return jsonify({"status": "error", "message": f"MQTT 연결 오류: {str(e)}"}), 500
+
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"MQTT 테스트 중 오류 발생: {str(e)}"
+            }), 500
+
     def import_config(self):
         """업로드된 설정 파일 가져오기"""
         try:
@@ -996,7 +1078,13 @@ class GshareWebServer:
                     'SMB_GUEST_OK': 'yes' if yaml_config.get('smb', {}).get('guest_ok', False) else 'no',
                     'SMB_READ_ONLY': 'yes' if yaml_config.get('smb', {}).get('read_only', True) else 'no',
                     'SMB_LINKS_DIR': yaml_config.get('smb', {}).get('links_dir', '/mnt/gshare_links'),
-                    'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul')
+                    'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
+                    'MQTT_BROKER': yaml_config.get('mqtt', {}).get('broker', ''),
+                    'MQTT_PORT': yaml_config.get('mqtt', {}).get('port', 1883),
+                    'MQTT_USERNAME': yaml_config.get('credentials', {}).get('mqtt_username', ''),
+                    'MQTT_PASSWORD': yaml_config.get('credentials', {}).get('mqtt_password', ''),
+                    'MQTT_TOPIC_PREFIX': yaml_config.get('mqtt', {}).get('topic_prefix', 'gshare'),
+                    'HA_DISCOVERY_PREFIX': yaml_config.get('mqtt', {}).get('ha_discovery_prefix', 'homeassistant')
                 }
 
                 temp_config_path = '/tmp/imported_config.yaml'
