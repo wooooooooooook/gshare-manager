@@ -203,6 +203,16 @@ class GshareConfig:
                 'log_level': 'INFO'
             }
 
+        # 필수 섹션이 없는 경우 초기화
+        required_sections = ['proxmox', 'mount', 'smb', 'credentials', 'nfs', 'mqtt']
+        for section in required_sections:
+            if section not in yaml_config or yaml_config[section] is None:
+                yaml_config[section] = {}
+
+        if 'proxmox' in yaml_config and yaml_config['proxmox'] is not None:
+            if 'cpu' not in yaml_config['proxmox'] or yaml_config['proxmox']['cpu'] is None:
+                yaml_config['proxmox']['cpu'] = {}
+
         # 일반 설정 업데이트
         if 'NODE_NAME' in config_dict:
             yaml_config['proxmox']['node_name'] = config_dict['NODE_NAME']
