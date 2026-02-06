@@ -157,13 +157,6 @@ class MQTTManager:
                     "icon": "mdi:history"
                 },
                 {
-                    "name": "Uptime",
-                    "id": "uptime",
-                    "type": "sensor",
-                    "value_template": "{{ value_json.uptime }}",
-                    "icon": "mdi:timer-outline"
-                },
-                {
                     "name": "Last Shutdown Time",
                     "id": "last_shutdown_time",
                     "type": "sensor",

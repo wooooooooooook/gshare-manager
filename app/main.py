@@ -354,7 +354,7 @@ class GShareManager:
         self.folder_monitor = FolderMonitor(
             config, proxmox_api, self.last_shutdown_time)
         self.last_shutdown_time_str = datetime.fromtimestamp(
-            self.last_shutdown_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
+            self.last_shutdown_time, pytz.timezone(self.config.TIMEZONE)).isoformat()
         logging.debug("FolderMonitor 초기화 완료")
 
         # SMBManager 초기화 (FolderMonitor의 SMBManager를 사용)
@@ -504,7 +504,7 @@ class GShareManager:
     def update_state(self, update_monitored_folders=True) -> State:
         try:
             logging.debug(f"상태 업데이트, update_monitored_folders: {update_monitored_folders}")
-            current_time_str = datetime.now(pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S') if update_monitored_folders else getattr(self.current_state, 'last_check_time', '-')
+            current_time_str = datetime.now(pytz.timezone(self.config.TIMEZONE)).isoformat() if update_monitored_folders else getattr(self.current_state, 'last_check_time', '-')
 
             vm_running = self.proxmox_api.is_vm_running()
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
@@ -563,7 +563,7 @@ class GShareManager:
             logging.error(f"상태 업데이트 실패: {e}")
             # 현재 시간을 다시 계산
             current_time_str = datetime.now(pytz.timezone(
-                self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
+                self.config.TIMEZONE)).isoformat()
             return State(
                 last_check_time=current_time_str,
                 vm_running=False,
@@ -694,7 +694,7 @@ class GShareManager:
             if hasattr(self, 'folder_monitor') and self.folder_monitor is not None:
                 self.folder_monitor.last_shutdown_time = current_time
             self.last_shutdown_time_str = datetime.fromtimestamp(
-                current_time, pytz.timezone(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
+                current_time, pytz.timezone(self.config.TIMEZONE)).isoformat()
             logging.info(f"VM 종료 시간 저장됨: {self.last_shutdown_time_str}")
         except Exception as e:
             logging.error(f"VM 종료 시간 저장 실패: {e}")
