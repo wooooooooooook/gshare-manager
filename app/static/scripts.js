@@ -1,7 +1,27 @@
+// 날짜 파싱 헬퍼 함수
+function parseDate(dateStr) {
+    if (!dateStr || dateStr === '-') return null;
+    try {
+        // 이미 ISO 형식이면 (T와 타임존 포함) 그대로 파싱
+        if (dateStr.includes('T') && (dateStr.includes('+') || dateStr.endsWith('Z'))) {
+            return new Date(dateStr);
+        }
+        // 아니면 "YYYY-MM-DD HH:MM:SS" 형식으로 가정하고 KST(+09:00) 추가
+        return new Date(dateStr.replace(' ', 'T') + '+09:00');
+    } catch (e) {
+        console.error("Date parsing error:", e);
+        return null;
+    }
+}
+
 // get_time_ago 함수
 function get_time_ago(timestamp_str) {
     try {
-        const last_check = new Date(timestamp_str.replace(' ', 'T') + '+09:00');
+        const last_check = parseDate(timestamp_str);
+
+        // 파싱 실패 시 원본 반환
+        if (!last_check || isNaN(last_check.getTime())) return timestamp_str;
+
         const now = new Date();
         const diff = Math.floor((now - last_check) / 1000);
 
@@ -90,7 +110,12 @@ function updateProgressBar() {
     }
 
     const now = new Date();
-    const lastCheckTime = new Date(document.querySelector('.last-check-time .time-string').innerText.replace(' ', 'T') + '+09:00');
+    const timeString = document.querySelector('.last-check-time .time-string').innerText;
+    const lastCheckTime = parseDate(timeString);
+
+    // 파싱 실패 시 함수 종료
+    if (!lastCheckTime || isNaN(lastCheckTime.getTime())) return;
+
     const elapsedTime = (now - lastCheckTime) / 1000;
     const progress = Math.min(100, (elapsedTime / checkInterval) * 100);
     
