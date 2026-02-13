@@ -1,5 +1,7 @@
 import logging
 import requests  # type: ignore
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from typing import Optional
 from config import GshareConfig  # type: ignore
 
@@ -9,6 +11,17 @@ class ProxmoxAPI:
         self.config = config
         self.session = requests.Session()
         self.session.verify = False
+
+        # 재시도 로직 설정 (총 3회, 1초 대기)
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "OPTIONS", "POST"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
         self._set_token_auth()
 
     def _set_token_auth(self) -> None:
