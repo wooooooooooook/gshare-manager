@@ -12,6 +12,8 @@ class GshareConfig:
     NODE_NAME: str
     ## android VM ID
     VM_ID: str
+    ## API 연결 타임아웃(초)
+    PROXMOX_TIMEOUT: int = 5
     ## API 토큰 ID
     TOKEN_ID: str
     ## API 토큰 시크릿
@@ -134,6 +136,7 @@ class GshareConfig:
             'PROXMOX_HOST': yaml_config['credentials'].get('proxmox_host', ''),
             'NODE_NAME': yaml_config['proxmox'].get('node_name', ''),
             'VM_ID': yaml_config['proxmox'].get('vm_id', ''),
+            'PROXMOX_TIMEOUT': yaml_config['proxmox'].get('timeout', 5),
             'TOKEN_ID': yaml_config['credentials'].get('token_id', ''),
             'SECRET': yaml_config['credentials'].get('secret', ''),
             'CPU_THRESHOLD': yaml_config['proxmox']['cpu'].get('threshold', 10.0),
@@ -216,8 +219,10 @@ class GshareConfig:
         # 일반 설정 업데이트
         if 'NODE_NAME' in config_dict:
             yaml_config['proxmox']['node_name'] = config_dict['NODE_NAME']
-        if 'VM_ID' in config_dict:
-            yaml_config['proxmox']['vm_id'] = config_dict['VM_ID']
+        if "VM_ID" in config_dict:
+            yaml_config["proxmox"]["vm_id"] = config_dict["VM_ID"]
+        if "PROXMOX_TIMEOUT" in config_dict:
+            yaml_config["proxmox"]["timeout"] = int(config_dict["PROXMOX_TIMEOUT"])
         if 'CPU_THRESHOLD' in config_dict:
             yaml_config['proxmox']['cpu']['threshold'] = float(config_dict['CPU_THRESHOLD'])
         if 'CHECK_INTERVAL' in config_dict:
@@ -317,7 +322,7 @@ class GshareConfig:
         
         # 템플릿 파일이 없으면 기본 설정 반환
         return {
-            'proxmox': {'node_name': '', 'vm_id': '', 'cpu': {'threshold': 10.0, 'check_interval': 60, 'threshold_count': 3}},
+            'proxmox': {'node_name': '', 'vm_id': '', 'timeout': 5, 'cpu': {'threshold': 10.0, 'check_interval': 60, 'threshold_count': 3}},
             'mount': {'path': '/mnt/gshare', 'folder_size_timeout': 30},
             'smb': {'share_name': 'gshare', 'comment': 'GShare SMB 공유', 'guest_ok': False, 'read_only': True, 'links_dir': '/mnt/gshare_links', 'port': 445},
             'nfs': {'path': ''},

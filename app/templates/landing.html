@@ -175,6 +175,11 @@
                             <input type="text" class="form-control" id="vm_id" name="VM_ID" required placeholder="100" value="{{ form_data.get('VM_ID', '') }}">
                         </div>
                         <div class="form-group">
+                            <label for="proxmox_timeout">API 연결 타임아웃 (초)</label>
+                            <input type="number" class="form-control" id="proxmox_timeout" name="PROXMOX_TIMEOUT" value="{{ form_data.get('PROXMOX_TIMEOUT', 5) }}" min="1" required>
+                            <small class="form-text text-muted">기본값: 5초. 네트워크가 느릴 경우 늘려주세요.</small>
+                        </div>
+                        <div class="form-group">
                             <label for="token_id">API 토큰 ID</label>
                             <input type="text" class="form-control" id="token_id" name="TOKEN_ID" required placeholder="user@pam!token" value="{{ form_data.get('TOKEN_ID', '') }}">
                             <small class="form-text text-muted">Proxmox API 토큰 ID를 입력하세요 (예: user@pam!token)</small>
@@ -576,6 +581,7 @@
             const vmId = document.getElementById('vm_id').value;
             const tokenId = document.getElementById('token_id').value;
             const secret = document.getElementById('secret').value;
+            const proxmoxTimeout = document.getElementById('proxmox_timeout').value;
             
             // 값 검증
             if (!proxmoxHost || !nodeName || !vmId || !tokenId || !secret) {
@@ -595,6 +601,7 @@
                 formData.append('vm_id', vmId);
                 formData.append('token_id', tokenId);
                 formData.append('secret', secret);
+                formData.append('proxmox_timeout', proxmoxTimeout);
                 
                 const response = await fetch('/test_proxmox_api', {
                     method: 'POST',
