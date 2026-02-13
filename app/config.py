@@ -111,7 +111,7 @@ class GshareConfig:
 
         # 로그 레벨: 환경 변수에서 우선적으로 가져오고, 없으면 YAML에서 가져옴
         env_log_level = os.environ.get('LOG_LEVEL')
-        yaml_log_level = yaml_config.get('log_level', 'INFO')
+        yaml_log_level = yaml_config.get('log_level') or 'INFO'
         
         # 환경 변수가 설정되어 있고, YAML과 다른 경우 YAML 업데이트
         if env_log_level and env_log_level != yaml_log_level:
@@ -136,14 +136,14 @@ class GshareConfig:
             'PROXMOX_HOST': yaml_config['credentials'].get('proxmox_host', ''),
             'NODE_NAME': yaml_config['proxmox'].get('node_name', ''),
             'VM_ID': yaml_config['proxmox'].get('vm_id', ''),
-            'PROXMOX_TIMEOUT': yaml_config['proxmox'].get('timeout', 5),
+            'PROXMOX_TIMEOUT': yaml_config['proxmox'].get('timeout') or 5,
             'TOKEN_ID': yaml_config['credentials'].get('token_id', ''),
             'SECRET': yaml_config['credentials'].get('secret', ''),
-            'CPU_THRESHOLD': yaml_config['proxmox']['cpu'].get('threshold', 10.0),
-            'CHECK_INTERVAL': yaml_config['proxmox']['cpu'].get('check_interval', 60),
-            'THRESHOLD_COUNT': yaml_config['proxmox']['cpu'].get('threshold_count', 3),
+            'CPU_THRESHOLD': yaml_config['proxmox']['cpu'].get('threshold') or 10.0,
+            'CHECK_INTERVAL': yaml_config['proxmox']['cpu'].get('check_interval') or 60,
+            'THRESHOLD_COUNT': yaml_config['proxmox']['cpu'].get('threshold_count') or 3,
             'MOUNT_PATH': yaml_config['mount'].get('path', '/mnt/gshare'),
-            'GET_FOLDER_SIZE_TIMEOUT': yaml_config['mount'].get('folder_size_timeout', 30),
+            'GET_FOLDER_SIZE_TIMEOUT': yaml_config['mount'].get('folder_size_timeout') or 30,
             'SHUTDOWN_WEBHOOK_URL': yaml_config['credentials'].get('shutdown_webhook_url', ''),
             'SMB_SHARE_NAME': yaml_config['smb'].get('share_name', 'gshare'),
             'SMB_USERNAME': yaml_config['credentials'].get('smb_username', ''),
@@ -152,11 +152,11 @@ class GshareConfig:
             'SMB_GUEST_OK': yaml_config['smb'].get('guest_ok', False),
             'SMB_READ_ONLY': yaml_config['smb'].get('read_only', True),
             'SMB_LINKS_DIR': yaml_config['smb'].get('links_dir', '/mnt/gshare_links'),
-            'SMB_PORT': yaml_config['smb'].get('port', 445),
-            'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
+            'SMB_PORT': yaml_config['smb'].get('port') or 445,
+            'TIMEZONE': yaml_config.get('timezone') or 'Asia/Seoul',
             'LOG_LEVEL': log_level,
             'MQTT_BROKER': yaml_config['mqtt'].get('broker', ''),
-            'MQTT_PORT': yaml_config['mqtt'].get('port', 1883),
+            'MQTT_PORT': yaml_config['mqtt'].get('port') or 1883,
             'MQTT_USERNAME': yaml_config['credentials'].get('mqtt_username', ''),
             'MQTT_PASSWORD': yaml_config['credentials'].get('mqtt_password', ''),
             'MQTT_TOPIC_PREFIX': yaml_config['mqtt'].get('topic_prefix', 'gshare'),
@@ -221,17 +221,17 @@ class GshareConfig:
             yaml_config['proxmox']['node_name'] = config_dict['NODE_NAME']
         if "VM_ID" in config_dict:
             yaml_config["proxmox"]["vm_id"] = config_dict["VM_ID"]
-        if "PROXMOX_TIMEOUT" in config_dict:
+        if "PROXMOX_TIMEOUT" in config_dict and str(config_dict["PROXMOX_TIMEOUT"]).strip():
             yaml_config["proxmox"]["timeout"] = int(config_dict["PROXMOX_TIMEOUT"])
-        if 'CPU_THRESHOLD' in config_dict:
+        if 'CPU_THRESHOLD' in config_dict and str(config_dict['CPU_THRESHOLD']).strip():
             yaml_config['proxmox']['cpu']['threshold'] = float(config_dict['CPU_THRESHOLD'])
-        if 'CHECK_INTERVAL' in config_dict:
+        if 'CHECK_INTERVAL' in config_dict and str(config_dict['CHECK_INTERVAL']).strip():
             yaml_config['proxmox']['cpu']['check_interval'] = int(config_dict['CHECK_INTERVAL'])
-        if 'THRESHOLD_COUNT' in config_dict:
+        if 'THRESHOLD_COUNT' in config_dict and str(config_dict['THRESHOLD_COUNT']).strip():
             yaml_config['proxmox']['cpu']['threshold_count'] = int(config_dict['THRESHOLD_COUNT'])
         if 'MOUNT_PATH' in config_dict:
             yaml_config['mount']['path'] = config_dict['MOUNT_PATH']
-        if 'GET_FOLDER_SIZE_TIMEOUT' in config_dict:
+        if 'GET_FOLDER_SIZE_TIMEOUT' in config_dict and str(config_dict['GET_FOLDER_SIZE_TIMEOUT']).strip():
             yaml_config['mount']['folder_size_timeout'] = int(config_dict['GET_FOLDER_SIZE_TIMEOUT'])
         if 'SMB_SHARE_NAME' in config_dict:
             yaml_config['smb']['share_name'] = config_dict['SMB_SHARE_NAME']
@@ -243,7 +243,7 @@ class GshareConfig:
             yaml_config['smb']['read_only'] = config_dict['SMB_READ_ONLY'] == 'yes'
         if 'SMB_LINKS_DIR' in config_dict:
             yaml_config['smb']['links_dir'] = config_dict['SMB_LINKS_DIR']
-        if 'SMB_PORT' in config_dict:
+        if 'SMB_PORT' in config_dict and str(config_dict['SMB_PORT']).strip():
             yaml_config['smb']['port'] = int(config_dict['SMB_PORT'])
         if 'TIMEZONE' in config_dict:
             yaml_config['timezone'] = config_dict['TIMEZONE']
@@ -254,7 +254,7 @@ class GshareConfig:
         # MQTT 설정 업데이트
         if 'MQTT_BROKER' in config_dict:
             yaml_config['mqtt']['broker'] = config_dict['MQTT_BROKER']
-        if 'MQTT_PORT' in config_dict:
+        if 'MQTT_PORT' in config_dict and str(config_dict['MQTT_PORT']).strip():
             yaml_config['mqtt']['port'] = int(config_dict['MQTT_PORT'])
         if 'MQTT_TOPIC_PREFIX' in config_dict:
             yaml_config['mqtt']['topic_prefix'] = config_dict['MQTT_TOPIC_PREFIX']
