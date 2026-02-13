@@ -22,7 +22,7 @@ class ProxmoxAPI:
         try:
             response = self.session.get(
                 f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
-                timeout=(5, 10)
+                timeout=(self.config.PROXMOX_TIMEOUT, 10)
             )
             response.raise_for_status()
             result = response.json()["data"]["status"]
@@ -36,7 +36,7 @@ class ProxmoxAPI:
         try:
             response = self.session.get(
                 f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
-                timeout=(5, 10)
+                timeout=(self.config.PROXMOX_TIMEOUT, 10)
             )
             response.raise_for_status()
             result = response.json()["data"]["uptime"]
@@ -50,7 +50,7 @@ class ProxmoxAPI:
         try:
             response = self.session.get(
                 f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
-                timeout=(5, 10)
+                timeout=(self.config.PROXMOX_TIMEOUT, 10)
             )
             response.raise_for_status()
             result = response.json()["data"]["cpu"] * 100
@@ -64,7 +64,7 @@ class ProxmoxAPI:
         try:
             response = self.session.post(
                 f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/start",
-                timeout=(5, 10)
+                timeout=(self.config.PROXMOX_TIMEOUT, 10)
             )
             response.raise_for_status()
             logging.debug(f"VM 시작 응답 받음")
