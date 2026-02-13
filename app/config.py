@@ -13,7 +13,7 @@ class GshareConfig:
     ## android VM ID
     VM_ID: str
     ## API 연결 타임아웃(초)
-    PROXMOX_TIMEOUT: int = 5
+    PROXMOX_TIMEOUT: int
     ## API 토큰 ID
     TOKEN_ID: str
     ## API 토큰 시크릿
