@@ -13,12 +13,24 @@ class ProxmoxAPI:
         self.session.verify = False
 
         # 재시도 로직 설정 (총 3회, 1초 대기)
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "OPTIONS", "POST"]
-        )
+        try:
+            # urllib3 >= 1.26.0
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=1,
+                status_forcelist=[500, 502, 503, 504],
+                allowed_methods=["HEAD", "GET", "OPTIONS", "POST"]
+            )
+        except TypeError:
+            # urllib3 < 1.26.0
+            logging.warning("Detected older urllib3 version, falling back to method_whitelist")
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=1,
+                status_forcelist=[500, 502, 503, 504],
+                method_whitelist=["HEAD", "GET", "OPTIONS", "POST"]
+            )
+
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
