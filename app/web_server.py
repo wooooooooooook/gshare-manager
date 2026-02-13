@@ -322,6 +322,7 @@ class GshareWebServer:
                 'PROXMOX_HOST': form_data.get('PROXMOX_HOST', ''),
                 'NODE_NAME': form_data.get('NODE_NAME', ''),
                 'VM_ID': form_data.get('VM_ID', ''),
+                'PROXMOX_TIMEOUT': form_data.get('PROXMOX_TIMEOUT', 5),
                 'TOKEN_ID': form_data.get('TOKEN_ID', ''),
                 'SECRET': form_data.get('SECRET', ''),
                 'CPU_THRESHOLD': form_data.get('CPU_THRESHOLD', 10),
@@ -768,6 +769,7 @@ class GshareWebServer:
             vm_id = request.form.get('vm_id')
             token_id = request.form.get('token_id')
             secret = request.form.get('secret')
+            proxmox_timeout = int(request.form.get('proxmox_timeout') or 5)
 
             if not all([proxmox_host, node_name, vm_id, token_id, secret]):
                 return jsonify({
@@ -783,15 +785,15 @@ class GshareWebServer:
 
             try:
                 version_response = session.get(
-                    f"{proxmox_host}/version", timeout=(5, 10))
+                    f"{proxmox_host}/version", timeout=(proxmox_timeout, 10))
                 version_response.raise_for_status()
 
                 node_response = session.get(
-                    f"{proxmox_host}/nodes/{node_name}", timeout=(5, 10))
+                    f"{proxmox_host}/nodes/{node_name}", timeout=(proxmox_timeout, 10))
                 node_response.raise_for_status()
 
                 vm_response = session.get(
-                    f"{proxmox_host}/nodes/{node_name}/qemu/{vm_id}/status/current", timeout=(5, 10))
+                    f"{proxmox_host}/nodes/{node_name}/qemu/{vm_id}/status/current", timeout=(proxmox_timeout, 10))
                 vm_response.raise_for_status()
 
                 vm_status = vm_response.json()["data"]["status"]
