@@ -829,6 +829,21 @@ class GshareWebServer:
                 return jsonify({"status": "error", "message": "트랜스코딩이 이미 진행 중입니다."}), 409
 
             mount_path = self.manager.config.MOUNT_PATH
+            
+            # 스캔 전 config.yaml에서 최신 규칙 재로드
+            try:
+                config_path = '/config/config.yaml'
+                if os.path.exists(config_path):
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        yaml_config = yaml.safe_load(f)
+                    transcoding = yaml_config.get('transcoding', {})
+                    latest_rules = transcoding.get('rules', [])
+                    self.manager.transcoder.rules = latest_rules
+                    logging.info(f"스캔 전 규칙 재로드 완료: {len(latest_rules)}개")
+            except Exception as e:
+                logging.warning(f"스캔 전 규칙 재로드 실패: {e}")
+            
+            logging.info(f"스캔 요청 수신 - mount_path: {mount_path}, rules: {len(self.manager.transcoder.rules)}개")
 
             def progress_callback(status):
                 """SocketIO로 진행 상황 전송"""
@@ -838,7 +853,20 @@ class GshareWebServer:
                     logging.error(f"트랜스코딩 진행 상황 전송 오류: {e}")
 
             def run_scan():
-                self.manager.transcoder.scan_all_folders(mount_path, progress_callback)
+                try:
+                    self.manager.transcoder.scan_all_folders(mount_path, progress_callback)
+                except Exception as e:
+                    import traceback
+                    logging.error(f"스캔 스레드 오류: {e}\n{traceback.format_exc()}")
+                    try:
+                        self.socketio.emit('transcoding_progress', {
+                            'phase': 'error',
+                            'total_files': 0, 'current_index': 0, 'current_file': '',
+                            'completed': 0, 'failed': 0,
+                            'message': f'스캔 스레드 오류: {str(e)}'
+                        })
+                    except Exception:
+                        pass
 
             scan_thread = threading.Thread(target=run_scan, daemon=True)
             scan_thread.start()

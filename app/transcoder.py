@@ -350,6 +350,14 @@ class Transcoder:
                 })
             return {'completed': 0, 'failed': 0, 'total': 0}
 
+        # 진단 로그
+        logging.info(f"=== 수동 스캔 시작 ===")
+        logging.info(f"마운트 경로: {mount_path}")
+        logging.info(f"경로 존재 여부: {os.path.exists(mount_path)}")
+        logging.info(f"규칙 수: {len(self.rules)}")
+        for i, rule in enumerate(self.rules):
+            logging.info(f"  규칙 {i+1}: name={rule.get('name')}, folder_pattern={rule.get('folder_pattern')}, extensions={rule.get('file_extensions')}")
+
         self._processing = True
         self._scan_cancel = False
         completed = 0
