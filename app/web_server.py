@@ -172,6 +172,8 @@ class GshareWebServer:
                               'scan_transcoding', self.scan_transcoding, methods=['POST'])
         self.app.add_url_rule('/cancel_transcoding_scan',
                               'cancel_transcoding_scan', self.cancel_transcoding_scan, methods=['POST'])
+        self.app.add_url_rule('/get_scan_status',
+                              'get_scan_status', self.get_scan_status)
 
         # SocketIO 이벤트 핸들러 등록
         self._register_socket_events()
@@ -858,6 +860,17 @@ class GshareWebServer:
             return jsonify({"status": "error", "message": "트랜스코더가 없습니다."}), 404
         except Exception as e:
             return jsonify({"status": "error", "message": str(e)}), 500
+
+    def get_scan_status(self):
+        """현재 트랜스코딩 스캔 상태 반환 (새로고침 후 복구용)"""
+        try:
+            if self.manager and hasattr(self.manager, 'transcoder'):
+                status = self.manager.transcoder.scan_status.copy()
+                status['is_processing'] = self.manager.transcoder._processing
+                return jsonify(status)
+            return jsonify({'phase': 'idle', 'is_processing': False})
+        except Exception as e:
+            return jsonify({'phase': 'idle', 'is_processing': False, 'error': str(e)})
 
     def test_proxmox_api(self):
         """Proxmox API 연결 테스트"""

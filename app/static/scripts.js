@@ -1713,6 +1713,40 @@ document.addEventListener('DOMContentLoaded', function () {
             updateTranscodingStatus(data.enabled || false);
         })
         .catch(() => { });
+
+    // 새로고침 후 스캔 진행 중이면 UI 복구
+    fetch('/get_scan_status')
+        .then(response => response.json())
+        .then(data => {
+            if (data.is_processing || (data.phase && data.phase !== 'idle')) {
+                const progressDiv = document.getElementById('transcodingProgress');
+                const scanBtn = document.getElementById('scanTranscodingBtn');
+                const cancelBtn = document.getElementById('cancelScanBtn');
+                if (progressDiv) progressDiv.classList.remove('hidden');
+                if (data.is_processing) {
+                    if (scanBtn) { scanBtn.disabled = true; scanBtn.classList.add('opacity-50', 'cursor-not-allowed'); }
+                    if (cancelBtn) cancelBtn.classList.remove('hidden');
+                }
+                updateProgressUI(data);
+
+                // 스캔 중이면 폴링으로 상태 갱신 (SocketIO 연결 전 대비)
+                if (data.is_processing) {
+                    const pollInterval = setInterval(() => {
+                        fetch('/get_scan_status')
+                            .then(r => r.json())
+                            .then(s => {
+                                updateProgressUI(s);
+                                if (!s.is_processing) {
+                                    clearInterval(pollInterval);
+                                    resetScanUI();
+                                }
+                            })
+                            .catch(() => clearInterval(pollInterval));
+                    }, 1500);
+                }
+            }
+        })
+        .catch(() => { });
 });
 
 // 트랜스코딩 스캔 시작
