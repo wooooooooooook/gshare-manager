@@ -54,6 +54,32 @@ class Transcoder:
 
         return None
 
+    DONE_FILENAME = '.transcoding_done'
+
+    def _load_done_list(self, directory: str) -> set:
+        """디렉토리의 .transcoding_done 파일에서 이미 처리된 파일 목록을 로드"""
+        done_path = os.path.join(directory, self.DONE_FILENAME)
+        done_set = set()
+        if os.path.exists(done_path):
+            try:
+                with open(done_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            done_set.add(line)
+            except Exception as e:
+                logging.warning(f".transcoding_done 읽기 실패 ({directory}): {e}")
+        return done_set
+
+    def _mark_done(self, directory: str, filename: str):
+        """파일을 .transcoding_done에 기록"""
+        done_path = os.path.join(directory, self.DONE_FILENAME)
+        try:
+            with open(done_path, 'a', encoding='utf-8') as f:
+                f.write(filename + '\n')
+        except Exception as e:
+            logging.warning(f".transcoding_done 쓰기 실패 ({directory}): {e}")
+
     def process_folder(self, folder_path: str) -> int:
         """폴더 내 매칭되는 파일들을 트랜스코딩. 처리된 파일 수 반환."""
         if not self.enabled or not self.rules:
@@ -72,6 +98,7 @@ class Transcoder:
                 return 0
 
             for root, dirs, files in os.walk(folder_path):
+                done_set = self._load_done_list(root)
                 for filename in files:
                     file_path = os.path.join(root, filename)
                     rule = self.find_matching_rule(file_path)
@@ -79,20 +106,26 @@ class Transcoder:
                     if rule is None:
                         continue
 
-                    # 임시 파일은 건너뛰기
+                    # 임시 파일과 추적 파일 건너뛰기
                     if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
                         continue
+                    if filename == self.DONE_FILENAME:
+                        continue
 
-                    # 이미 트랜스코딩된 파일인지 확인 (출력 패턴으로 생성된 파일 건너뛰기)
+                    # .transcoding_done 파일로 이미 처리 여부 확인
+                    if filename in done_set:
+                        continue
+
+                    # 출력 패턴 기반 건너뛰기 (보조)
                     output_pattern = rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
                     if '{{filename}}' in output_pattern:
-                        # 패턴에서 고정 부분 추출하여 매칭 확인
                         pattern_parts = output_pattern.replace('{{ext}}', '').replace('{{filename}}', '')
                         if pattern_parts and pattern_parts in filename:
                             continue
 
                     success = self.transcode_file(file_path, rule)
                     if success:
+                        self._mark_done(root, filename)
                         processed_count += 1
 
         except Exception as e:
@@ -229,6 +262,7 @@ class Transcoder:
             return matched_files
 
         for root, dirs, files in os.walk(folder_path):
+            done_set = self._load_done_list(root)
             for filename in files:
                 file_path = os.path.join(root, filename)
                 rule = self.find_matching_rule(file_path)
@@ -238,8 +272,14 @@ class Transcoder:
 
                 if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
                     continue
+                if filename == self.DONE_FILENAME:
+                    continue
 
-                # 이미 트랜스코딩된 파일 건너뛰기
+                # .transcoding_done 파일로 이미 처리 여부 확인
+                if filename in done_set:
+                    continue
+
+                # 출력 패턴 기반 건너뛰기 (보조)
                 output_pattern = rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
                 if '{{filename}}' in output_pattern:
                     pattern_parts = output_pattern.replace('{{ext}}', '').replace('{{filename}}', '')
@@ -249,6 +289,7 @@ class Transcoder:
                 matched_files.append({
                     'file_path': file_path,
                     'filename': filename,
+                    'folder': root,
                     'rule': rule,
                     'rule_name': rule.get('name', '')
                 })
@@ -347,6 +388,7 @@ class Transcoder:
 
                 success = self.transcode_file(file_path, rule)
                 if success:
+                    self._mark_done(item.get('folder', os.path.dirname(file_path)), filename)
                     completed += 1
                 else:
                     failed += 1
