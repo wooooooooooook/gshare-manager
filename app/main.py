@@ -16,6 +16,7 @@ from proxmox_api import ProxmoxAPI
 from web_server import GshareWebServer
 from smb_manager import SMBManager
 from mqtt_manager import MQTTManager
+from transcoder import Transcoder
 import yaml  # type: ignore
 import traceback
 import urllib3  # type: ignore
@@ -361,6 +362,13 @@ class GShareManager:
         self.smb_manager = self.folder_monitor.smb_manager
         logging.debug("SMBManager 참조 완료")
 
+        # Transcoder 초기화
+        self.transcoder = Transcoder(config)
+        if self.transcoder.enabled:
+            logging.info(f"트랜스코딩 활성화됨 (규칙 {len(self.transcoder.rules)}개)")
+        else:
+            logging.debug("트랜스코딩 비활성화")
+
         # 모든 속성이 초기화된 후에 상태 업데이트 수행
         self.current_state = self.update_state()
 
@@ -610,6 +618,15 @@ class GShareManager:
                     logging.debug("폴더 수정 시간 변화 확인 중")
                     changed_folders, should_start_vm = self.folder_monitor.check_modifications()
                     if changed_folders:
+                        # 변경된 폴더에 대해 트랜스코딩 실행 (SMB 활성화 전)
+                        if self.transcoder.enabled:
+                            for folder in changed_folders:
+                                try:
+                                    folder_full_path = os.path.join(self.config.MOUNT_PATH, folder)
+                                    self.transcoder.process_folder(folder_full_path)
+                                except Exception as te:
+                                    logging.error(f"트랜스코딩 오류 ({folder}): {te}")
+
                         # 변경된 폴더들의 SMB 공유 활성화
                         if self.smb_manager.activate_smb_share():
                             self.last_action = f"SMB 공유 활성화: {', '.join(changed_folders)}"

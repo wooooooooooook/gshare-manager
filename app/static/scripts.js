@@ -92,7 +92,7 @@ function logStateToConsole(state) {
     } else {
         console.log(`마운트된 폴더: 0/0`);
     }
-    
+
     console.log('===================');
 }
 
@@ -100,7 +100,7 @@ function logStateToConsole(state) {
 function updateProgressBar() {
     const progressBar = document.querySelector('.last-check-progress');
     if (!progressBar) return;
-    
+
     // NFS 상태 확인
     const nfsStatusSpan = document.querySelector('.nfs-status span:first-child');
     if (nfsStatusSpan && nfsStatusSpan.innerText === 'OFF') {
@@ -118,7 +118,7 @@ function updateProgressBar() {
 
     const elapsedTime = (now - lastCheckTime) / 1000;
     const progress = Math.min(100, (elapsedTime / checkInterval) * 100);
-    
+
     progressBar.style.width = `${progress}%`;
 }
 
@@ -160,12 +160,12 @@ function initSocketIO() {
     socket = io();
 
     // 소켓 연결 이벤트
-    socket.on('connect', function() {
+    socket.on('connect', function () {
         console.log('Socket.IO 서버에 연결되었습니다.');
         // 연결이 되면 상태 요청
         socket.emit('request_state');
         socket.emit('request_log');
-        
+
         // 폴링이 실행 중이면 중지
         if (pollingInterval) {
             clearInterval(pollingInterval);
@@ -174,24 +174,24 @@ function initSocketIO() {
     });
 
     // 연결 해제 이벤트
-    socket.on('disconnect', function() {
+    socket.on('disconnect', function () {
         console.log('Socket.IO 서버와 연결이 끊어졌습니다.');
     });
 
     // 오류 이벤트
-    socket.on('connect_error', function(error) {
+    socket.on('connect_error', function (error) {
         console.error('Socket.IO 연결 오류:', error);
         // 연결 오류 시 폴백으로 HTTP 폴링 사용
         startPolling();
     });
 
     // 상태 업데이트 이벤트
-    socket.on('state_update', function(data) {
+    socket.on('state_update', function (data) {
         updateUI(data);
     });
 
     // 로그 업데이트 이벤트
-    socket.on('log_update', function(logContent) {
+    socket.on('log_update', function (logContent) {
         updateLogContent(logContent);
     });
 }
@@ -200,7 +200,7 @@ function initSocketIO() {
 function updateUI(data) {
     // state 업데이트를 콘솔에 로깅
     logStateToConsole(data);
-    
+
     // check_interval 업데이트
     if (data.check_interval) {
         checkInterval = data.check_interval;
@@ -225,27 +225,27 @@ function updateUI(data) {
     if (elements.lastCheckTimeReadable) elements.lastCheckTimeReadable.innerText = get_time_ago(data.last_check_time);
     if (elements.lastCheckTimeString) elements.lastCheckTimeString.innerText = data.last_check_time;
     if (elements.lastAction) elements.lastAction.innerText = data.last_action;
-    
+
     // VM 상태 업데이트
     if (elements.vmStatus) {
         updateVMStatus(data.vm_status);
     }
-    
+
     // SMB 상태 업데이트
     if (elements.smbStatus) {
         updateSMBStatus(data.smb_status);
     }
-    
+
     // NFS 상태 업데이트
     if (elements.nfsStatus) {
         updateNFSStatus(data.nfs_status);
     }
-    
+
     if (elements.cpuUsage) elements.cpuUsage.innerText = data.cpu_usage + '%';
     if (elements.lowCpuCount) elements.lowCpuCount.innerText = data.low_cpu_count + '/' + data.threshold_count;
     if (elements.uptime) elements.uptime.innerText = data.uptime;
     if (elements.lastShutdownTimeReadable) {
-        elements.lastShutdownTimeReadable.innerText = data.last_shutdown_time !== '-' ? 
+        elements.lastShutdownTimeReadable.innerText = data.last_shutdown_time !== '-' ?
             get_time_ago(data.last_shutdown_time) : '정보없음';
     }
     if (elements.lastShutdownTimeString) {
@@ -258,7 +258,7 @@ function updateUI(data) {
         const sortedFolders = Object.entries(data.monitored_folders).sort((a, b) => {
             return new Date(b[1].mtime) - new Date(a[1].mtime);
         });
-        
+
         // 백그라운드로 폴더 목록 처리를 위해 requestAnimationFrame 사용
         window.requestAnimationFrame(() => {
             updateFolderList(sortedFolders);
@@ -275,12 +275,12 @@ function updateUI(data) {
 function updateLogContent(logContent) {
     // 마우스가 로그 영역에 있거나 자동 업데이트가 비활성화된 경우 업데이트 중지
     if (!autoUpdateLog || logHovered) return;
-    
+
     const logElement = document.querySelector('#logContent');
     if (!logElement) return;
-    
+
     logElement.innerText = logContent;
-    
+
     // 자동 스크롤이 활성화되고 사용자가 직접 스크롤하지 않은 경우에만 맨 아래로 스크롤
     if (autoScrollLog && !userScrolled) {
         logElement.scrollTop = logElement.scrollHeight;
@@ -292,14 +292,14 @@ let pollingInterval = null; // 인터벌 ID를 저장할 변수 추가
 
 function startPolling() {
     console.warn('Socket.IO 연결 실패, HTTP 폴링으로 전환합니다.');
-    
+
     // 이미 실행 중인 폴링이 있으면 중지
     if (pollingInterval) {
         clearInterval(pollingInterval);
     }
-    
+
     // 1초마다 상태 업데이트 요청
-    pollingInterval = setInterval(function() {
+    pollingInterval = setInterval(function () {
         fetch('/update_state')
             .then(response => response.json())
             .then(data => {
@@ -333,12 +333,12 @@ function initFolderTimeObserver() {
     if (folderTimeObserver) {
         folderTimeObserver.disconnect();
     }
-    
+
     // 새 observer 생성
     folderTimeObserver = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             const el = entry.target;
-            
+
             if (entry.isIntersecting) {
                 // 화면에 보이게 되면 Set에 추가
                 visibleFolderElements.add(el);
@@ -352,7 +352,7 @@ function initFolderTimeObserver() {
         rootMargin: '50px', // viewport 여유공간
         threshold: 0.1 // 10% 이상 보일 때 감지
     });
-    
+
     // 모든 폴더 타임라인 요소 감시 등록
     document.querySelectorAll('.monitored-folders-grid .toggle-text, .smb-folders-grid .toggle-text').forEach(el => {
         folderTimeObserver.observe(el);
@@ -378,26 +378,26 @@ window.onload = function () {
         logContent.scrollTop = logContent.scrollHeight;
 
         // 로그 영역에 마우스 진입/이탈 이벤트 리스너 추가
-        logContent.addEventListener('mouseenter', function() {
+        logContent.addEventListener('mouseenter', function () {
             logHovered = true;
         });
-        
-        logContent.addEventListener('mouseleave', function() {
+
+        logContent.addEventListener('mouseleave', function () {
             logHovered = false;
         });
 
         // 로그 영역 스크롤 이벤트 감지
         let scrollTimeout;
-        
-        logContent.addEventListener('scroll', function() {
+
+        logContent.addEventListener('scroll', function () {
             // 사용자가 맨 아래까지 스크롤했는지 확인
             const isAtBottom = logContent.scrollHeight - logContent.clientHeight <= logContent.scrollTop + 5;
-            
+
             // 맨 아래가 아니면 사용자가 스크롤했다고 표시
             if (!isAtBottom) {
                 userScrolled = true;
                 clearTimeout(scrollTimeout);
-                
+
                 // 5초 후 사용자 스크롤 상태 초기화
                 scrollTimeout = setTimeout(() => {
                     userScrolled = false;
@@ -419,7 +419,7 @@ window.onload = function () {
     // 초기 SMB 상태에 따라 컨테이너 표시 설정
     const initialSMBStatus = document.querySelector('.smb-status span').innerText;
     updateSMBStatus(initialSMBStatus);
-    
+
     // 초기 NFS 상태에 따라 컨테이너 표시 설정
     const initialNFSStatus = document.querySelector('.nfs-status span').innerText;
     updateNFSStatus(initialNFSStatus);
@@ -458,7 +458,7 @@ window.onload = function () {
         const lastShutdownTime = document.querySelector('.last-shutdown-time .time-string');
         if (lastShutdownTime) {
             const readableTime = document.querySelector('.last-shutdown-time .readable-time');
-            readableTime.innerText = lastShutdownTime.innerText !== '-' ? 
+            readableTime.innerText = lastShutdownTime.innerText !== '-' ?
                 get_time_ago(lastShutdownTime.innerText) : '정보없음';
         }
 
@@ -467,16 +467,16 @@ window.onload = function () {
     }, 1000);
 
     // 페이지 언로드 시 인터벌 정리
-    window.addEventListener('beforeunload', function() {
+    window.addEventListener('beforeunload', function () {
         if (progressBarInterval) clearInterval(progressBarInterval);
         if (timeUpdateInterval) clearInterval(timeUpdateInterval);
         if (pollingInterval) clearInterval(pollingInterval);
-        
+
         // Observer 연결 해제
         if (folderTimeObserver) {
             folderTimeObserver.disconnect();
         }
-        
+
         // 소켓 연결 정리
         if (socket) {
             socket.off('connect');
@@ -520,7 +520,7 @@ function updateVMStatus(status) {
         // VM 실행 중
         vmStatusContainer.classList.remove('bg-red-50', 'border-red-100');
         vmStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
-        
+
         // 상태 표시 스타일 변경
         if (vmStatusSpan) {
             vmStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
@@ -529,7 +529,7 @@ function updateVMStatus(status) {
         } else {
             console.warn('VM 상태 표시 요소를 찾을 수 없습니다.');
         }
-        
+
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-red-500');
@@ -545,7 +545,7 @@ function updateVMStatus(status) {
         // VM 중지됨
         vmStatusContainer.classList.remove('bg-green-50', 'border-green-100');
         vmStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
-        
+
         // 상태 표시 스타일 변경
         if (vmStatusSpan) {
             vmStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
@@ -554,7 +554,7 @@ function updateVMStatus(status) {
         } else {
             console.warn('VM 상태 표시 요소를 찾을 수 없습니다.');
         }
-        
+
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-green-500');
@@ -583,7 +583,7 @@ function updateSMBStatus(status) {
         // SMB 실행 중
         smbStatusContainer.classList.remove('bg-red-50', 'border-red-100');
         smbStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
-        
+
         // 상태 표시 스타일 변경
         if (smbStatusSpan) {
             smbStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
@@ -592,7 +592,7 @@ function updateSMBStatus(status) {
         } else {
             console.warn('SMB 상태 표시 요소를 찾을 수 없습니다.');
         }
-        
+
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-red-500');
@@ -604,7 +604,7 @@ function updateSMBStatus(status) {
         // SMB 중지됨
         smbStatusContainer.classList.remove('bg-green-50', 'border-green-100');
         smbStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
-        
+
         // 상태 표시 스타일 변경
         if (smbStatusSpan) {
             smbStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
@@ -613,7 +613,7 @@ function updateSMBStatus(status) {
         } else {
             console.warn('SMB 상태 표시 요소를 찾을 수 없습니다.');
         }
-        
+
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-green-500');
@@ -640,7 +640,7 @@ function updateNFSStatus(status) {
         // NFS 마운트됨
         nfsStatusContainer.classList.remove('bg-red-50', 'border-red-100');
         nfsStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
-        
+
         // 상태 표시 스타일 변경
         if (nfsStatusSpan) {
             nfsStatusSpan.classList.remove('bg-slate-50', 'text-slate-700');
@@ -649,7 +649,7 @@ function updateNFSStatus(status) {
         } else {
             console.warn('NFS 상태 표시 요소를 찾을 수 없습니다.');
         }
-        
+
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-red-500');
@@ -657,24 +657,24 @@ function updateNFSStatus(status) {
         } else {
             console.warn('NFS 상태 아이콘을 찾을 수 없습니다.');
         }
-        
+
         // NFS 경고 메시지 숨기기
         if (nfsWarning) {
             nfsWarning.classList.add('hidden');
         }
-        
+
         // SMB 패널 활성화
         if (smbPanel) {
             smbPanel.classList.remove('opacity-50', 'pointer-events-none');
         }
-        
+
         // 프로그레스 바 갱신 시작
         updateProgressBar();
     } else {
         // NFS 마운트 해제됨
         nfsStatusContainer.classList.remove('bg-green-50', 'border-green-100');
         nfsStatusContainer.classList.add('bg-gray-50', 'border-gray-200');
-        
+
         // 상태 표시 스타일 변경
         if (nfsStatusSpan) {
             nfsStatusSpan.classList.remove('bg-emerald-50', 'text-emerald-700');
@@ -683,7 +683,7 @@ function updateNFSStatus(status) {
         } else {
             console.warn('NFS 상태 표시 요소를 찾을 수 없습니다.');
         }
-        
+
         // 상태 아이콘 변경 (신호등)
         if (statusIcon) {
             statusIcon.classList.remove('bg-green-500');
@@ -691,17 +691,17 @@ function updateNFSStatus(status) {
         } else {
             console.warn('NFS 상태 아이콘을 찾을 수 없습니다.');
         }
-        
+
         // NFS 경고 메시지 표시
         if (nfsWarning) {
             nfsWarning.classList.remove('hidden');
         }
-        
+
         // SMB 패널 비활성화
         if (smbPanel) {
             smbPanel.classList.add('opacity-50', 'pointer-events-none');
         }
-        
+
         // 프로그레스 바 초기화
         const progressBar = document.querySelector('.last-check-progress');
         if (progressBar) {
@@ -776,21 +776,21 @@ function startVM() {
         const statusText = document.getElementById('vmControlStatusText');
         statusDiv.classList.remove('hidden');
         statusText.textContent = 'VM 시작을 요청중입니다...';
-        
+
         fetch('/start_vm')
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
                     statusText.textContent = data.message;
-                    
+
                     // VM 시작 후 즉시 state를 가져와서 콘솔에 로깅
                     console.log('=== VM 시작 요청 성공 ===');
-                    
+
                     // VM 시작 후 서버 상태 변경을 위한 충분한 지연 시간 추가 (2초)
                     setTimeout(() => {
                         // 상태를 업데이트하여 UI 반영
                         updateFolderState();
-                        
+
                         statusDiv.classList.add('hidden');
                     }, 2000);
                 } else {
@@ -812,21 +812,21 @@ function shutdownVM() {
         const statusText = document.getElementById('vmControlStatusText');
         statusDiv.classList.remove('hidden');
         statusText.textContent = 'VM 종료를 요청중입니다...';
-        
+
         fetch('/shutdown_vm')
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
                     statusText.textContent = data.message;
-                    
+
                     // VM 종료 후 즉시 state를 가져와서 콘솔에 로깅
                     console.log('=== VM 종료 요청 성공 ===');
-                    
+
                     // VM 종료 후 서버 상태 변경을 위한 충분한 지연 시간 추가 (2초)
                     setTimeout(() => {
                         // 상태를 업데이트하여 UI 반영
                         updateFolderState();
-                        
+
                         statusDiv.classList.add('hidden');
                     }, 2000);
                 } else {
@@ -881,31 +881,31 @@ function updateFolderNameScrolling(root = document) {
 
 // 폴더 목록 HTML 생성 함수 추가
 function generateFolderListHtml(sortedFolders, showToggleButtons = true, action = 'mount') {
-    
+
     let foldersHtml = '';
-    
+
     // sortedFolders가 비어있거나 정의되지 않은 경우 처리
     if (!sortedFolders || (Array.isArray(sortedFolders) ? sortedFolders.length === 0 : Object.keys(sortedFolders).length === 0)) {
         return '<div class="text-center py-4"><p class="text-sm text-gray-600">폴더가 없습니다.</p></div>';
     }
-    
+
     try {
         // sortedFolders가 객체인 경우 배열로 변환
-        const foldersArray = Array.isArray(sortedFolders) 
-            ? sortedFolders 
+        const foldersArray = Array.isArray(sortedFolders)
+            ? sortedFolders
             : Object.entries(sortedFolders);
-                
+
         if (!foldersArray.length) {
             return '<div class="text-center py-4"><p class="text-sm text-gray-600">폴더가 없습니다.</p></div>';
         }
-        
+
         for (const entry of foldersArray) {
             const folder = entry[0];
             const info = entry[1];
-            
+
             // 폴더 경로에서 안전한 ID 생성 (한글 등 Latin1 범위 밖의 문자 처리)
             const folderId = `folder-${encodeURIComponent(folder).replace(/%/g, '_')}`;
-            
+
             // 버튼 텍스트와 스타일 결정
             let buttonText, buttonClass;
             if (action === 'mount') {
@@ -915,7 +915,7 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
                 buttonText = '마운트 해제';
                 buttonClass = 'bg-red-50 text-red-700 hover:bg-red-100';
             }
-            
+
             foldersHtml += `
                 <div id="${folderId}" class="folder-item flex justify-between items-center p-2 mb-2 border border-gray-200 rounded-lg hover:bg-gray-50" data-folder="${folder}" data-mtime="${info.mtime}" data-action="${action}">
                     <div class="flex-1 overflow-hidden">
@@ -937,7 +937,7 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
                 </div>
             `;
         }
-        
+
         return foldersHtml;
     } catch (error) {
         console.error('generateFolderListHtml 오류:', error);
@@ -954,9 +954,9 @@ function toggleMount(folder, action = 'mount') {
         btn.innerText = '처리 중...';
         btn.classList.add('opacity-50', 'cursor-not-allowed');
     });
-    
+
     console.log(`폴더 ${folder}에 대한 ${action} 작업 요청`);
-    
+
     // 비동기 요청으로 처리
     fetch(`/toggle_mount/${encodeURIComponent(folder)}`)
         .then(response => response.json())
@@ -964,12 +964,12 @@ function toggleMount(folder, action = 'mount') {
             if (data.status === 'success') {
                 // 폴더 마운트 상태 변경 후 로깅
                 console.log(`=== 폴더 '${folder}' 마운트 상태 변경 성공 ===`);
-                
+
                 // 서버 상태 변경을 위한 충분한 지연 시간 추가 (1.5초)
                 setTimeout(() => {
                     // 상태 업데이트 요청
                     updateFolderState();
-                    
+
                     // 버튼 상태 복원
                     resetToggleButtons();
                 }, 1500);
@@ -985,7 +985,7 @@ function toggleMount(folder, action = 'mount') {
             // 버튼 상태 복원
             resetToggleButtons();
         });
-        
+
     // 버튼 상태를 복원하는 함수
     function resetToggleButtons() {
         toggleButtons.forEach(btn => {
@@ -1005,7 +1005,7 @@ function updateFolderState() {
     if (statusIndicator) {
         statusIndicator.classList.remove('hidden');
     }
-    
+
     fetch('/update_state')
         .then(response => response.json())
         .then(data => {
@@ -1014,13 +1014,13 @@ function updateFolderState() {
             if (vmStatusSpan) {
                 updateVMStatus(data.vm_status);
             }
-            
+
             // SMB 상태 업데이트 - 선택자 수정
             const smbStatusSpan = document.querySelector('.smb-status span:first-child');
             if (smbStatusSpan) {
                 updateSMBStatus(data.smb_status);
             }
-            
+
             // NFS 상태 업데이트 - 선택자 수정
             const nfsStatusSpan = document.querySelector('.nfs-status span:first-child');
             if (nfsStatusSpan) {
@@ -1033,7 +1033,7 @@ function updateFolderState() {
                 const sortedFolders = Object.entries(data.monitored_folders).sort((a, b) => {
                     return new Date(b[1].mtime) - new Date(a[1].mtime);
                 });
-                
+
                 // 대규모 폴더 리스트 처리 최적화
                 if (sortedFolders.length > 100) {
                     console.log(`대용량 폴더 목록 처리: ${sortedFolders.length}개`);
@@ -1055,7 +1055,7 @@ function updateFolderState() {
                     updateFolderList([]);
                 });
             }
-            
+
             // 상태 표시기 숨기기 (이 위치로 이동)
             if (statusIndicator && (!data.monitored_folders || Object.keys(data.monitored_folders).length === 0)) {
                 statusIndicator.classList.add('hidden');
@@ -1083,7 +1083,7 @@ function updateFolderList(sortedFolders) {
                 <p class="text-sm text-gray-600">공유 중인 폴더가 없습니다.</p>
             </div>
         `;
-        
+
         // 상태 표시기 숨기기
         const statusIndicator = document.querySelector('.status-update-indicator');
         if (statusIndicator) {
@@ -1097,7 +1097,7 @@ function updateFolderList(sortedFolders) {
     if (loadingElement) {
         loadingElement.style.display = 'none';
     }
-    
+
     const loadingSmbElement = document.getElementById('loadingSmbFolders');
     if (loadingSmbElement) {
         loadingSmbElement.style.display = 'none';
@@ -1106,14 +1106,14 @@ function updateFolderList(sortedFolders) {
     // 마운트된 폴더와 마운트되지 않은 폴더 분류 - 최적화 (한 번만 순회)
     const unmountedFolders = [];
     const mountedFolders = [];
-    
+
     // 메모리 사용량 최적화: 배열 미리 할당 (대략적인 크기 예측)
     const estimatedSize = Math.min(1000, sortedFolders.length);
     unmountedFolders.length = estimatedSize;
     mountedFolders.length = estimatedSize;
     let unmountedCount = 0;
     let mountedCount = 0;
-    
+
     // 각 폴더를 마운트 상태에 따라 분류 (정렬 순서 유지)
     for (let i = 0; i < sortedFolders.length; i++) {
         const folderEntry = sortedFolders[i];
@@ -1123,29 +1123,29 @@ function updateFolderList(sortedFolders) {
             unmountedFolders[unmountedCount++] = folderEntry;
         }
     }
-    
+
     // 실제 사용된 크기로 배열 조정
     unmountedFolders.length = unmountedCount;
     mountedFolders.length = mountedCount;
-    
+
     console.log('마운트되지 않은 폴더 갯수:', unmountedCount);
     console.log('마운트된 폴더 갯수:', mountedCount);
-    
+
     // 총 폴더 수가 많은 경우 비동기 처리 최적화
     const isBatchProcessingNeeded = sortedFolders.length > 200;
-    
+
     // 컨테이너 업데이트 함수 실행
     if (isBatchProcessingNeeded) {
         // 비동기적으로 컨테이너 업데이트 (타이밍 조정)
         setTimeout(() => {
             // NFS 패널에는 마운트되지 않은 폴더만 표시 (마운트 가능한 목록)
             updateFolderContainer('monitoredFoldersContainer', unmountedFolders, 'mount');
-            
+
             // 다음 프레임에서 SMB 패널 업데이트
             setTimeout(() => {
                 // SMB 패널에는 마운트된 폴더만 표시 (언마운트 가능한 목록)
                 updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
-                
+
                 // 상태 표시기 숨기기
                 const statusIndicator = document.querySelector('.status-update-indicator');
                 if (statusIndicator) {
@@ -1157,7 +1157,7 @@ function updateFolderList(sortedFolders) {
         // 적은 수의 폴더는 일반적인 방식으로 처리
         updateFolderContainer('monitoredFoldersContainer', unmountedFolders, 'mount');
         updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
-        
+
         // 상태 표시기 숨기기
         const statusIndicator = document.querySelector('.status-update-indicator');
         if (statusIndicator) {
@@ -1170,29 +1170,29 @@ function updateFolderList(sortedFolders) {
 function updateFolderContainer(containerId, folderData, action) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    
+
     // 현재 컨테이너에 있는 모든 폴더 항목 가져오기
     const existingFolderItems = container.querySelectorAll('.folder-item');
     const existingFolderMap = new Map();
-    
+
     // 기존 폴더 항목을 Map에 저장
     existingFolderItems.forEach(item => {
         existingFolderMap.set(item.dataset.folder, item);
     });
-    
+
     // 폴더 데이터 준비 (정렬은 이미 완료됨)
     const folders = Array.isArray(folderData) ? folderData : Object.entries(folderData);
-    
+
     // 처리된 폴더 경로 추적을 위한 Set
     const processedFolders = new Set();
-    
+
     // 삭제할 항목을 담을 
     const removeList = [];
-    
+
     // 성능 최적화를 위한 청크 단위 처리
     const CHUNK_SIZE = 50; // 한 번에 처리할 항목 수
     let currentChunk = 0;
-    
+
     // 시간 변환 결과 캐싱
     const timeAgoCache = new Map();
     function getCachedTimeAgo(timestamp) {
@@ -1201,43 +1201,43 @@ function updateFolderContainer(containerId, folderData, action) {
         }
         return timeAgoCache.get(timestamp);
     }
-    
+
     // 지연 렌더링 함수 정의
     function processChunk() {
         // 현재 청크의 범위 계산
         const start = currentChunk * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, folders.length);
-        
+
         // 해당 청크의 요소를 처리할 프래그먼트
         const newItemsFragment = document.createDocumentFragment();
-        
+
         // 현재 청크의 폴더들 처리
         for (let i = start; i < end; i++) {
             const entry = folders[i];
             const folder = entry[0];
             const info = entry[1];
-            
+
             // 폴더 처리 완료 표시
             processedFolders.add(folder);
-            
+
             // 폴더 경로에서 안전한 ID 생성
             const folderId = `folder-${encodeURIComponent(folder).replace(/%/g, '_')}`;
-            
+
             // 이미 존재하는 폴더 항목인지 확인
             if (existingFolderMap.has(folder)) {
                 // 기존 항목 업데이트
                 const existingItem = existingFolderMap.get(folder);
-                
+
                 // 수정 시간 업데이트 (변경된 경우에만)
                 const timeString = existingItem.querySelector('.time-string');
                 const readableTime = existingItem.querySelector('.readable-time');
-                
+
                 if (timeString && readableTime && timeString.innerText !== info.mtime) {
                     timeString.innerText = info.mtime;
                     readableTime.innerText = getCachedTimeAgo(info.mtime);
                     existingItem.dataset.mtime = info.mtime;
                 }
-                
+
                 // 위치 이동 없이 그대로 유지
             } else {
                 // 새 항목 생성
@@ -1247,11 +1247,11 @@ function updateFolderContainer(containerId, folderData, action) {
                 newItem.dataset.folder = folder;
                 newItem.dataset.mtime = info.mtime;
                 newItem.dataset.action = action;
-                
+
                 // 렌더링 성능 향상을 위한 속성 추가
                 newItem.style.contain = 'content';
                 newItem.style.willChange = 'transform';
-                
+
                 // 버튼 텍스트와 스타일 결정
                 let buttonText, buttonClass;
                 if (action === 'mount') {
@@ -1261,10 +1261,10 @@ function updateFolderContainer(containerId, folderData, action) {
                     buttonText = '마운트 해제';
                     buttonClass = 'bg-red-50 text-red-700 hover:bg-red-100';
                 }
-                
+
                 // 캐시된 시간 가져오기
                 const cachedTimeAgo = getCachedTimeAgo(info.mtime);
-                
+
                 newItem.innerHTML = `
                     <div class="flex-1 overflow-hidden">
                         <div class="folder-name-wrapper min-w-0 text-sm mb-1 font-medium text-gray-800">
@@ -1283,12 +1283,12 @@ function updateFolderContainer(containerId, folderData, action) {
                         ${buttonText}
                     </button>
                 `;
-                
+
                 // 새 항목 프래그먼트에 추가
                 newItemsFragment.appendChild(newItem);
             }
         }
-        
+
         // 새 항목들만 컨테이너에 추가 (기존 항목은 그대로 유지)
         if (newItemsFragment.childNodes.length > 0) {
             container.appendChild(newItemsFragment);
@@ -1306,10 +1306,10 @@ function updateFolderContainer(containerId, folderData, action) {
                 el.closest('.folder-item').dataset.eventAttached = 'true';
             });
         }
-        
+
         // 다음 청크로 이동
         currentChunk++;
-        
+
         // 아직 처리할 청크가 남아있으면 다음 프레임에 스케줄링
         if (currentChunk * CHUNK_SIZE < folders.length) {
             // requestIdleCallback을 지원하면 사용, 아니면 requestAnimationFrame으로 폴백
@@ -1326,23 +1326,23 @@ function updateFolderContainer(containerId, folderData, action) {
                     removeList.push(element);
                 }
             }
-            
+
             // 제거할 항목이 있으면 일괄 처리
             if (removeList.length > 0) {
                 // 실제 DOM에서 제거
                 removeList.forEach(el => el.remove());
             }
-            
+
             // 모든 처리가 완료되면 Observer에 새 요소 등록
             if (typeof updateObserversAfterProcessing === 'function') {
                 updateObserversAfterProcessing();
             }
         }
     }
-    
+
     // 첫 번째 청크 처리 시작
     processChunk();
-    
+
     // 폴더 목록이 변경되면 Observer 업데이트
     function updateObserversAfterProcessing() {
         // 이전에 등록된 Observer가 있으면 다시 등록
@@ -1351,7 +1351,7 @@ function updateFolderContainer(containerId, folderData, action) {
             setTimeout(() => {
                 // 새로 추가된 toggle-text 요소들 찾기
                 const newToggleElements = container.querySelectorAll('.folder-item:not([data-observer-attached]) .toggle-text');
-                
+
                 // 각 요소를 Observer에 등록
                 newToggleElements.forEach(el => {
                     folderTimeObserver.observe(el);
@@ -1361,7 +1361,7 @@ function updateFolderContainer(containerId, folderData, action) {
             }, 0);
         }
     }
-    
+
     // Observer 업데이트 예약
     if (folders.length > 0) {
         updateObserversAfterProcessing();
@@ -1376,43 +1376,43 @@ function toggleSMB() {
         console.error('SMB 상태 요소를 찾을 수 없습니다.');
         return;
     }
-    
+
     const currentStatus = smbStatusSpan.innerText;
     console.log(`현재 SMB 상태: ${currentStatus}`);
-    
+
     // 상태에 따라 다른 메시지 표시
-    const message = currentStatus === 'ON' 
-        ? 'SMB 서비스를 끄시겠습니까? 공유된 폴더에 접근할 수 없게 됩니다.' 
+    const message = currentStatus === 'ON'
+        ? 'SMB 서비스를 끄시겠습니까? 공유된 폴더에 접근할 수 없게 됩니다.'
         : 'SMB 서비스를 켜시겠습니까? 마운트된 폴더가 네트워크에 공유됩니다.';
-    
+
     // 확인 대화상자 표시
     if (confirm(message)) {
         // 상태 표시기 표시
         const smbStatusDiv = document.querySelector('.smb-status');
-        
+
         // 클릭 불가능하게 만들기
         if (smbStatusDiv) {
             smbStatusDiv.style.pointerEvents = 'none';
             smbStatusDiv.style.opacity = '0.5';
         }
-        
+
         console.log('SMB 토글 요청 시작');
-        
+
         // 현재 상태에 따라 다른 엔드포인트 호출
         const endpoint = currentStatus === 'ON' ? '/deactivate_smb' : '/activate_smb';
-        
+
         // 서버에 SMB 토글 요청 보내기
         fetch(endpoint)
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
                     console.log(`SMB ${currentStatus === 'ON' ? '비활성화' : '활성화'} 성공: ${data.message}`);
-                    
+
                     // 서버 상태 변경을 위한 충분한 지연 시간 추가 (2초)
                     setTimeout(() => {
                         // 상태를 업데이트하여 UI 반영
                         updateFolderState();
-                        
+
                         // 다시 클릭 가능하게 만들기
                         if (smbStatusDiv) {
                             smbStatusDiv.style.pointerEvents = 'auto';
@@ -1421,7 +1421,7 @@ function toggleSMB() {
                     }, 2000);
                 } else {
                     alert('오류: ' + data.message);
-                    
+
                     // 다시 클릭 가능하게 만들기
                     if (smbStatusDiv) {
                         smbStatusDiv.style.pointerEvents = 'auto';
@@ -1432,7 +1432,7 @@ function toggleSMB() {
             .catch(error => {
                 console.error('SMB 토글 중 오류:', error);
                 alert('SMB 토글 중 오류가 발생했습니다.');
-                
+
                 // 다시 클릭 가능하게 만들기
                 if (smbStatusDiv) {
                     smbStatusDiv.style.pointerEvents = 'auto';
@@ -1450,10 +1450,10 @@ function toggleVM() {
         console.error('VM 상태 요소를 찾을 수 없습니다.');
         return;
     }
-    
+
     const currentStatus = vmStatusSpan.innerText;
     console.log(`현재 VM 상태: ${currentStatus}`);
-    
+
     // 상태에 따라 시작 또는 종료 함수 호출
     if (currentStatus === 'OFF') {
         startVM();
@@ -1468,27 +1468,27 @@ function remountNFS() {
     if (confirm('NFS 연결을 다시 시도하시겠습니까? 현재 연결에 문제가 있는 경우 사용하세요.')) {
         // 상태 표시기 표시
         const nfsStatusDiv = document.querySelector('.nfs-status');
-        
+
         // 클릭 불가능하게 만들기
         if (nfsStatusDiv) {
             nfsStatusDiv.style.pointerEvents = 'none';
             nfsStatusDiv.style.opacity = '0.5';
         }
-        
+
         console.log('NFS remount 요청 시작');
-        
+
         // 서버에 NFS remount 요청 보내기
         fetch('/remount_nfs')
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
                     console.log(`NFS remount 성공: ${data.message}`);
-                    
+
                     // 서버 상태 변경을 위한 충분한 지연 시간 추가 (2초)
                     setTimeout(() => {
                         // 상태를 업데이트하여 UI 반영
                         updateFolderState();
-                        
+
                         // 다시 클릭 가능하게 만들기
                         if (nfsStatusDiv) {
                             nfsStatusDiv.style.pointerEvents = 'auto';
@@ -1497,7 +1497,7 @@ function remountNFS() {
                     }, 2000);
                 } else {
                     alert('오류: ' + data.message);
-                    
+
                     // 다시 클릭 가능하게 만들기
                     if (nfsStatusDiv) {
                         nfsStatusDiv.style.pointerEvents = 'auto';
@@ -1508,7 +1508,7 @@ function remountNFS() {
             .catch(error => {
                 console.error('NFS remount 중 오류:', error);
                 alert('NFS remount 중 오류가 발생했습니다.');
-                
+
                 // 다시 클릭 가능하게 만들기
                 if (nfsStatusDiv) {
                     nfsStatusDiv.style.pointerEvents = 'auto';
@@ -1517,3 +1517,195 @@ function remountNFS() {
             });
     }
 }
+
+// ==========================================
+// 트랜스코딩 설정 관련 함수
+// ==========================================
+
+let transcodingRules = [];
+
+function toggleTranscodingPanel() {
+    const panel = document.getElementById('transcodingPanel');
+    const chevron = document.getElementById('transcodingChevron');
+
+    if (panel.classList.contains('hidden')) {
+        panel.classList.remove('hidden');
+        chevron.style.transform = 'rotate(180deg)';
+        loadTranscodingConfig();
+    } else {
+        panel.classList.add('hidden');
+        chevron.style.transform = 'rotate(0deg)';
+    }
+}
+
+function loadTranscodingConfig() {
+    fetch('/get_transcoding_config')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('transcodingEnabled').checked = data.enabled || false;
+            transcodingRules = data.rules || [];
+            updateTranscodingStatus(data.enabled);
+            renderTranscodingRules();
+        })
+        .catch(error => {
+            console.error('트랜스코딩 설정 로드 오류:', error);
+        });
+}
+
+function updateTranscodingStatus(enabled) {
+    const statusEl = document.getElementById('transcodingStatus');
+    if (statusEl) {
+        if (enabled) {
+            statusEl.textContent = 'ON';
+            statusEl.className = 'text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700';
+        } else {
+            statusEl.textContent = 'OFF';
+            statusEl.className = 'text-xs px-2 py-0.5 rounded-full bg-slate-50 text-slate-600';
+        }
+    }
+}
+
+function renderTranscodingRules() {
+    const container = document.getElementById('transcodingRules');
+    const emptyMsg = document.getElementById('transcodingEmpty');
+
+    if (transcodingRules.length === 0) {
+        container.innerHTML = '';
+        emptyMsg.classList.remove('hidden');
+        return;
+    }
+
+    emptyMsg.classList.add('hidden');
+
+    let html = '';
+    transcodingRules.forEach((rule, index) => {
+        const extensions = (rule.file_extensions || []).join(', ');
+        html += `
+            <div class="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                <div class="flex items-center justify-between mb-2">
+                    <input type="text" value="${escapeHtml(rule.name || '')}" 
+                        onchange="updateRule(${index}, 'name', this.value)"
+                        placeholder="규칙 이름" 
+                        class="text-sm font-medium text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none px-1 py-0.5 w-48">
+                    <button onclick="removeTranscodingRule(${index})" 
+                        class="text-xs px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded border border-red-200 transition-colors">
+                        삭제
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div>
+                        <label class="text-xs text-gray-500 block mb-0.5">폴더 패턴</label>
+                        <input type="text" value="${escapeHtml(rule.folder_pattern || '')}"
+                            onchange="updateRule(${index}, 'folder_pattern', this.value)"
+                            placeholder="예: DScam"
+                            class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded bg-white focus:border-blue-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500 block mb-0.5">파일 확장자 (쉼표 구분)</label>
+                        <input type="text" value="${escapeHtml(extensions)}"
+                            onchange="updateRuleExtensions(${index}, this.value)"
+                            placeholder="예: .mp4, .avi"
+                            class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded bg-white focus:border-blue-500 focus:outline-none">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="text-xs text-gray-500 block mb-0.5">FFmpeg 옵션</label>
+                        <input type="text" value="${escapeHtml(rule.ffmpeg_options || '')}"
+                            onchange="updateRule(${index}, 'ffmpeg_options', this.value)"
+                            placeholder="예: -c:v copy -c:a aac"
+                            class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded bg-white focus:border-blue-500 focus:outline-none font-mono">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="text-xs text-gray-500 block mb-0.5">출력 파일명 패턴 (<code class="text-blue-600">{{filename}}</code> = 원본이름, <code class="text-blue-600">{{ext}}</code> = 확장자)</label>
+                        <input type="text" value="${escapeHtml(rule.output_pattern || '{{filename}}.transcoded.{{ext}}')}"
+                            onchange="updateRule(${index}, 'output_pattern', this.value)"
+                            placeholder="예: {{filename}}.transcoded.{{ext}}"
+                            class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded bg-white focus:border-blue-500 focus:outline-none font-mono">
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <label class="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" ${rule.delete_original !== false ? 'checked' : ''}
+                            onchange="updateRule(${index}, 'delete_original', this.checked)"
+                            class="w-3.5 h-3.5 rounded">
+                        <span class="text-xs text-gray-600">원본 파일 삭제 (변환 파일로 대체)</span>
+                    </label>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function addTranscodingRule() {
+    transcodingRules.push({
+        name: `규칙 ${transcodingRules.length + 1}`,
+        folder_pattern: '',
+        file_extensions: ['.mp4'],
+        ffmpeg_options: '-c:v copy -c:a aac',
+        delete_original: true,
+        output_pattern: '{{filename}}.transcoded.{{ext}}'
+    });
+    renderTranscodingRules();
+    saveTranscodingConfig();
+}
+
+function removeTranscodingRule(index) {
+    if (confirm('이 규칙을 삭제하시겠습니까?')) {
+        transcodingRules.splice(index, 1);
+        renderTranscodingRules();
+        saveTranscodingConfig();
+    }
+}
+
+function updateRule(index, field, value) {
+    transcodingRules[index][field] = value;
+    saveTranscodingConfig();
+}
+
+function updateRuleExtensions(index, value) {
+    transcodingRules[index].file_extensions = value
+        .split(',')
+        .map(ext => ext.trim())
+        .filter(ext => ext.length > 0);
+    saveTranscodingConfig();
+}
+
+function saveTranscodingConfig() {
+    const enabled = document.getElementById('transcodingEnabled').checked;
+    updateTranscodingStatus(enabled);
+
+    fetch('/update_transcoding_config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            enabled: enabled,
+            rules: transcodingRules
+        })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status !== 'success') {
+                console.error('트랜스코딩 설정 저장 실패:', data.message);
+            }
+        })
+        .catch(error => {
+            console.error('트랜스코딩 설정 저장 오류:', error);
+        });
+}
+
+// 페이지 로드 시 트랜스코딩 상태 표시 업데이트
+document.addEventListener('DOMContentLoaded', function () {
+    fetch('/get_transcoding_config')
+        .then(response => response.json())
+        .then(data => {
+            updateTranscodingStatus(data.enabled || false);
+        })
+        .catch(() => { });
+});

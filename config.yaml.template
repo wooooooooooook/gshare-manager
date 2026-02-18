@@ -36,3 +36,15 @@ credentials:
 # 시스템 설정
 timezone: "Asia/Seoul"  # 시간대 
 log_level: "INFO"
+
+# 트랜스코딩 설정
+transcoding:
+  enabled: false  # 트랜스코딩 활성화 여부
+  rules: []
+  # 규칙 예시:
+  # - name: "DScam AAC 변환"
+  #   folder_pattern: "DScam"
+  #   file_extensions: [".mp4"]
+  #   ffmpeg_options: "-c:v copy -c:a aac"
+  #   output_pattern: "{{filename}}.transcoded.{{ext}}"
+  #   delete_original: true

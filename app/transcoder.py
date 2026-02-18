@@ -1,0 +1,222 @@
+import logging
+import os
+import subprocess
+import shlex
+from typing import Optional, Dict, Any, List
+from config import GshareConfig  # type: ignore
+
+
+class Transcoder:
+    """폴더 내 미디어 파일에 대해 ffmpeg 트랜스코딩을 수행하는 클래스"""
+
+    def __init__(self, config: GshareConfig):
+        self.config = config
+        self.enabled = config.TRANSCODING_ENABLED
+        self.rules = config.TRANSCODING_RULES or []
+        self._processing = False  # 중복 실행 방지 플래그
+
+    def reload_config(self, config: GshareConfig):
+        """설정 변경 시 규칙을 다시 로드"""
+        self.config = config
+        self.enabled = config.TRANSCODING_ENABLED
+        self.rules = config.TRANSCODING_RULES or []
+
+    def find_matching_rule(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """파일 경로가 매칭되는 트랜스코딩 규칙을 찾아 반환"""
+        if not self.enabled or not self.rules:
+            return None
+
+        for rule in self.rules:
+            folder_pattern = rule.get('folder_pattern', '')
+            file_extensions = rule.get('file_extensions', [])
+
+            if not folder_pattern:
+                continue
+
+            # 폴더 패턴 매칭 (경로에 패턴 문자열이 포함되어 있는지 확인)
+            if folder_pattern not in file_path:
+                continue
+
+            # 확장자 매칭
+            if file_extensions:
+                _, ext = os.path.splitext(file_path)
+                ext = ext.lower()
+                # 확장자 목록에 '.'이 없는 경우도 처리
+                normalized_extensions = [
+                    e.lower() if e.startswith('.') else f'.{e.lower()}'
+                    for e in file_extensions
+                ]
+                if ext not in normalized_extensions:
+                    continue
+
+            return rule
+
+        return None
+
+    def process_folder(self, folder_path: str) -> int:
+        """폴더 내 매칭되는 파일들을 트랜스코딩. 처리된 파일 수 반환."""
+        if not self.enabled or not self.rules:
+            return 0
+
+        if self._processing:
+            logging.warning("트랜스코딩이 이미 진행 중입니다. 건너뜁니다.")
+            return 0
+
+        self._processing = True
+        processed_count = 0
+
+        try:
+            if not os.path.exists(folder_path):
+                logging.warning(f"트랜스코딩 대상 폴더가 존재하지 않습니다: {folder_path}")
+                return 0
+
+            for root, dirs, files in os.walk(folder_path):
+                for filename in files:
+                    file_path = os.path.join(root, filename)
+                    rule = self.find_matching_rule(file_path)
+
+                    if rule is None:
+                        continue
+
+                    # 임시 파일은 건너뛰기
+                    if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
+                        continue
+
+                    # 이미 트랜스코딩된 파일인지 확인 (출력 패턴으로 생성된 파일 건너뛰기)
+                    output_pattern = rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
+                    if '{{filename}}' in output_pattern:
+                        # 패턴에서 고정 부분 추출하여 매칭 확인
+                        pattern_parts = output_pattern.replace('{{ext}}', '').replace('{{filename}}', '')
+                        if pattern_parts and pattern_parts in filename:
+                            continue
+
+                    success = self.transcode_file(file_path, rule)
+                    if success:
+                        processed_count += 1
+
+        except Exception as e:
+            logging.error(f"폴더 트랜스코딩 중 오류 발생 ({folder_path}): {e}")
+        finally:
+            self._processing = False
+
+        if processed_count > 0:
+            logging.info(f"트랜스코딩 완료: {folder_path} ({processed_count}개 파일 처리)")
+
+        return processed_count
+
+    def _apply_output_pattern(self, file_name: str, file_ext: str, pattern: str) -> str:
+        """출력 파일명 패턴을 적용하여 최종 파일명을 생성
+        
+        지원 변수:
+            {{filename}} - 원본 파일명 (확장자 제외)
+            {{ext}} - 원본 확장자 (점 제외)
+        """
+        ext_no_dot = file_ext.lstrip('.')
+        result = pattern.replace('{{filename}}', file_name)
+        result = result.replace('{{ext}}', ext_no_dot)
+        return result
+
+    def transcode_file(self, file_path: str, rule: Dict[str, Any]) -> bool:
+        """개별 파일에 대해 ffmpeg 트랜스코딩 수행"""
+        rule_name = rule.get('name', '알 수 없는 규칙')
+        ffmpeg_options = rule.get('ffmpeg_options', '')
+        delete_original = rule.get('delete_original', True)
+        output_pattern = rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
+
+        if not ffmpeg_options:
+            logging.warning(f"ffmpeg 옵션이 비어있습니다. 규칙: {rule_name}")
+            return False
+
+        # 임시 출력 파일 경로 생성
+        file_dir = os.path.dirname(file_path)
+        file_name, file_ext = os.path.splitext(os.path.basename(file_path))
+        tmp_path = os.path.join(file_dir, f"{file_name}.transcoding_tmp{file_ext}")
+
+        try:
+            logging.info(f"트랜스코딩 시작: {file_path} (규칙: {rule_name})")
+
+            # ffmpeg 명령어 구성
+            cmd = ['ffmpeg', '-y', '-i', file_path]
+            # ffmpeg 옵션을 안전하게 분리
+            cmd.extend(shlex.split(ffmpeg_options))
+            cmd.append(tmp_path)
+
+            logging.debug(f"ffmpeg 명령어: {' '.join(cmd)}")
+
+            # ffmpeg 실행
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=3600  # 1시간 타임아웃
+            )
+
+            if result.returncode != 0:
+                logging.error(f"트랜스코딩 실패: {file_path}")
+                logging.error(f"ffmpeg stderr: {result.stderr[-500:]}")
+                # 임시 파일 정리
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                return False
+
+            # 임시 파일이 제대로 생성되었는지 확인
+            if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+                logging.error(f"트랜스코딩 출력 파일이 비어있거나 존재하지 않습니다: {tmp_path}")
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                return False
+
+            # 원본 파일 권한/소유자 정보 보존 시도
+            try:
+                stat_info = os.stat(file_path)
+            except OSError:
+                stat_info = None
+
+            # 출력 파일명 결정
+            output_filename = self._apply_output_pattern(file_name, file_ext, output_pattern)
+            output_path = os.path.join(file_dir, output_filename)
+
+            if delete_original:
+                # 원본 파일을 변환 파일로 대체
+                os.replace(tmp_path, output_path)
+                # 출력 파일명이 원본과 다르면 원본 삭제
+                if output_path != file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+                logging.info(f"트랜스코딩 완료 (원본 대체): {output_path}")
+            else:
+                # 원본 유지, 변환 파일은 패턴에 따라 저장
+                os.replace(tmp_path, output_path)
+                logging.info(f"트랜스코딩 완료 (별도 저장): {output_path}")
+
+            # 권한 복원 시도
+            if stat_info:
+                try:
+                    target = file_path if delete_original else output_path
+                    os.chmod(target, stat_info.st_mode)
+                    os.chown(target, stat_info.st_uid, stat_info.st_gid)
+                except OSError as e:
+                    logging.debug(f"파일 권한/소유자 복원 실패 (무시): {e}")
+
+            return True
+
+        except subprocess.TimeoutExpired:
+            logging.error(f"트랜스코딩 타임아웃 (1시간 초과): {file_path}")
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            return False
+        except Exception as e:
+            logging.error(f"트랜스코딩 오류: {file_path} - {e}")
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            return False
+
+    def get_rules_summary(self) -> List[Dict[str, Any]]:
+        """현재 트랜스코딩 규칙 요약 반환"""
+        return [{
+            'name': rule.get('name', ''),
+            'folder_pattern': rule.get('folder_pattern', ''),
+            'file_extensions': rule.get('file_extensions', []),
+            'ffmpeg_options': rule.get('ffmpeg_options', ''),
+            'delete_original': rule.get('delete_original', True),
+            'output_pattern': rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
+        } for rule in self.rules]

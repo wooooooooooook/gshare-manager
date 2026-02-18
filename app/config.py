@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import os
 import yaml
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 @dataclass
 class GshareConfig:
@@ -75,6 +75,16 @@ class GshareConfig:
     MQTT_TOPIC_PREFIX: str = 'gshare'
     ## Home Assistant Discovery 접두사
     HA_DISCOVERY_PREFIX: str = 'homeassistant'
+
+    # 트랜스코딩 설정
+    ## 트랜스코딩 활성화 여부
+    TRANSCODING_ENABLED: bool = False
+    ## 트랜스코딩 규칙 목록
+    TRANSCODING_RULES: List[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        if self.TRANSCODING_RULES is None:
+            self.TRANSCODING_RULES = []
 
     @classmethod
     def load_config(cls) -> 'GshareConfig':
@@ -160,7 +170,9 @@ class GshareConfig:
             'MQTT_USERNAME': yaml_config['credentials'].get('mqtt_username', ''),
             'MQTT_PASSWORD': yaml_config['credentials'].get('mqtt_password', ''),
             'MQTT_TOPIC_PREFIX': yaml_config['mqtt'].get('topic_prefix', 'gshare'),
-            'HA_DISCOVERY_PREFIX': yaml_config['mqtt'].get('ha_discovery_prefix', 'homeassistant')
+            'HA_DISCOVERY_PREFIX': yaml_config['mqtt'].get('ha_discovery_prefix', 'homeassistant'),
+            'TRANSCODING_ENABLED': yaml_config.get('transcoding', {}).get('enabled', False),
+            'TRANSCODING_RULES': yaml_config.get('transcoding', {}).get('rules', [])
         }
 
         # NFS 설정 추가
@@ -283,6 +295,14 @@ class GshareConfig:
         if 'NFS_PATH' in config_dict:
             yaml_config['nfs']['path'] = config_dict['NFS_PATH']
 
+        # 트랜스코딩 설정 저장
+        if 'transcoding' not in yaml_config or yaml_config['transcoding'] is None:
+            yaml_config['transcoding'] = {'enabled': False, 'rules': []}
+        if 'TRANSCODING_ENABLED' in config_dict:
+            yaml_config['transcoding']['enabled'] = config_dict['TRANSCODING_ENABLED']
+        if 'TRANSCODING_RULES' in config_dict:
+            yaml_config['transcoding']['rules'] = config_dict['TRANSCODING_RULES']
+
         # 설정 저장
         os.makedirs(os.path.dirname(yaml_path), exist_ok=True)
         with open(yaml_path, 'w', encoding='utf-8') as f:
@@ -328,10 +348,11 @@ class GshareConfig:
             'nfs': {'path': ''},
             'mqtt': {'broker': '', 'port': 1883, 'topic_prefix': 'gshare', 'ha_discovery_prefix': 'homeassistant'},
             'credentials': {'proxmox_host': '', 'token_id': '', 'secret': '', 'shutdown_webhook_url': '', 'smb_username': '', 'smb_password': '', 'mqtt_username': '', 'mqtt_password': ''},
-            'timezone': 'Asia/Seoul'
+            'timezone': 'Asia/Seoul',
+            'transcoding': {'enabled': False, 'rules': []}
         }
 
-    def __post_init__(self):
+    def __post_init_validation__(self):
         # 초기화 시 설정 유효성 검사
         if not all([
             self.PROXMOX_HOST,

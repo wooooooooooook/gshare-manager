@@ -164,6 +164,10 @@ class GshareWebServer:
                               self.restart_app, methods=['POST'])
         self.app.add_url_rule('/check_restart_status',
                               'check_restart_status', self.check_restart_status)
+        self.app.add_url_rule('/get_transcoding_config',
+                              'get_transcoding_config', self.get_transcoding_config)
+        self.app.add_url_rule('/update_transcoding_config',
+                              'update_transcoding_config', self.update_transcoding_config, methods=['POST'])
 
         # SocketIO 이벤트 핸들러 등록
         self._register_socket_events()
@@ -759,6 +763,51 @@ class GshareWebServer:
                 "message": "설정이 업데이트되었습니다. 변경사항을 적용하려면 서비스를 재시작하세요."
             })
         except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+    def get_transcoding_config(self):
+        """트랜스코딩 설정 정보 제공"""
+        try:
+            yaml_path = '/config/config.yaml'
+            if os.path.exists(yaml_path):
+                with open(yaml_path, 'r', encoding='utf-8') as f:
+                    yaml_config = yaml.safe_load(f)
+                transcoding = yaml_config.get('transcoding', {})
+            else:
+                transcoding = {}
+
+            return jsonify({
+                'enabled': transcoding.get('enabled', False),
+                'rules': transcoding.get('rules', [])
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    def update_transcoding_config(self):
+        """트랜스코딩 설정 업데이트"""
+        try:
+            data = request.json
+            if data is None:
+                return jsonify({"status": "error", "message": "요청 데이터가 없습니다."}), 400
+
+            config_dict = {
+                'TRANSCODING_ENABLED': data.get('enabled', False),
+                'TRANSCODING_RULES': data.get('rules', [])
+            }
+            GshareConfig.update_yaml_config(config_dict)
+
+            # 실행 중인 transcoder에 설정 반영
+            if self.manager and hasattr(self.manager, 'transcoder'):
+                self.manager.transcoder.enabled = config_dict['TRANSCODING_ENABLED']
+                self.manager.transcoder.rules = config_dict['TRANSCODING_RULES']
+                logging.info(f"트랜스코딩 설정 업데이트됨 (활성화: {config_dict['TRANSCODING_ENABLED']}, 규칙 {len(config_dict['TRANSCODING_RULES'])}개)")
+
+            return jsonify({
+                "status": "success",
+                "message": "트랜스코딩 설정이 업데이트되었습니다."
+            })
+        except Exception as e:
+            logging.error(f"트랜스코딩 설정 업데이트 실패: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
 
     def test_proxmox_api(self):

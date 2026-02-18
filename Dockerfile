@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     net-tools \
     gawk \
     samba \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # 필요한 Python 패키지 설치
