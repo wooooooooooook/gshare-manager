@@ -858,7 +858,9 @@ class GshareWebServer:
 
             def run_scan():
                 try:
-                    self.manager.transcoder.scan_all_folders(mount_path, progress_callback)
+                    # GShareManager가 이미 감시 중인 서브폴더 목록을 전달
+                    subfolders = list(self.manager.folder_monitor.previous_mtimes.keys()) if self.manager.folder_monitor else None
+                    self.manager.transcoder.scan_all_folders(mount_path, progress_callback, subfolders=subfolders)
                 except Exception as e:
                     import traceback
                     logging.error(f"스캔 스레드 오류: {e}\n{traceback.format_exc()}")

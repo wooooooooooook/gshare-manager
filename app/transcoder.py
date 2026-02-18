@@ -275,8 +275,13 @@ class Transcoder:
             'output_pattern': rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
         } for rule in self.rules]
 
-    def collect_matching_files(self, folder_path: str) -> List[Dict[str, Any]]:
-        """폴더에서 규칙에 매칭되는 파일 목록을 수집 (enabled 무관, 수동 스캔용)"""
+    def collect_matching_files(self, folder_path: str, subfolders: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """폴더에서 규칙에 매칭되는 파일 목록을 수집 (enabled 무관, 수동 스캔용)
+        
+        Args:
+            folder_path: 베이스 마운트 경로 (/mnt/gshare)
+            subfolders: 이미 파악된 서브폴더 목록 (선택 사항)
+        """
         matched_files = []
         if not self.rules:
             logging.warning("트랜스코딩 규칙이 없습니다. 설정에서 규칙을 추가하세요.")
@@ -285,52 +290,69 @@ class Transcoder:
             logging.warning(f"스캔 대상 경로가 존재하지 않습니다: {folder_path}")
             return matched_files
 
-        logging.info(f"파일 수집 시작: {folder_path}")
-        for root, dirs, files in os.walk(folder_path):
-            logging.debug(f"디렉토리 진입: {root} (파일 수: {len(files)})")
-            done_set = self._load_done_list(root)
-            
-            for filename in files:
-                file_path = os.path.join(root, filename)
-                rule = self._find_rule_for_scan(file_path)
+        logging.info(f"파일 수집 시작: {folder_path} (서브폴더 지정: {len(subfolders) if subfolders else '전체 스캔'})")
+        
+        # 스캔할 루트 목록 결정
+        scan_roots = []
+        if subfolders:
+            for sub in subfolders:
+                full_path = os.path.join(folder_path, sub)
+                if os.path.exists(full_path):
+                    scan_roots.append(full_path)
+        else:
+            scan_roots = [folder_path]
 
-                if rule is None:
-                    # 너무 많은 로그 방지를 위해 가끔 로깅하거나 상세 디버그시에만 로깅
-                    # logging.debug(f"규칙 매칭 실패: {filename}")
-                    continue
+        for scan_root in scan_roots:
+            # 지정된 서브폴더만 보거나 (subfolders 있는 경우), 전체를 뒤짐 (없는 경우)
+            # 단, subfolders가 있어도 그 내부의 하위 폴더까지는 os.walk로 뒤져야 함
+            for root, dirs, files in os.walk(scan_root, followlinks=True):
+                # 숨김 폴더 제외
+                dirs[:] = [d for d in dirs if not d.startswith('@') and not d.startswith('.')]
+                
+                if files:
+                    logging.info(f"디렉토리 진입: {root} (검색 대상 파일 수: {len(files)})")
+                
+                done_set = self._load_done_list(root)
+                
+                for filename in files:
+                    file_path = os.path.join(root, filename)
+                    rule = self._find_rule_for_scan(file_path)
 
-                if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
-                    logging.debug(f"임시 파일 건너뜀: {filename}")
-                    continue
-                if filename == self.DONE_FILENAME:
-                    continue
-
-                # .transcoding_done 파일로 이미 처리 여부 확인
-                if filename in done_set:
-                    logging.debug(f"이미 처리됨 (건너뜀): {file_path}")
-                    continue
-
-                # 출력 패턴 기반 건너뛰기 (보조)
-                output_pattern = rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
-                if '{{filename}}' in output_pattern:
-                    pattern_parts = output_pattern.replace('{{ext}}', '').replace('{{filename}}', '')
-                    if pattern_parts and pattern_parts in filename:
-                        logging.debug(f"출력 파일 패턴 감지 (건너뜀): {filename}")
+                    if rule is None:
                         continue
 
-                logging.info(f"대상 파일 발견: {filename} (규칙: {rule.get('name')})")
-                matched_files.append({
-                    'file_path': file_path,
-                    'filename': filename,
-                    'folder': root,
-                    'rule': rule,
-                    'rule_name': rule.get('name', '')
-                })
+                    if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
+                        logging.debug(f"임시 파일 건너뜀: {filename}")
+                        continue
+                    if filename == self.DONE_FILENAME:
+                        continue
+
+                    # .transcoding_done 파일로 이미 처리 여부 확인
+                    if filename in done_set:
+                        logging.debug(f"이미 처리됨 (건너뜀): {file_path}")
+                        continue
+
+                    # 출력 패턴 기반 건너뛰기 (보조)
+                    output_pattern = rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
+                    if '{{filename}}' in output_pattern:
+                        pattern_parts = output_pattern.replace('{{ext}}', '').replace('{{filename}}', '')
+                        if pattern_parts and pattern_parts in filename:
+                            logging.debug(f"출력 파일 패턴 감지 (건너뜀): {filename}")
+                            continue
+
+                    logging.info(f"대상 파일 발견: {filename} (규칙: {rule.get('name')})")
+                    matched_files.append({
+                        'file_path': file_path,
+                        'filename': filename,
+                        'folder': root,
+                        'rule': rule,
+                        'rule_name': rule.get('name', '')
+                    })
 
         logging.info(f"파일 수집 완료: {len(matched_files)}개 발견")
         return matched_files
 
-    def scan_all_folders(self, mount_path: str, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
+    def scan_all_folders(self, mount_path: str, progress_callback: Optional[Callable] = None, subfolders: Optional[List[str]] = None) -> Dict[str, Any]:
         """전체 마운트 경로를 스캔하여 매칭되는 파일들을 트랜스코딩.
         
         progress_callback: callable(status_dict) - 진행 상황 콜백
@@ -388,7 +410,7 @@ class Transcoder:
                 'message': '폴더 스캔 중...'
             })
 
-            all_matched = self.collect_matching_files(mount_path)
+            all_matched = self.collect_matching_files(mount_path, subfolders=subfolders)
             total = len(all_matched)
 
             if total == 0:
