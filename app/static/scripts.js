@@ -1249,8 +1249,6 @@ function updateFolderContainer(containerId, folderData, action) {
                     readableTime.innerText = getCachedTimeAgo(info.mtime);
                     existingItem.dataset.mtime = info.mtime;
                 }
-
-                // 위치 이동 없이 그대로 유지
             } else {
                 // 새 항목 생성
                 const newItem = document.createElement('div');
@@ -1317,65 +1315,58 @@ function updateFolderContainer(containerId, folderData, action) {
             // 이벤트 추가 표시
             el.closest('.folder-item').dataset.eventAttached = 'true';
         });
-    }
 
-    // 다음 청크로 이동
-    currentChunk++;
+        // 다음 청크로 이동
+        currentChunk++;
 
-    // 아직 처리할 청크가 남아있으면 다음 프레임에 스케줄링
-    if (currentChunk * CHUNK_SIZE < folders.length) {
-        // requestIdleCallback을 지원하면 사용, 아니면 requestAnimationFrame으로 폴백
-        if (window.requestIdleCallback) {
-            window.requestIdleCallback(processChunk, { timeout: 100 });
-        } else {
-            window.requestAnimationFrame(processChunk);
-        }
-    } else {
-        // 모든 청크 처리 완료 후 제거할 항목 처리
-        // 현재 데이터에 없는 기존 항목 제거
-        for (const [folder, element] of existingFolderMap.entries()) {
-            if (!processedFolders.has(folder)) {
-                removeList.push(element);
+        // 아직 처리할 청크가 남아있으면 다음 프레임에 스케줄링
+        if (currentChunk * CHUNK_SIZE < folders.length) {
+            // requestIdleCallback을 지원하면 사용, 아니면 requestAnimationFrame으로 폴백
+            if (window.requestIdleCallback) {
+                window.requestIdleCallback(processChunk, { timeout: 100 });
+            } else {
+                window.requestAnimationFrame(processChunk);
             }
-        }
+        } else {
+            // 모든 청크 처리 완료 후 제거할 항목 처리
+            // 현재 데이터에 없는 기존 항목 제거
+            for (const [folder, element] of existingFolderMap.entries()) {
+                if (!processedFolders.has(folder)) {
+                    removeList.push(element);
+                }
+            }
 
-        // 제거할 항목이 있으면 일괄 처리
-        if (removeList.length > 0) {
-            // 실제 DOM에서 제거
-            removeList.forEach(el => el.remove());
-        }
+            // 제거할 항목이 있으면 일괄 처리
+            if (removeList.length > 0) {
+                // 실제 DOM에서 제거
+                removeList.forEach(el => el.remove());
+            }
 
-        // 모든 처리가 완료되면 Observer에 새 요소 등록
-        if (typeof updateObserversAfterProcessing === 'function') {
+            // 모든 처리가 완료되면 Observer 에 새 요소 등록
             updateObserversAfterProcessing();
         }
     }
+
+    // 폴더 목록이 변경되면 Observer 업데이트
+    function updateObserversAfterProcessing() {
+        if (!folderTimeObserver) return;
+        setTimeout(() => {
+            // 새로 추가된 toggle-text 요소들 찾기
+            const newToggleElements = container.querySelectorAll('.folder-item:not([data-observer-attached]) .toggle-text');
+
+            // 각 요소를 Observer에 등록
+            newToggleElements.forEach(el => {
+                folderTimeObserver.observe(el);
+                // 추적 중인 요소로 표시
+                el.closest('.folder-item').dataset.observerAttached = 'true';
+            });
+        }, 0);
+    }
+
+    // 첫 번째 청크 처리 시작
+    processChunk();
 }
 
-// 첫 번째 청크 처리 시작
-processChunk();
-
-// 폴더 목록이 변경되면 Observer 업데이트
-function updateObserversAfterProcessing() {
-    if (!folderTimeObserver) return;
-    // 모든 폴더가 처리된 후 Observer 업데이트
-    setTimeout(() => {
-        // 새로 추가된 toggle-text 요소들 찾기
-        const folderContainer = document.getElementById('folderContainer');
-        if (!folderContainer) return;
-        const newToggleElements = folderContainer.querySelectorAll('.folder-item:not([data-observer-attached]) .toggle-text');
-
-        // 각 요소를 Observer에 등록
-        newToggleElements.forEach(el => {
-            folderTimeObserver.observe(el);
-            // 추적 중인 요소로 표시
-            el.closest('.folder-item').dataset.observerAttached = 'true';
-        });
-    }, 0);
-}
-
-// Observer 업데이트 예약
-updateObserversAfterProcessing();
 
 // SMB 서비스 토글 함수 추가
 function toggleSMB() {
