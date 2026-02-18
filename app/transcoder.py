@@ -372,13 +372,7 @@ class Transcoder:
                         logging.debug(f"이미 처리됨 (건너뜀): {file_path}")
                         continue
 
-                    # 출력 패턴 기반 건너뛰기 (보조)
-                    output_pattern = rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
-                    if '{{filename}}' in output_pattern:
-                        pattern_parts = output_pattern.replace('{{ext}}', '').replace('{{filename}}', '')
-                        if pattern_parts and pattern_parts in filename:
-                            logging.debug(f"출력 파일 패턴 감지 (건너뜀): {filename}")
-                            continue
+
 
                     logging.info(f"대상 파일 발견: {filename} (규칙: {rule.get('name')})")
                     matched_files.append({
