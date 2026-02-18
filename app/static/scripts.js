@@ -1361,7 +1361,9 @@ function updateObserversAfterProcessing() {
     // 모든 폴더가 처리된 후 Observer 업데이트
     setTimeout(() => {
         // 새로 추가된 toggle-text 요소들 찾기
-        const newToggleElements = container.querySelectorAll('.folder-item:not([data-observer-attached]) .toggle-text');
+        const folderContainer = document.getElementById('folderContainer');
+        if (!folderContainer) return;
+        const newToggleElements = folderContainer.querySelectorAll('.folder-item:not([data-observer-attached]) .toggle-text');
 
         // 각 요소를 Observer에 등록
         newToggleElements.forEach(el => {
