@@ -168,6 +168,10 @@ class GshareWebServer:
                               'get_transcoding_config', self.get_transcoding_config)
         self.app.add_url_rule('/update_transcoding_config',
                               'update_transcoding_config', self.update_transcoding_config, methods=['POST'])
+        self.app.add_url_rule('/scan_transcoding',
+                              'scan_transcoding', self.scan_transcoding, methods=['POST'])
+        self.app.add_url_rule('/cancel_transcoding_scan',
+                              'cancel_transcoding_scan', self.cancel_transcoding_scan, methods=['POST'])
 
         # SocketIO 이벤트 핸들러 등록
         self._register_socket_events()
@@ -808,6 +812,51 @@ class GshareWebServer:
             })
         except Exception as e:
             logging.error(f"트랜스코딩 설정 업데이트 실패: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+    def scan_transcoding(self):
+        """트랜스코딩 수동 스캔 시작"""
+        try:
+            if self.manager is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
+
+            if not hasattr(self.manager, 'transcoder'):
+                return jsonify({"status": "error", "message": "트랜스코더가 초기화되지 않았습니다."}), 500
+
+            if self.manager.transcoder._processing:
+                return jsonify({"status": "error", "message": "트랜스코딩이 이미 진행 중입니다."}), 409
+
+            mount_path = self.manager.config.MOUNT_PATH
+
+            def progress_callback(status):
+                """SocketIO로 진행 상황 전송"""
+                try:
+                    self.socketio.emit('transcoding_progress', status)
+                except Exception as e:
+                    logging.error(f"트랜스코딩 진행 상황 전송 오류: {e}")
+
+            def run_scan():
+                self.manager.transcoder.scan_all_folders(mount_path, progress_callback)
+
+            scan_thread = threading.Thread(target=run_scan, daemon=True)
+            scan_thread.start()
+
+            return jsonify({
+                "status": "success",
+                "message": "트랜스코딩 스캔이 시작되었습니다."
+            })
+        except Exception as e:
+            logging.error(f"트랜스코딩 스캔 시작 실패: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+    def cancel_transcoding_scan(self):
+        """트랜스코딩 스캔 취소"""
+        try:
+            if self.manager and hasattr(self.manager, 'transcoder'):
+                self.manager.transcoder.cancel_scan()
+                return jsonify({"status": "success", "message": "스캔 취소 요청됨"})
+            return jsonify({"status": "error", "message": "트랜스코더가 없습니다."}), 404
+        except Exception as e:
             return jsonify({"status": "error", "message": str(e)}), 500
 
     def test_proxmox_api(self):

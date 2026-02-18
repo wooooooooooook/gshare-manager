@@ -194,6 +194,11 @@ function initSocketIO() {
     socket.on('log_update', function (logContent) {
         updateLogContent(logContent);
     });
+
+    // 트랜스코딩 진행 상황 이벤트
+    socket.on('transcoding_progress', function (data) {
+        handleTranscodingProgress(data);
+    });
 }
 
 // 상태 UI 업데이트 함수
@@ -1709,3 +1714,103 @@ document.addEventListener('DOMContentLoaded', function () {
         })
         .catch(() => { });
 });
+
+// 트랜스코딩 스캔 시작
+function startTranscodingScan() {
+    if (!confirm('기존 폴더를 스캔하여 트랜스코딩을 시작하시겠습니까?')) return;
+
+    const scanBtn = document.getElementById('scanTranscodingBtn');
+    const cancelBtn = document.getElementById('cancelScanBtn');
+    const progressDiv = document.getElementById('transcodingProgress');
+
+    scanBtn.disabled = true;
+    scanBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    cancelBtn.classList.remove('hidden');
+    progressDiv.classList.remove('hidden');
+
+    // 진행상황 초기화
+    updateProgressUI({ phase: 'scanning', total_files: 0, current_index: 0, current_file: '', completed: 0, failed: 0, message: '폴더 스캔 중...' });
+
+    fetch('/scan_transcoding', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status !== 'success') {
+                alert('오류: ' + data.message);
+                resetScanUI();
+            }
+        })
+        .catch(error => {
+            console.error('스캔 시작 오류:', error);
+            alert('스캔 시작 중 오류가 발생했습니다.');
+            resetScanUI();
+        });
+}
+
+function cancelTranscodingScan() {
+    fetch('/cancel_transcoding_scan', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            console.log('스캔 취소:', data.message);
+        })
+        .catch(error => {
+            console.error('스캔 취소 오류:', error);
+        });
+}
+
+function handleTranscodingProgress(data) {
+    updateProgressUI(data);
+
+    if (data.phase === 'done' || data.phase === 'error') {
+        resetScanUI();
+    }
+}
+
+function updateProgressUI(data) {
+    const msgEl = document.getElementById('transcodingProgressMsg');
+    const percentEl = document.getElementById('transcodingProgressPercent');
+    const barEl = document.getElementById('transcodingProgressBar');
+    const fileEl = document.getElementById('transcodingProgressFile');
+    const completedEl = document.getElementById('transcodingCompleted');
+    const failedEl = document.getElementById('transcodingFailed');
+    const currentEl = document.getElementById('transcodingCurrent');
+    const totalEl = document.getElementById('transcodingTotal');
+
+    msgEl.textContent = data.message || '';
+    fileEl.textContent = data.current_file || '';
+    completedEl.textContent = data.completed || 0;
+    failedEl.textContent = data.failed || 0;
+    currentEl.textContent = data.current_index || 0;
+    totalEl.textContent = data.total_files || 0;
+
+    const total = data.total_files || 0;
+    const current = data.current_index || 0;
+    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+
+    percentEl.textContent = percent + '%';
+    barEl.style.width = percent + '%';
+
+    // 상태에 따른 바 색상
+    if (data.phase === 'done') {
+        barEl.className = 'h-full rounded-full bg-emerald-500 transition-all duration-300';
+        barEl.style.width = '100%';
+        percentEl.textContent = '완료';
+    } else if (data.phase === 'error') {
+        barEl.className = 'h-full rounded-full bg-red-500 transition-all duration-300';
+        percentEl.textContent = '오류';
+    } else if (data.phase === 'scanning') {
+        barEl.className = 'h-full rounded-full bg-yellow-400 transition-all duration-300 animate-pulse';
+        barEl.style.width = '100%';
+        percentEl.textContent = '스캔 중';
+    } else {
+        barEl.className = 'h-full rounded-full bg-blue-500 transition-all duration-300';
+    }
+}
+
+function resetScanUI() {
+    const scanBtn = document.getElementById('scanTranscodingBtn');
+    const cancelBtn = document.getElementById('cancelScanBtn');
+
+    scanBtn.disabled = false;
+    scanBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+    cancelBtn.classList.add('hidden');
+}

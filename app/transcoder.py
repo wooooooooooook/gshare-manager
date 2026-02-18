@@ -2,7 +2,7 @@ import logging
 import os
 import subprocess
 import shlex
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 from config import GshareConfig  # type: ignore
 
 
@@ -14,6 +14,7 @@ class Transcoder:
         self.enabled = config.TRANSCODING_ENABLED
         self.rules = config.TRANSCODING_RULES or []
         self._processing = False  # 중복 실행 방지 플래그
+        self._scan_cancel = False  # 스캔 취소 플래그
 
     def reload_config(self, config: GshareConfig):
         """설정 변경 시 규칙을 다시 로드"""
@@ -220,3 +221,169 @@ class Transcoder:
             'delete_original': rule.get('delete_original', True),
             'output_pattern': rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
         } for rule in self.rules]
+
+    def collect_matching_files(self, folder_path: str) -> List[Dict[str, Any]]:
+        """폴더에서 규칙에 매칭되는 파일 목록을 수집 (스캔 전 미리보기용)"""
+        matched_files = []
+        if not os.path.exists(folder_path):
+            return matched_files
+
+        for root, dirs, files in os.walk(folder_path):
+            for filename in files:
+                file_path = os.path.join(root, filename)
+                rule = self.find_matching_rule(file_path)
+
+                if rule is None:
+                    continue
+
+                if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
+                    continue
+
+                # 이미 트랜스코딩된 파일 건너뛰기
+                output_pattern = rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
+                if '{{filename}}' in output_pattern:
+                    pattern_parts = output_pattern.replace('{{ext}}', '').replace('{{filename}}', '')
+                    if pattern_parts and pattern_parts in filename:
+                        continue
+
+                matched_files.append({
+                    'file_path': file_path,
+                    'filename': filename,
+                    'rule': rule,
+                    'rule_name': rule.get('name', '')
+                })
+
+        return matched_files
+
+    def scan_all_folders(self, mount_path: str, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
+        """전체 마운트 경로를 스캔하여 매칭되는 파일들을 트랜스코딩.
+        
+        progress_callback: callable(status_dict) - 진행 상황 콜백
+            status_dict 형식:
+            {
+                'phase': 'scanning' | 'transcoding' | 'done' | 'error',
+                'total_files': int,
+                'current_index': int,  # 1-based
+                'current_file': str,
+                'completed': int,
+                'failed': int,
+                'message': str
+            }
+        """
+        if self._processing:
+            if progress_callback:
+                progress_callback({
+                    'phase': 'error',
+                    'message': '트랜스코딩이 이미 진행 중입니다.'
+                })
+            return {'completed': 0, 'failed': 0, 'total': 0}
+
+        self._processing = True
+        self._scan_cancel = False
+        completed = 0
+        failed = 0
+
+        try:
+            # 1단계: 파일 수집
+            if progress_callback:
+                progress_callback({
+                    'phase': 'scanning',
+                    'total_files': 0,
+                    'current_index': 0,
+                    'current_file': '',
+                    'completed': 0,
+                    'failed': 0,
+                    'message': '폴더 스캔 중...'
+                })
+
+            all_matched = self.collect_matching_files(mount_path)
+            total = len(all_matched)
+
+            if total == 0:
+                if progress_callback:
+                    progress_callback({
+                        'phase': 'done',
+                        'total_files': 0,
+                        'current_index': 0,
+                        'current_file': '',
+                        'completed': 0,
+                        'failed': 0,
+                        'message': '트랜스코딩할 파일이 없습니다.'
+                    })
+                return {'completed': 0, 'failed': 0, 'total': 0}
+
+            logging.info(f"수동 스캔: {total}개 파일 발견")
+
+            # 2단계: 순차 트랜스코딩
+            for idx, item in enumerate(all_matched):
+                if self._scan_cancel:
+                    logging.info("스캔 취소됨")
+                    if progress_callback:
+                        progress_callback({
+                            'phase': 'done',
+                            'total_files': total,
+                            'current_index': idx,
+                            'current_file': '',
+                            'completed': completed,
+                            'failed': failed,
+                            'message': f'스캔 취소됨 (완료: {completed}, 실패: {failed})'
+                        })
+                    break
+
+                file_path = item['file_path']
+                filename = item['filename']
+                rule = item['rule']
+
+                if progress_callback:
+                    progress_callback({
+                        'phase': 'transcoding',
+                        'total_files': total,
+                        'current_index': idx + 1,
+                        'current_file': filename,
+                        'completed': completed,
+                        'failed': failed,
+                        'message': f'트랜스코딩 중: {filename}'
+                    })
+
+                success = self.transcode_file(file_path, rule)
+                if success:
+                    completed += 1
+                else:
+                    failed += 1
+
+            # 완료
+            if not self._scan_cancel:
+                msg = f'스캔 완료! 완료: {completed}, 실패: {failed}, 전체: {total}'
+                logging.info(msg)
+                if progress_callback:
+                    progress_callback({
+                        'phase': 'done',
+                        'total_files': total,
+                        'current_index': total,
+                        'current_file': '',
+                        'completed': completed,
+                        'failed': failed,
+                        'message': msg
+                    })
+
+        except Exception as e:
+            logging.error(f"수동 스캔 중 오류: {e}")
+            if progress_callback:
+                progress_callback({
+                    'phase': 'error',
+                    'total_files': 0,
+                    'current_index': 0,
+                    'current_file': '',
+                    'completed': completed,
+                    'failed': failed,
+                    'message': f'오류 발생: {str(e)}'
+                })
+        finally:
+            self._processing = False
+            self._scan_cancel = False
+
+        return {'completed': completed, 'failed': failed, 'total': len(all_matched)}
+
+    def cancel_scan(self):
+        """진행 중인 스캔 취소"""
+        self._scan_cancel = True

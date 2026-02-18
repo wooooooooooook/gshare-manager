@@ -354,6 +354,48 @@
 				<div id="transcodingEmpty" class="text-center py-4 text-sm text-gray-400">
 					규칙이 없습니다. "규칙 추가" 버튼을 눌러 추가하세요.
 				</div>
+
+				<!-- 스캔 버튼 영역 -->
+				<div class="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+					<button id="scanTranscodingBtn" onclick="startTranscodingScan()"
+						class="text-xs px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded border border-emerald-200 transition-colors duration-200 flex items-center gap-1">
+						<svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+							stroke-width="1.5" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round"
+								d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+						</svg>
+						기존 폴더 스캔
+					</button>
+					<button id="cancelScanBtn" onclick="cancelTranscodingScan()"
+						class="hidden text-xs px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded border border-red-200 transition-colors duration-200">
+						스캔 취소
+					</button>
+				</div>
+
+				<!-- 진행 상황 표시 -->
+				<div id="transcodingProgress" class="hidden mt-3">
+					<div class="bg-white rounded-lg p-3 border border-gray-200">
+						<div class="flex items-center justify-between mb-1.5">
+							<span id="transcodingProgressMsg" class="text-xs text-gray-600">대기 중...</span>
+							<span id="transcodingProgressPercent" class="text-xs font-medium text-blue-700">0%</span>
+						</div>
+						<div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+							<div id="transcodingProgressBar"
+								class="h-full rounded-full bg-blue-500 transition-all duration-300" style="width: 0%">
+							</div>
+						</div>
+						<div class="flex items-center justify-between mt-1.5">
+							<span id="transcodingProgressFile"
+								class="text-xs text-gray-400 truncate max-w-[60%]"></span>
+							<div class="flex items-center gap-2 text-xs">
+								<span class="text-emerald-600">✓ <span id="transcodingCompleted">0</span></span>
+								<span class="text-red-500">✗ <span id="transcodingFailed">0</span></span>
+								<span class="text-gray-400"><span id="transcodingCurrent">0</span>/<span
+										id="transcodingTotal">0</span></span>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 
