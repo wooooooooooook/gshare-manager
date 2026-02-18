@@ -191,6 +191,9 @@ class Transcoder:
 
             # ffmpeg 명령어 구성
             cmd = ['ffmpeg', '-y', '-i', file_path]
+            # 메타데이터 보존 (-map_metadata 0) - 사용자가 명시하지 않은 경우 기본 추가
+            if '-map_metadata' not in ffmpeg_options:
+                cmd.extend(['-map_metadata', '0'])
             # ffmpeg 옵션을 안전하게 분리
             cmd.extend(shlex.split(ffmpeg_options))
             cmd.append(tmp_path)
@@ -248,6 +251,8 @@ class Transcoder:
                     target = file_path if delete_original else output_path
                     os.chmod(target, stat_info.st_mode)
                     os.chown(target, stat_info.st_uid, stat_info.st_gid)
+                    # 파일 접근/수정 시간 복원
+                    os.utime(target, (stat_info.st_atime, stat_info.st_mtime))
                 except OSError as e:
                     logging.debug(f"파일 권한/소유자 복원 실패 (무시): {e}")
 
