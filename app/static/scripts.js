@@ -1357,27 +1357,23 @@ processChunk();
 
 // 폴더 목록이 변경되면 Observer 업데이트
 function updateObserversAfterProcessing() {
-    // 이전에 등록된 Observer가 있으면 다시 등록
-    if (folderTimeObserver && currentChunk * CHUNK_SIZE >= folders.length) {
-        // 모든 폴더가 처리된 후 Observer 업데이트
-        setTimeout(() => {
-            // 새로 추가된 toggle-text 요소들 찾기
-            const newToggleElements = container.querySelectorAll('.folder-item:not([data-observer-attached]) .toggle-text');
+    if (!folderTimeObserver) return;
+    // 모든 폴더가 처리된 후 Observer 업데이트
+    setTimeout(() => {
+        // 새로 추가된 toggle-text 요소들 찾기
+        const newToggleElements = container.querySelectorAll('.folder-item:not([data-observer-attached]) .toggle-text');
 
-            // 각 요소를 Observer에 등록
-            newToggleElements.forEach(el => {
-                folderTimeObserver.observe(el);
-                // 추적 중인 요소로 표시
-                el.closest('.folder-item').dataset.observerAttached = 'true';
-            });
-        }, 0);
-    }
+        // 각 요소를 Observer에 등록
+        newToggleElements.forEach(el => {
+            folderTimeObserver.observe(el);
+            // 추적 중인 요소로 표시
+            el.closest('.folder-item').dataset.observerAttached = 'true';
+        });
+    }, 0);
 }
 
 // Observer 업데이트 예약
-if (folders.length > 0) {
-    updateObserversAfterProcessing();
-}
+updateObserversAfterProcessing();
 
 // SMB 서비스 토글 함수 추가
 function toggleSMB() {
