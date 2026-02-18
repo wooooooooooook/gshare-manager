@@ -275,12 +275,13 @@ class Transcoder:
             'output_pattern': rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
         } for rule in self.rules]
 
-    def collect_matching_files(self, folder_path: str, subfolders: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    def collect_matching_files(self, folder_path: str, subfolders: Optional[List[str]] = None, progress_callback: Optional[Callable] = None) -> List[Dict[str, Any]]:
         """폴더에서 규칙에 매칭되는 파일 목록을 수집 (enabled 무관, 수동 스캔용)
         
         Args:
             folder_path: 베이스 마운트 경로 (/mnt/gshare)
             subfolders: 이미 파악된 서브폴더 목록 (선택 사항)
+            progress_callback: 진행 상황 전송용 콜백
         """
         matched_files = []
         if not self.rules:
@@ -292,19 +293,53 @@ class Transcoder:
 
         logging.info(f"파일 수집 시작: {folder_path} (서브폴더 지정: {len(subfolders) if subfolders else '전체 스캔'})")
         
-        # 스캔할 루트 목록 결정
+        # 0. 진행 상황 초기 업데이트
+        if progress_callback:
+            progress_callback({
+                'phase': 'scanning',
+                'message': '스캔 대상 폴더 필터링 중...',
+                'total_files': 0, 'current_index': 0, 'completed': 0, 'failed': 0
+            })
+
+        # 1. 스캔할 폴더 목록 필터링 (최적화)
+        active_patterns = [r.get('folder_pattern') for r in self.rules if r.get('folder_pattern')]
         scan_roots = []
+        
         if subfolders:
+            # 설정된 규칙의 패턴이 포함된 폴더만 골라냄
+            filtered_subs = []
             for sub in subfolders:
+                # 윈도우/리눅스 경로 구분자 호환성을 위해 /로 통일하여 비교
+                normalized_sub = sub.replace(os.sep, '/')
+                if any(p in normalized_sub for p in active_patterns):
+                    filtered_subs.append(sub)
+            
+            logging.info(f"폴더 필터링 완료: {len(subfolders)}개 중 {len(filtered_subs)}개 폴더가 규칙에 매칭됨")
+            
+            for sub in filtered_subs:
                 full_path = os.path.join(folder_path, sub)
                 if os.path.exists(full_path):
                     scan_roots.append(full_path)
         else:
             scan_roots = [folder_path]
 
-        for scan_root in scan_roots:
-            # 지정된 서브폴더만 보거나 (subfolders 있는 경우), 전체를 뒤짐 (없는 경우)
-            # 단, subfolders가 있어도 그 내부의 하위 폴더까지는 os.walk로 뒤져야 함
+        # 2. 파일 수집 실행
+        for i, scan_root in enumerate(scan_roots):
+            if hasattr(self, '_scan_cancel') and self._scan_cancel:
+                break
+
+            # 진행 상황 업데이트 (UI에서 0/0으로 멈춰 보이지 않게 함)
+            if progress_callback:
+                rel_name = os.path.relpath(scan_root, folder_path)
+                progress_callback({
+                    'phase': 'scanning',
+                    'message': f'폴더 스캔 중 ({i+1}/{len(scan_roots)}) - {len(matched_files)}개 발견: {rel_name}',
+                    'total_files': len(matched_files),
+                    'current_index': 0, 'completed': 0, 'failed': 0
+                })
+
+            # walk를 하되, 필터링된 폴더의 직계 파일만 보거나 하위까지 봄
+            # subfolders 리스트가 이미 leaf라면 walk는 한 번만 돌고 끝남
             for root, dirs, files in os.walk(scan_root, followlinks=True):
                 # 숨김 폴더 제외
                 dirs[:] = [d for d in dirs if not d.startswith('@') and not d.startswith('.')]
@@ -407,10 +442,10 @@ class Transcoder:
                 'current_file': '',
                 'completed': 0,
                 'failed': 0,
-                'message': '폴더 스캔 중...'
+                'message': '폴더 목록 수집 중...'
             })
 
-            all_matched = self.collect_matching_files(mount_path, subfolders=subfolders)
+            all_matched = self.collect_matching_files(mount_path, subfolders=subfolders, progress_callback=_emit)
             total = len(all_matched)
 
             if total == 0:
