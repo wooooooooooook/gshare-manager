@@ -68,13 +68,22 @@ class FolderMonitor:
         logging.debug("SMB 관리자 초기화 중...")
         self.smb_manager = SMBManager(config, self.nfs_uid, self.nfs_gid)
 
+        # 서브폴더 정보 업데이트 및 초기 링크 생성은 initialize()에서 수행
+        logging.debug("FolderMonitor 객체 생성됨 (초기 스캔은 지연됨)")
+
+    def initialize(self) -> None:
+        """초기 파일시스템 스캔 및 링크 생성 수행"""
+        logging.info("초기 파일시스템 스캔 시작...")
+        start_time = time.time()
+        
         # 서브폴더 정보 업데이트
-        logging.debug("서브폴더 정보 업데이트 중...")
         self._update_subfolder_mtimes()
 
         # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성
-        logging.debug("최근 수정된 폴더의 링크 생성 중...")
         self._create_links_for_recently_modified()
+        
+        elapsed_time = time.time() - start_time
+        logging.info(f"초기 파일시스템 스캔 완료 - 걸린 시간: {elapsed_time:.3f}초")
 
     def _get_nfs_ownership(self) -> tuple[int, int]:
         """NFS 마운트 경로의 UID/GID를 반환"""
@@ -369,8 +378,21 @@ class GShareManager:
         else:
             logging.debug("트랜스코딩 비활성화")
 
-        # 모든 속성이 초기화된 후에 상태 업데이트 수행
+        # 상태 업데이트는 initialize() 호출 시 수행
+        self.current_state = None
+        logging.debug("GShareManager 객체 생성됨")
+
+    def initialize(self) -> None:
+        """GShareManager 초기화 수행 (무거운 작업 포함)"""
+        logging.debug("GShareManager 초기화 작업 시작...")
+        
+        # FolderMonitor 초기화 (스캔 수행)
+        self.folder_monitor.initialize()
+        
+        # 초기 상태 업데이트
         self.current_state = self.update_state()
+        
+        logging.debug("GShareManager 초기화 작업 완료")
 
     def _load_last_shutdown_time(self) -> float:
         """VM 마지막 종료 시간을 로드 (UTC 기준)"""
@@ -512,7 +534,9 @@ class GShareManager:
     def update_state(self, update_monitored_folders=True) -> State:
         try:
             logging.debug(f"상태 업데이트, update_monitored_folders: {update_monitored_folders}")
-            current_time_str = datetime.now(pytz.timezone(self.config.TIMEZONE)).isoformat() if update_monitored_folders else getattr(self.current_state, 'last_check_time', '-')
+            current_time_str = (datetime.now(pytz.timezone(self.config.TIMEZONE)).isoformat() 
+                                if update_monitored_folders or self.current_state is None 
+                                else getattr(self.current_state, 'last_check_time', '-'))
 
             vm_running = self.proxmox_api.is_vm_running()
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
@@ -1001,6 +1025,9 @@ if __name__ == "__main__":
                 logging.error(f"Flask 웹 서버 시작 중 오류 발생: {flask_error}")
                 logging.error(f"상세 오류: {traceback.format_exc()}")
                 raise
+
+            # GShareManager 초기화 (무거운 스캔 작업 수행)
+            gshare_manager.initialize()
 
             # 모니터링 시작
             logging.info(f"모니터링 시작... 간격: {config.CHECK_INTERVAL}초")
