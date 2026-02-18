@@ -82,27 +82,23 @@ class Transcoder:
 
     def _load_done_list(self, directory: str) -> set:
         """디렉토리의 .transcoding_done 파일에서 이미 처리된 파일 목록을 로드"""
-        done_path = os.path.join(directory, self.DONE_FILENAME)
-        done_set = set()
-        if os.path.exists(done_path):
-            try:
-                with open(done_path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            done_set.add(line)
-            except Exception as e:
-                logging.warning(f".transcoding_done 읽기 실패 ({directory}): {e}")
-        return done_set
+        done_file = os.path.join(directory, self.DONE_FILENAME)
+        if not os.path.exists(done_file):
+            return set()
+        try:
+            with open(done_file, 'r', encoding='utf-8') as f:
+                return set(line.strip() for line in f if line.strip())
+        except Exception:
+            return set()
 
     def _mark_done(self, directory: str, filename: str):
-        """파일을 .transcoding_done에 기록"""
-        done_path = os.path.join(directory, self.DONE_FILENAME)
+        """ファイルを .transcoding_doneに記録"""
+        done_file = os.path.join(directory, self.DONE_FILENAME)
         try:
-            with open(done_path, 'a', encoding='utf-8') as f:
-                f.write(filename + '\n')
+            with open(done_file, 'a', encoding='utf-8') as f:
+                f.write(f"{filename}\n")
         except Exception as e:
-            logging.warning(f".transcoding_done 쓰기 실패 ({directory}): {e}")
+            logging.error(f"처리 완료 기록 실패 ({directory}): {e}")
 
     def process_folder(self, folder_path: str) -> int:
         """폴더 내 매칭되는 파일들을 트랜스코딩. 처리된 파일 수 반환."""
@@ -291,15 +287,20 @@ class Transcoder:
 
         logging.info(f"파일 수집 시작: {folder_path}")
         for root, dirs, files in os.walk(folder_path):
+            logging.debug(f"디렉토리 진입: {root} (파일 수: {len(files)})")
             done_set = self._load_done_list(root)
+            
             for filename in files:
                 file_path = os.path.join(root, filename)
                 rule = self._find_rule_for_scan(file_path)
 
                 if rule is None:
+                    # 너무 많은 로그 방지를 위해 가끔 로깅하거나 상세 디버그시에만 로깅
+                    # logging.debug(f"규칙 매칭 실패: {filename}")
                     continue
 
                 if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
+                    logging.debug(f"임시 파일 건너뜀: {filename}")
                     continue
                 if filename == self.DONE_FILENAME:
                     continue
@@ -314,8 +315,10 @@ class Transcoder:
                 if '{{filename}}' in output_pattern:
                     pattern_parts = output_pattern.replace('{{ext}}', '').replace('{{filename}}', '')
                     if pattern_parts and pattern_parts in filename:
+                        logging.debug(f"출력 파일 패턴 감지 (건너뜀): {filename}")
                         continue
 
+                logging.info(f"대상 파일 발견: {filename} (규칙: {rule.get('name')})")
                 matched_files.append({
                     'file_path': file_path,
                     'filename': filename,

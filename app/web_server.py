@@ -435,9 +435,13 @@ class GshareWebServer:
     def update_log(self):
         """로그 업데이트"""
         if os.path.exists(self.log_file):
-            with open(self.log_file, 'r') as file:
-                log_content = file.read()
-                return log_content
+            try:
+                with open(self.log_file, 'r', encoding='utf-8', errors='replace') as file:
+                    log_content = file.read()
+                    return log_content
+            except Exception as e:
+                logging.error(f"로그 파일 읽기 중 오류: {e}")
+                return f"Error reading log file: {str(e)}"
         else:
             return "Log file not found.", 404
 
@@ -445,7 +449,7 @@ class GshareWebServer:
         """소켓을 통해 로그 업데이트 전송"""
         try:
             if os.path.exists(self.log_file):
-                with open(self.log_file, 'r') as file:
+                with open(self.log_file, 'r', encoding='utf-8', errors='replace') as file:
                     log_content = file.read()
                     self.socketio.emit('log_update', log_content)
                     logging.debug("소켓을 통한 로그 업데이트 전송")
@@ -1511,6 +1515,9 @@ class GshareWebServer:
                 # monitored_folders를 업데이트하지 않는 가벼운 상태 업데이트 수행
                 self.manager.current_state = self.manager.update_state(update_monitored_folders=False)
                 self.emit_state_update()
+                
+                # 로그 업데이트 전송
+                self.emit_log_update()
                 
                 # 5초 대기
                 time.sleep(5)
