@@ -848,47 +848,7 @@ function shutdownVM() {
 }
 
 function updateFolderNameScrolling(root = document) {
-    const targetRoot = root && typeof root.querySelectorAll === 'function' ? root : document;
-    const elements = targetRoot.querySelectorAll('.folder-name-text');
-    const isTouchDevice = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
-
-    if (!elements.length) {
-        return;
-    }
-
-    window.requestAnimationFrame(() => {
-        // 1. 읽기 단계 (Batch Read): 모든 레이아웃 정보 추출
-        const updates = [];
-        elements.forEach(element => {
-            const wrapper = element.closest('.folder-name-wrapper');
-            if (!wrapper) return;
-
-            if (isTouchDevice) {
-                updates.push({ element, type: 'clear' });
-            } else {
-                const scrollAmount = element.scrollWidth - wrapper.clientWidth;
-                updates.push({ element, scrollAmount, type: 'scroll' });
-            }
-        });
-
-        // 2. 쓰기 단계 (Batch Write): DOM 변경 및 스타일 적용
-        updates.forEach(({ element, scrollAmount, type }) => {
-            if (type === 'clear') {
-                element.classList.remove('is-scrollable');
-                element.style.removeProperty('--scroll-distance');
-                element.style.removeProperty('transform');
-            } else if (type === 'scroll') {
-                if (scrollAmount > 0) {
-                    element.style.setProperty('--scroll-distance', `${scrollAmount}px`);
-                    element.classList.add('is-scrollable');
-                } else {
-                    element.classList.remove('is-scrollable');
-                    element.style.removeProperty('--scroll-distance');
-                    element.style.removeProperty('transform');
-                }
-            }
-        });
-    });
+    // 애니메이션 기능 비활성화 (성능 문제로 인해 수동 스크롤로 대체됨)
 }
 
 // 폴더 목록 HTML 생성 함수 추가
@@ -1302,8 +1262,7 @@ function updateFolderContainer(containerId, folderData, action) {
         // 새 항목들만 컨테이너에 추가 (기존 항목은 그대로 유지)
         container.appendChild(newItemsFragment);
 
-        // 새로 추가된 요소들만 스크롤 로직 적용 (전체 컨테이너 재조회 X)
-        updateFolderNameScrolling(newItemsFragment);
+        // updateFolderNameScrolling(newItemsFragment);
 
         // 새로 추가된 토글 텍스트에 클릭 이벤트 추가
         const newToggleElements = container.querySelectorAll('.folder-item:not([data-event-attached]) .toggle-text');
