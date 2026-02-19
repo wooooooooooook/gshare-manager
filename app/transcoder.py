@@ -71,6 +71,28 @@ class Transcoder:
                 'extensions': normalized_extensions
             })
 
+    def _get_active_rules_for_folder(self, root: str) -> List[tuple]:
+        """
+        해당 폴더(root)에 대해 검사해야 할 규칙 목록을 최적화하여 반환.
+        Returns: list of (optimized_rule, check_filename_only)
+        """
+        if not getattr(self, '_optimized_rules', None):
+            return []
+
+        active = []
+        for optimized in self._optimized_rules:
+            folder_pattern = optimized['folder_pattern']
+            if not folder_pattern:
+                continue
+
+            # 폴더 경로에 패턴이 이미 포함되어 있으면 파일명 검사 불필요 (check_filename_only=False)
+            if folder_pattern in root:
+                active.append((optimized, False))
+            else:
+                # 폴더 경로에 없으면 파일명에 포함될 수 있으므로 검사 필요 (check_filename_only=True)
+                active.append((optimized, True))
+        return active
+
     def find_matching_rule(self, file_path: str) -> Optional[Dict[str, Any]]:
         """파일 경로가 매칭되는 트랜스코딩 규칙을 찾아 반환"""
         if not self.enabled or not getattr(self, '_optimized_rules', None):
@@ -168,9 +190,27 @@ class Transcoder:
 
             for root, dirs, files in os.walk(folder_path):
                 done_set = self._load_done_list(root)
+                # 최적화: 폴더별로 유효한 규칙 목록 미리 계산
+                active_rules = self._get_active_rules_for_folder(root)
+
                 for filename in files:
                     file_path = os.path.join(root, filename)
-                    rule = self.find_matching_rule(file_path)
+
+                    # 최적화된 규칙 매칭
+                    rule = None
+                    _, ext = os.path.splitext(filename)
+                    ext = ext.lower()
+
+                    for optimized, check_filename_only in active_rules:
+                        if check_filename_only:
+                            if optimized['folder_pattern'] not in filename:
+                                continue
+
+                        if optimized['extensions'] and ext not in optimized['extensions']:
+                            continue
+
+                        rule = optimized['original']
+                        break
 
                     if rule is None:
                         continue
@@ -403,9 +443,27 @@ class Transcoder:
                 
                 done_set = self._load_done_list(root)
                 
+                # 최적화: 폴더별로 유효한 규칙 목록 미리 계산
+                active_rules = self._get_active_rules_for_folder(root)
+
                 for filename in files:
                     file_path = os.path.join(root, filename)
-                    rule = self._find_rule_for_scan(file_path)
+
+                    # 최적화된 규칙 매칭
+                    rule = None
+                    _, ext = os.path.splitext(filename)
+                    ext = ext.lower()
+
+                    for optimized, check_filename_only in active_rules:
+                        if check_filename_only:
+                            if optimized['folder_pattern'] not in filename:
+                                continue
+
+                        if optimized['extensions'] and ext not in optimized['extensions']:
+                            continue
+
+                        rule = optimized['original']
+                        break
 
                     if rule is None:
                         continue
