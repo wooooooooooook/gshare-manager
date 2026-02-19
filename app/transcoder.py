@@ -16,6 +16,7 @@ class Transcoder:
         self.config = config
         self.enabled = config.TRANSCODING_ENABLED
         self.rules = config.TRANSCODING_RULES or []
+        self._build_optimized_rules()
         self._processing = False  # 중복 실행 방지 플래그
         self._scan_cancel = False  # 스캔 취소 플래그
         self.scan_status: Dict[str, Any] = {'phase': 'idle'}  # 스캔 상태 (새로고침 복구용)
@@ -44,15 +45,43 @@ class Transcoder:
         self.config = config
         self.enabled = config.TRANSCODING_ENABLED
         self.rules = config.TRANSCODING_RULES or []
+        self._build_optimized_rules()
 
-    def find_matching_rule(self, file_path: str) -> Optional[Dict[str, Any]]:
-        """파일 경로가 매칭되는 트랜스코딩 규칙을 찾아 반환"""
-        if not self.enabled or not self.rules:
-            return None
+    def _build_optimized_rules(self):
+        """규칙의 확장자를 미리 정규화하여 최적화된 구조 생성"""
+        self._optimized_rules = []
+        if not self.rules:
+            return
 
         for rule in self.rules:
             folder_pattern = rule.get('folder_pattern', '')
             file_extensions = rule.get('file_extensions', [])
+
+            normalized_extensions = set()
+            if file_extensions:
+                for e in file_extensions:
+                    ext = e.lower()
+                    if not ext.startswith('.'):
+                        ext = f'.{ext}'
+                    normalized_extensions.add(ext)
+
+            self._optimized_rules.append({
+                'original': rule,
+                'folder_pattern': folder_pattern,
+                'extensions': normalized_extensions
+            })
+
+    def find_matching_rule(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """파일 경로가 매칭되는 트랜스코딩 규칙을 찾아 반환"""
+        if not self.enabled or not getattr(self, '_optimized_rules', None):
+            return None
+
+        _, ext = os.path.splitext(file_path)
+        ext = ext.lower()
+
+        for optimized in self._optimized_rules:
+            folder_pattern = optimized['folder_pattern']
+            extensions = optimized['extensions']
 
             if not folder_pattern:
                 continue
@@ -61,43 +90,35 @@ class Transcoder:
             if folder_pattern not in file_path:
                 continue
 
-            # 확장자 매칭
-            if file_extensions:
-                _, ext = os.path.splitext(file_path)
-                ext = ext.lower()
-                # 확장자 목록에 '.'이 없는 경우도 처리
-                normalized_extensions = [
-                    e.lower() if e.startswith('.') else f'.{e.lower()}'
-                    for e in file_extensions
-                ]
-                if ext not in normalized_extensions:
-                    continue
+            # 확장자 매칭 (set 조회 O(1))
+            if extensions and ext not in extensions:
+                continue
 
-            return rule
+            return optimized['original']
 
         return None
 
     def _find_rule_for_scan(self, file_path: str) -> Optional[Dict[str, Any]]:
         """수동 스캔용 규칙 매칭 - enabled 여부와 무관하게 동작"""
-        if not self.rules:
+        if not getattr(self, '_optimized_rules', None):
             return None
-        for rule in self.rules:
-            folder_pattern = rule.get('folder_pattern', '')
-            file_extensions = rule.get('file_extensions', [])
+
+        _, ext = os.path.splitext(file_path)
+        ext = ext.lower()
+
+        for optimized in self._optimized_rules:
+            folder_pattern = optimized['folder_pattern']
+            extensions = optimized['extensions']
+
             if not folder_pattern:
                 continue
             if folder_pattern not in file_path:
                 continue
-            if file_extensions:
-                _, ext = os.path.splitext(file_path)
-                ext = ext.lower()
-                normalized_extensions = [
-                    e.lower() if e.startswith('.') else f'.{e.lower()}'
-                    for e in file_extensions
-                ]
-                if ext not in normalized_extensions:
-                    continue
-            return rule
+
+            # 확장자 매칭 (set 조회 O(1))
+            if extensions and ext not in extensions:
+                continue
+            return optimized['original']
         return None
 
     DONE_FILENAME = '.transcoding_done'
