@@ -2,6 +2,9 @@ import logging
 import os
 import subprocess
 import shlex
+import queue
+import threading
+import time
 from typing import Optional, Dict, Any, List, Callable
 from config import GshareConfig  # type: ignore
 
@@ -16,6 +19,25 @@ class Transcoder:
         self._processing = False  # 중복 실행 방지 플래그
         self._scan_cancel = False  # 스캔 취소 플래그
         self.scan_status: Dict[str, Any] = {'phase': 'idle'}  # 스캔 상태 (새로고침 복구용)
+
+        # 비동기 처리를 위한 큐와 스레드 초기화
+        self.task_queue = queue.Queue()
+        self._lock = threading.Lock()
+        self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker_thread.start()
+
+    def _worker_loop(self):
+        """백그라운드에서 트랜스코딩 작업을 처리하는 루프"""
+        while True:
+            try:
+                folder_path = self.task_queue.get()
+                # 수동 스캔과 충돌 방지를 위해 락 사용
+                with self._lock:
+                    self._process_folder_sync(folder_path)
+            except Exception as e:
+                logging.error(f"트랜스코딩 워커 스레드 오류: {e}")
+            finally:
+                self.task_queue.task_done()
 
     def reload_config(self, config: GshareConfig):
         """설정 변경 시 규칙을 다시 로드"""
@@ -101,14 +123,20 @@ class Transcoder:
             logging.error(f"처리 완료 기록 실패 ({directory}): {e}")
 
     def process_folder(self, folder_path: str) -> int:
-        """폴더 내 매칭되는 파일들을 트랜스코딩. 처리된 파일 수 반환."""
+        """폴더 트랜스코딩 요청을 큐에 추가 (비동기 처리)"""
         if not self.enabled or not self.rules:
             return 0
 
-        if self._processing:
-            logging.warning("트랜스코딩이 이미 진행 중입니다. 건너뜁니다.")
+        self.task_queue.put(folder_path)
+        logging.info(f"트랜스코딩 작업 큐에 추가됨: {folder_path}")
+        return 0  # 비동기 처리이므로 즉시 반환
+
+    def _process_folder_sync(self, folder_path: str) -> int:
+        """폴더 내 매칭되는 파일들을 트랜스코딩 (동기 실행). 처리된 파일 수 반환."""
+        if not self.enabled or not self.rules:
             return 0
 
+        # _processing 플래그는 상태 표시용으로만 사용 (동기화는 _lock으로 처리됨)
         self._processing = True
         processed_count = 0
 
@@ -401,7 +429,18 @@ class Transcoder:
                 'message': str
             }
         """
+        # 락 획득 시도 (비동기 트랜스코딩과 충돌 방지)
+        if not self._lock.acquire(blocking=False):
+            if progress_callback:
+                progress_callback({
+                    'phase': 'error',
+                    'message': '자동 트랜스코딩 작업이 진행 중입니다. 잠시 후 다시 시도해주세요.'
+                })
+            return {'completed': 0, 'failed': 0, 'total': 0}
+
         if self._processing:
+            # 락을 획득했지만 _processing이 True라면 뭔가 잘못된 상태이나 일단 해제하고 리턴
+            self._lock.release()
             if progress_callback:
                 progress_callback({
                     'phase': 'error',
@@ -526,6 +565,7 @@ class Transcoder:
         finally:
             self._processing = False
             self._scan_cancel = False
+            self._lock.release()
 
         return {'completed': completed, 'failed': failed, 'total': len(all_matched)}
 
