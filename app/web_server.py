@@ -3,6 +3,7 @@ from flask import Flask, jsonify, render_template, request, redirect, url_for  #
 import threading
 import subprocess
 import os
+import re
 import sys
 import requests  # type: ignore
 from datetime import datetime
@@ -49,6 +50,31 @@ class GshareWebServer:
 
     def set_config(self, config):
         self.config = config
+
+    def _get_app_version(self):
+        """pyproject.toml에서 앱 버전 읽기"""
+        try:
+            # Docker 환경에서는 /app/pyproject.toml, 로컬 개발 환경에서는 상위 디렉토리 등 확인
+            possible_paths = [
+                'pyproject.toml',
+                '../pyproject.toml',
+                '/app/pyproject.toml'
+            ]
+
+            for path in possible_paths:
+                if os.path.exists(path):
+                    with open(path, 'r', encoding='utf-8') as f:
+                        toml_content = f.read()
+                        # version = "1.3.3" 형태 찾기
+                        match = re.search(r'version\s*=\s*"([^"]+)"', toml_content)
+                        if match:
+                            return match.group(1)
+
+            logging.warning("pyproject.toml을 찾을 수 없거나 버전을 읽을 수 없습니다.")
+            return "Unknown"
+        except Exception as e:
+            logging.error(f"앱 버전 읽기 실패: {e}")
+            return "Unknown"
 
     def _setup_logging(self):
         """로깅 설정"""
@@ -248,6 +274,7 @@ class GshareWebServer:
     def main_page(self):
         """메인 페이지 표시"""
         try:
+            version = self._get_app_version()
             if not self.is_setup_complete:
                 logging.debug("'/' 경로 접근: 설정 페이지로 리디렉션")
                 return redirect(url_for('setup'))
@@ -255,16 +282,16 @@ class GshareWebServer:
             if self.manager:
                 try:
                     current_state = self.manager.current_state
-                    return render_template('index.html', state=current_state, config=self.config)
+                    return render_template('index.html', state=current_state, config=self.config, version=version)
                 except Exception as e:
                     logging.error(f"manager.current_state 사용 중 에러: {e}")
                     logging.error(traceback.format_exc())
-                    return render_template('index.html', state=self._get_default_state(), config=self.config)
+                    return render_template('index.html', state=self._get_default_state(), config=self.config, version=version)
             else:
                 logging.info("manager가 없음, 기본 상태 사용")
                 default_state = self._get_default_state()
                 logging.info(f"기본 상태 생성 완료: {default_state is not None}")
-                return render_template('index.html', state=default_state, config=None)
+                return render_template('index.html', state=default_state, config=None, version=version)
         except Exception as e:
             logging.error(f"메인 페이지 렌더링 중 에러 발생: {e}")
             logging.error(traceback.format_exc())
