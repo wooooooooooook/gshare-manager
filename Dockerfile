@@ -1,24 +1,18 @@
-﻿FROM python:3.9-slim
+FROM python:3.9-slim
 
 WORKDIR /app
 
 # 필요한 패키지 설치 (NFS, SMB 클라이언트 포함)
-RUN apt-get update && apt-get install -y \
-    procps \
-    curl \
-    nfs-common \
-    smbclient \
-    cifs-utils \
-    iputils-ping \
-    net-tools \
-    gawk \
-    samba \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y     procps     curl     nfs-common     smbclient     cifs-utils     iputils-ping     net-tools     gawk     samba     ffmpeg     && rm -rf /var/lib/apt/lists/*
 
-# 필요한 Python 패키지 설치
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Poetry
+RUN pip install poetry
+
+# Copy poetry files
+COPY pyproject.toml .
+
+# Install dependencies
+RUN poetry config virtualenvs.create false     && poetry install --no-dev --no-interaction --no-ansi
 
 # 디렉토리 생성
 RUN mkdir -p /mnt/gshare /mnt/gshare_links /config /logs
@@ -40,4 +34,4 @@ ENV TZ=Asia/Seoul
 VOLUME ["/config"]
 
 # 실행 명령
-CMD ["python", "main.py"] 
+CMD ["python", "main.py"]
