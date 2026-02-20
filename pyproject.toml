@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "gshare-manager"
-version = "1.4.1"
+version = "1.5.0"
 description = "GShare Manager"
 authors = ["wooooooooooook <wooooooooooook@gmail.com>"]
 
