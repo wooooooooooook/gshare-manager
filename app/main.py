@@ -297,8 +297,8 @@ class FolderMonitor:
         logging.debug(
             f"폴더 구조 업데이트 완료 - 걸린 시간: {elapsed_time:.3f}초, 총 폴더: {len(self.previous_mtimes)}개, 새 폴더: {len(new_folders)}개, 삭제된 폴더: {len(deleted_folders)}개")
 
-    def check_modifications(self) -> tuple[list[str], bool]:
-        """수정 시간이 변경된 서브폴더 목록과 VM 시작 필요 여부를 반환 (Async)"""
+    def check_modifications(self) -> tuple[list[str], bool, list[str]]:
+        """수정 시간이 변경된 서브폴더 목록, VM 시작 필요 여부, 마운트/트랜스코딩 대상 폴더를 반환 (Async)"""
         start_time = time.time()
         changed_folders = []
         should_start_vm = False
@@ -342,7 +342,7 @@ class FolderMonitor:
             logging.debug(
                 f"폴더 수정 시간 확인 완료 (Async) - 걸린 시간: {elapsed_time:.3f}초, 변경된 폴더: {len(changed_folders)}개")
 
-            return changed_folders, should_start_vm
+            return changed_folders, should_start_vm, mount_targets
 
         except queue.Empty:
             pass
@@ -353,7 +353,7 @@ class FolderMonitor:
             self._scan_thread.daemon = True
             self._scan_thread.start()
 
-        return [], False
+        return [], False, []
 
     def get_monitored_folders(self) -> dict:
         """감시 중인 모든 폴더와 수정 시간, 링크 상태를 반환"""
@@ -791,11 +791,12 @@ class GShareManager:
 
                 try:
                     logging.debug("폴더 수정 시간 변화 확인 중")
-                    changed_folders, should_start_vm = self.folder_monitor.check_modifications()
+                    changed_folders, should_start_vm, mount_targets = self.folder_monitor.check_modifications()
                     if changed_folders:
                         # 변경된 폴더에 대해 트랜스코딩 실행 (SMB 활성화 전)
                         if self.transcoder.enabled:
-                            for folder in changed_folders:
+                            transcode_targets = mount_targets if mount_targets else changed_folders
+                            for folder in transcode_targets:
                                 try:
                                     folder_full_path = os.path.join(self.config.MOUNT_PATH, folder)
                                     self.transcoder.process_folder(folder_full_path)
