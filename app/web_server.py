@@ -476,11 +476,32 @@ class GshareWebServer:
         """소켓을 통해 로그 업데이트 전송"""
         try:
             if os.path.exists(self.log_file):
-                with open(self.log_file, 'r', encoding='utf-8', errors='replace') as file:
-                    log_content = file.read()
-                    self.socketio.emit('log_update', log_content)
-                    logging.debug("소켓을 통한 로그 업데이트 전송")
-                    return True
+                log_content = ""
+                # Limit read size to avoid memory issues and improve performance
+                max_read_size = 100 * 1024  # 100KB (approx 1000 lines)
+
+                try:
+                    file_size = os.path.getsize(self.log_file)
+                except OSError:
+                    file_size = 0
+
+                if file_size > max_read_size:
+                    with open(self.log_file, 'rb') as file:
+                        file.seek(-max_read_size, 2)
+                        raw_content = file.read()
+                        # Decode and discard partial first line if necessary
+                        decoded_content = raw_content.decode('utf-8', errors='replace')
+                        if '\n' in decoded_content:
+                            log_content = decoded_content.split('\n', 1)[1]
+                        else:
+                            log_content = decoded_content
+                else:
+                    with open(self.log_file, 'r', encoding='utf-8', errors='replace') as file:
+                        log_content = file.read()
+
+                self.socketio.emit('log_update', log_content)
+                logging.debug("소켓을 통한 로그 업데이트 전송")
+                return True
             return False
         except Exception as e:
             logging.error(f"소켓 로그 전송 중 오류: {e}")
