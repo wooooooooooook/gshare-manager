@@ -129,25 +129,78 @@ class FolderMonitor:
         return results
 
 
-    def _scan_folders(self) -> dict[str, float]:
-        """마운트 경로의 파일이 있는 서브폴더와 수정 시간을 반환 (최적화됨)"""
+    def _scan_folders_hybrid(self, path: str) -> dict[str, float]:
+        """Use 'find' command for faster directory scanning (Hybrid Approach)."""
         results = {}
         try:
-            if not os.path.exists(self.config.MOUNT_PATH):
-                logging.error(f"마운트 경로가 존재하지 않음: {self.config.MOUNT_PATH}")
-                return {}
+            # find . -mindepth 1 -type d -printf '%P\t%T@\0'
+            cmd = ['find', '.', '-mindepth', '1', '-type', 'd', '-printf', '%P\\t%T@\\0']
 
-            # Root mtime (initial stat)
-            try:
-                root_mtime = os.path.getmtime(self.config.MOUNT_PATH)
-            except OSError:
-                root_mtime = 0.0
+            # Run with cwd set to path
+            result = subprocess.run(
+                cmd,
+                cwd=path,
+                capture_output=True,
+                text=False
+            )
 
-            # Start recursive scan
-            return self._scan_folders_iterative(self.config.MOUNT_PATH, root_mtime)
+            if result.returncode != 0:
+                logging.warning(f"Hybrid scan failed (exit code {result.returncode}): {result.stderr.decode(errors='replace')}")
+                return None
+
+            stdout = result.stdout
+            if not stdout:
+                return results
+
+            # Split by null terminator
+            entries = stdout.split(b'\0')
+
+            for entry in entries:
+                if not entry:
+                    continue
+                try:
+                    parts = entry.split(b'\t')
+                    if len(parts) != 2:
+                        continue
+
+                    rel_path_bytes = parts[0]
+                    mtime_bytes = parts[1]
+
+                    rel_path = rel_path_bytes.decode('utf-8', errors='replace')
+
+                    path_parts = rel_path.split(os.sep)
+                    if any(p.startswith('.') or p.startswith('@') for p in path_parts):
+                        continue
+
+                    mtime = float(mtime_bytes)
+                    results[rel_path] = mtime
+
+                except ValueError:
+                    continue
+
+            return results
+
         except Exception as e:
-            logging.error(f"폴더 스캔 중 오류: {e}")
+            logging.error(f"Hybrid scan error: {e}")
+            return None
+
+    def _scan_folders(self) -> dict[str, float]:
+        """마운트 경로의 폴더 스캔 (Hybrid 방식 우선 시도, 실패 시 Python 방식)"""
+        if not os.path.exists(self.config.MOUNT_PATH):
+            logging.error(f"마운트 경로가 존재하지 않음: {self.config.MOUNT_PATH}")
             return {}
+
+        hybrid_results = self._scan_folders_hybrid(self.config.MOUNT_PATH)
+        if hybrid_results is not None:
+            return hybrid_results
+
+        logging.info("Falling back to Python native scan")
+        try:
+            root_mtime = os.path.getmtime(self.config.MOUNT_PATH)
+        except OSError:
+            root_mtime = 0.0
+
+        return self._scan_folders_iterative(self.config.MOUNT_PATH, root_mtime)
 
     def _run_scan_worker(self) -> None:
         """Background worker for folder scanning."""
