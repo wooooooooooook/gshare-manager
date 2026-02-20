@@ -94,6 +94,81 @@ class Transcoder:
                 active.append((optimized, True))
         return active
 
+    def _match_rule_for_filename(self, filename: str, active_rules: List[tuple]) -> Optional[Dict[str, Any]]:
+        """폴더별 활성 규칙 목록에서 파일명/확장자에 맞는 규칙을 반환"""
+        _, ext = os.path.splitext(filename)
+        ext = ext.lower()
+
+        for optimized, check_filename_only in active_rules:
+            if check_filename_only and optimized['folder_pattern'] not in filename:
+                continue
+
+            if optimized['extensions'] and ext not in optimized['extensions']:
+                continue
+
+            return optimized['original']
+
+        return None
+
+    def _is_skippable_file(self, filename: str, done_set: set) -> bool:
+        """스캔/트랜스코딩 공통 건너뛰기 조건"""
+        if filename == self.done_filename:
+            return True
+        if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
+            return True
+        if filename in done_set:
+            return True
+        return False
+
+    def _iter_walk_matches(self, scan_root: str, log_prefix: str = ""):
+        """os.walk 기반으로 규칙 매칭된 파일을 순회"""
+        for root, dirs, files in os.walk(scan_root, followlinks=True):
+            dirs[:] = [d for d in dirs if not d.startswith('@') and not d.startswith('.')]
+
+            if files:
+                logging.info(f"{log_prefix}디렉토리 진입: {root} (검색 대상 파일 수: {len(files)})")
+
+            done_set = self._load_done_list(root)
+            active_rules = self._get_active_rules_for_folder(root)
+
+            for filename in files:
+                if self._is_skippable_file(filename, done_set):
+                    continue
+
+                rule = self._match_rule_for_filename(filename, active_rules)
+                if rule is None:
+                    continue
+
+                yield root, filename, rule
+
+    def _iter_known_folder_matches(self, folder_path: str, subfolders: List[str]):
+        """이미 파악된 폴더 목록(폴더 스캔 결과)을 재사용해 파일만 확인"""
+        for sub in subfolders:
+            full_path = os.path.join(folder_path, sub)
+            if not os.path.isdir(full_path):
+                continue
+
+            try:
+                done_set = self._load_done_list(full_path)
+                active_rules = self._get_active_rules_for_folder(full_path)
+
+                with os.scandir(full_path) as entries:
+                    for entry in entries:
+                        if not entry.is_file():
+                            continue
+
+                        filename = entry.name
+                        if self._is_skippable_file(filename, done_set):
+                            continue
+
+                        rule = self._match_rule_for_filename(filename, active_rules)
+                        if rule is None:
+                            continue
+
+                        yield full_path, filename, rule
+            except OSError as e:
+                logging.debug(f"폴더 재사용 스캔 실패(무시): {full_path} - {e}")
+
     def find_matching_rule(self, file_path: str) -> Optional[Dict[str, Any]]:
         """파일 경로가 매칭되는 트랜스코딩 규칙을 찾아 반환"""
         if not self.enabled or not getattr(self, '_optimized_rules', None):
@@ -188,42 +263,8 @@ class Transcoder:
                 logging.warning(f"트랜스코딩 대상 폴더가 존재하지 않습니다: {folder_path}")
                 return 0
 
-            for root, dirs, files in os.walk(folder_path):
-                done_set = self._load_done_list(root)
-                # 최적화: 폴더별로 유효한 규칙 목록 미리 계산
-                active_rules = self._get_active_rules_for_folder(root)
-
-                for filename in files:
-                    # 임시 파일과 추적 파일 건너뛰기 (최우선)
-                    if filename == self.done_filename:
-                        continue
-                    if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
-                        continue
-
-                    # .transcoding_done 파일로 이미 처리 여부 확인 (최우선)
-                    if filename in done_set:
-                        continue
-
+            for root, filename, rule in self._iter_walk_matches(folder_path):
                     file_path = os.path.join(root, filename)
-
-                    # 최적화된 규칙 매칭
-                    rule = None
-                    _, ext = os.path.splitext(filename)
-                    ext = ext.lower()
-
-                    for optimized, check_filename_only in active_rules:
-                        if check_filename_only:
-                            if optimized['folder_pattern'] not in filename:
-                                continue
-
-                        if optimized['extensions'] and ext not in optimized['extensions']:
-                            continue
-
-                        rule = optimized['original']
-                        break
-
-                    if rule is None:
-                        continue
 
                     # 출력 패턴 기반 건너뛰기 (보조)
                     output_pattern = rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
@@ -450,60 +491,20 @@ class Transcoder:
 
             # walk를 하되, 필터링된 폴더의 직계 파일만 보거나 하위까지 봄
             # subfolders 리스트가 이미 leaf라면 walk는 한 번만 돌고 끝남
-            for root, dirs, files in os.walk(scan_root, followlinks=True):
-                # 숨김 폴더 제외
-                dirs[:] = [d for d in dirs if not d.startswith('@') and not d.startswith('.')]
-                
-                if files:
-                    logging.info(f"디렉토리 진입: {root} (검색 대상 파일 수: {len(files)})")
-                
-                done_set = self._load_done_list(root)
-                
-                # 최적화: 폴더별로 유효한 규칙 목록 미리 계산
-                active_rules = self._get_active_rules_for_folder(root)
+            iterator = self._iter_walk_matches(scan_root, log_prefix="[수동 스캔] ")
+            if subfolders:
+                rel_root = os.path.relpath(scan_root, folder_path)
+                iterator = self._iter_known_folder_matches(folder_path, [rel_root])
 
-                for filename in files:
-                    # 임시 파일과 추적 파일 건너뛰기 (최우선)
-                    if filename == self.done_filename:
-                        continue
-                    if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
-                        logging.debug(f"임시 파일 건너뜀: {filename}")
-                        continue
-
-                    # .transcoding_done 파일로 이미 처리 여부 확인 (최우선)
-                    if filename in done_set:
-                        logging.debug(f"이미 처리됨 (건너뜀): {os.path.join(root, filename)}")
-                        continue
-
-                    file_path = os.path.join(root, filename)
-
-                    # 최적화된 규칙 매칭
-                    rule = None
-                    _, ext = os.path.splitext(filename)
-                    ext = ext.lower()
-
-                    for optimized, check_filename_only in active_rules:
-                        if check_filename_only:
-                            if optimized['folder_pattern'] not in filename:
-                                continue
-
-                        if optimized['extensions'] and ext not in optimized['extensions']:
-                            continue
-
-                        rule = optimized['original']
-                        break
-
-                    if rule is None:
-                        continue
-
-                    logging.info(f"대상 파일 발견: {filename} (규칙: {rule.get('name')})")
-                    matched_files.append({
-                        'file_path': file_path,
-                        'filename': filename,
-                        'folder': root,
-                        'rule': rule,
-                        'rule_name': rule.get('name', '')
-                    })
+            for root, filename, rule in iterator:
+                logging.info(f"대상 파일 발견: {filename} (규칙: {rule.get('name')})")
+                matched_files.append({
+                    'file_path': os.path.join(root, filename),
+                    'filename': filename,
+                    'folder': root,
+                    'rule': rule,
+                    'rule_name': rule.get('name', '')
+                })
 
         logging.info(f"파일 수집 완료: {len(matched_files)}개 발견")
         return matched_files
