@@ -414,29 +414,29 @@ class FolderMonitor:
             logging.error(f"최근 수정된 폴더 링크 생성 중 오류 발생: {e}")
 
     def _filter_mount_targets(self, folders: list[str]) -> list[str]:
-        """변경된 폴더 중 중복 마운트를 방지할 대상만 반환"""
+        """변경된 폴더 중 가장 깊은 경로의 폴더만 선택 (부모 폴더 제외)"""
         if not folders:
             return []
 
         folder_set = set(folders)
-        sorted_folders = sorted(folders, key=lambda path: len(path.split(os.sep)))
         mount_targets = []
 
-        for path in sorted_folders:
-            if self._has_changed_parent(path, folder_set):
-                continue
-            mount_targets.append(path)
+        # 각 폴더에 대해, 해당 폴더의 하위 폴더가 변경 목록에 있는지 확인
+        for path in folders:
+            has_child = False
+            # 경로 구분자를 붙여서 정확한 하위 폴더 매칭 (예: 'a' vs 'ab' 구분)
+            path_prefix = path + os.sep
+
+            for other in folder_set:
+                if other != path and other.startswith(path_prefix):
+                    has_child = True
+                    break
+
+            # 하위 폴더가 없는 경우(가장 깊은 폴더인 경우)에만 마운트 대상으로 추가
+            if not has_child:
+                mount_targets.append(path)
 
         return mount_targets
-
-    def _has_changed_parent(self, path: str, folder_set: set[str]) -> bool:
-        """상위 폴더가 변경 목록에 포함되어 있는지 확인"""
-        parts = path.split(os.sep)
-        for i in range(1, len(parts)):
-            parent = os.sep.join(parts[:i])
-            if parent in folder_set:
-                return True
-        return False
 
     def check_nfs_status(self) -> bool:
         """NFS 마운트가 되어 있는지 확인"""
