@@ -409,30 +409,68 @@ class FolderMonitor:
         except Exception as e:
             logging.error(f"최근 수정된 폴더 링크 생성 중 오류 발생: {e}")
 
+    def _has_direct_changes(self, path: str) -> bool:
+        """폴더 내에 최근 수정된 파일이 있는지 확인 (직접적인 변경 여부)"""
+        try:
+            full_path = os.path.join(self.config.MOUNT_PATH, path)
+            if not os.path.exists(full_path):
+                return False
+
+            # 디렉토리의 mtime 가져오기
+            dir_mtime = os.stat(full_path).st_mtime
+
+            # 디렉토리 내 파일 스캔
+            with os.scandir(full_path) as it:
+                for entry in it:
+                    if entry.is_file():
+                        # 파일의 수정 시간이 디렉토리 수정 시간과 매우 가까우면 직접 변경으로 간주 (2초 이내)
+                        if abs(entry.stat().st_mtime - dir_mtime) <= 2.0:
+                            return True
+            return False
+        except Exception as e:
+            logging.warning(f"직접 변경 확인 중 오류 ({path}): {e}")
+            return False
+
     def _filter_mount_targets(self, folders: list[str]) -> list[str]:
-        """변경된 폴더 중 중복 마운트를 방지할 대상만 반환"""
+        """변경된 폴더 중 중복 마운트를 방지하고 최적의 폴더 선택"""
         if not folders:
             return []
 
         folder_set = set(folders)
+        # 상위 폴더부터 처리하기 위해 경로 길이로 정렬 (짧은 순)
         sorted_folders = sorted(folders, key=lambda path: len(path.split(os.sep)))
-        mount_targets = []
+        final_mounts = set()
 
         for path in sorted_folders:
-            if self._has_changed_parent(path, folder_set):
+            # 1. 이미 선택된 마운트 포인트에 포함되는지 확인 (중복 방지)
+            is_covered = False
+            path_prefix = path + os.sep
+            for mount in final_mounts:
+                if path.startswith(mount + os.sep):
+                    is_covered = True
+                    break
+
+            if is_covered:
                 continue
-            mount_targets.append(path)
 
-        return mount_targets
+            # 2. 직접적인 파일 변경이 있는지 확인
+            if self._has_direct_changes(path):
+                final_mounts.add(path)
+            else:
+                # 3. 직접 변경이 없다면, 하위 폴더가 변경 목록에 있는지 확인
+                has_child_in_set = False
+                for other in folder_set:
+                    if other != path and other.startswith(path_prefix):
+                        has_child_in_set = True
+                        break
 
-    def _has_changed_parent(self, path: str, folder_set: set[str]) -> bool:
-        """상위 폴더가 변경 목록에 포함되어 있는지 확인"""
-        parts = path.split(os.sep)
-        for i in range(1, len(parts)):
-            parent = os.sep.join(parts[:i])
-            if parent in folder_set:
-                return True
-        return False
+                # 하위 폴더가 변경 목록에 없다면(Leaf 노드), 선택해야 함
+                # (예: 파일 삭제되거나 감지되지 않은 변경사항 등)
+                if not has_child_in_set:
+                    final_mounts.add(path)
+                # 하위 폴더가 있다면, 하위 폴더에게 처리를 위임 (현재 폴더 스킵)
+
+        return list(final_mounts)
 
     def check_nfs_status(self) -> bool:
         """NFS 마운트가 되어 있는지 확인"""
