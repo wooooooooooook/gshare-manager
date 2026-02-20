@@ -24,6 +24,7 @@ class SMBManager:
         self.nfs_uid = nfs_uid
         self.nfs_gid = nfs_gid
         self.user_checked = False # 사용자 검증 완료 여부 
+        self._active_links = set()  # Active link cache
 
         # 초기화 작업
         self._init_smb_config()
@@ -36,6 +37,16 @@ class SMBManager:
 
         # 시작 시 기존 심볼릭 링크 모두 제거
         self.cleanup_all_symlinks()
+
+    def is_link_active(self, subfolder: str) -> bool:
+        """
+        Check if a link is active using memory cache to minimize syscalls.
+
+        Args:
+            subfolder: Original subfolder path (e.g., 'Movies/Action')
+        """
+        link_name = subfolder.replace(os.sep, '_')
+        return link_name in self._active_links
 
     def _init_smb_config(self) -> None:
         """기본 SMB 설정 초기화"""
@@ -552,6 +563,7 @@ class SMBManager:
                 time.sleep(5)
                 self.deactivate_smb_share()
                 
+            self._active_links.discard(subfolder.replace(os.sep, "_"))
             return True
         except Exception as e:
             logging.error(f"심볼릭 링크 제거 실패 ({subfolder}): {e}")
@@ -595,6 +607,7 @@ class SMBManager:
             except Exception as e:
                 logging.warning(f"심볼릭 링크 소유권 변경 실패 ({link_path}): {e}")
 
+            self._active_links.add(subfolder.replace(os.sep, "_"))
             logging.info(f"심볼릭 링크 생성됨: {link_path} -> {source_path}")
             return True
         except Exception as e:
@@ -613,10 +626,18 @@ class SMBManager:
                         try:
                             os.remove(file_path)
                             logging.debug(f"심볼릭 링크 제거됨: {file_path}")
-                            self.remove_symlink(file_path.replace(self.links_dir,'').replace('_',os.sep).replace(os.sep,'',1))
                         except Exception as e:
                             logging.error(f"심볼릭 링크 제거 실패 ({file_path}): {e}")
-                logging.info(f"모든 심볼릭 링크 제거 완료: {self.links_dir}")
+
+            self._active_links.clear()
+            logging.info(f"모든 심볼릭 링크 제거 완료: {self.links_dir}")
+
+            # Deactivate SMB share if no links remain (which is true here)
+            # self.deactivate_smb_share() # Wait, deactivate_smb_share calls cleanup_all_symlinks! Infinite recursion risk if we call it here.
+            # But the original code called remove_symlink which called deactivate_smb_share if list is empty.
+            # However, cleanup_all_symlinks is usually called BY deactivate_smb_share.
+            # So we should NOT call deactivate_smb_share here.
+
         except Exception as e:
             logging.error(f"심볼릭 링크 정리 중 오류 발생: {e}")
             

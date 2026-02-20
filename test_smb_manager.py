@@ -133,25 +133,95 @@ class TestSMBManagerRefactor(unittest.TestCase):
         finally:
             self.patcher_perms.start()
 
+
+
+class TestSMBManagerCache(unittest.TestCase):
+    def setUp(self):
+        self.patcher_init = patch('smb_manager.SMBManager._init_smb_config')
+        self.patcher_ownership = patch('smb_manager.SMBManager._set_smb_user_ownership')
+        self.patcher_perms = patch('smb_manager.SMBManager._set_links_directory_permissions')
+        self.patcher_cleanup = patch('smb_manager.SMBManager.cleanup_all_symlinks')
+
+        self.mock_init = self.patcher_init.start()
+        self.mock_ownership = self.patcher_ownership.start()
+        self.mock_perms = self.patcher_perms.start()
+        self.mock_cleanup = self.patcher_cleanup.start()
+
+        self.config = DummyConfig()
+        self.smb_manager = SMBManager(self.config, 1000, 1000)
+
+    def tearDown(self):
+        self.patcher_init.stop()
+        self.patcher_ownership.stop()
+        self.patcher_perms.stop()
+        self.patcher_cleanup.stop()
+
+    def test_cache_logic(self):
+        # 1. Initial state
+        self.assertEqual(len(self.smb_manager._active_links), 0)
+        self.assertFalse(self.smb_manager.is_link_active('Folder/A'))
+
+        # 2. Create link
+        with patch('smb_manager.os.symlink'),              patch('smb_manager.os.path.exists', return_value=False),              patch('smb_manager.subprocess.run'),              patch.object(self.smb_manager, '_get_group_name', return_value='group'):
+
+            success = self.smb_manager.create_symlink('Folder/A')
+            self.assertTrue(success)
+            self.assertTrue(self.smb_manager.is_link_active('Folder/A'))
+            # Internal check
+            self.assertIn('Folder_A', self.smb_manager._active_links)
+
+        # 3. Create another link
+        with patch('smb_manager.os.symlink'),              patch('smb_manager.os.path.exists', return_value=False),              patch('smb_manager.subprocess.run'):
+
+            self.smb_manager.create_symlink('Folder/B')
+            self.assertTrue(self.smb_manager.is_link_active('Folder/B'))
+            self.assertEqual(len(self.smb_manager._active_links), 2)
+
+        # 4. Remove link
+        with patch('smb_manager.os.remove'),              patch('smb_manager.os.path.exists', side_effect=lambda x: True),              patch('smb_manager.os.listdir', return_value=[]):
+             # Mock deactivate to avoid side effects
+             with patch.object(self.smb_manager, 'deactivate_smb_share'):
+                 success = self.smb_manager.remove_symlink('Folder/A')
+                 self.assertTrue(success)
+                 self.assertFalse(self.smb_manager.is_link_active('Folder/A'))
+                 self.assertTrue(self.smb_manager.is_link_active('Folder/B'))
+                 self.assertEqual(len(self.smb_manager._active_links), 1)
+
+class TestSMBManagerCleanup(unittest.TestCase):
+    def setUp(self):
+        # Patch everything EXCEPT cleanup_all_symlinks
+        self.patcher_init = patch('smb_manager.SMBManager._init_smb_config')
+        self.patcher_ownership = patch('smb_manager.SMBManager._set_smb_user_ownership')
+        self.patcher_perms = patch('smb_manager.SMBManager._set_links_directory_permissions')
+
+        self.mock_init = self.patcher_init.start()
+        self.mock_ownership = self.patcher_ownership.start()
+        self.mock_perms = self.patcher_perms.start()
+
+        self.config = DummyConfig()
+
+        # We need to mock cleanup during __init__ though, otherwise it runs real code
+        with patch('smb_manager.SMBManager.cleanup_all_symlinks') as mock_cleanup:
+            self.smb_manager = SMBManager(self.config, 1000, 1000)
+
+    def tearDown(self):
+        self.patcher_init.stop()
+        self.patcher_ownership.stop()
+        self.patcher_perms.stop()
+
+    def test_cleanup_real_method(self):
+        # Setup cache
+        self.smb_manager._active_links.add('A_B')
+
+        # Mock os calls used in cleanup
+        with patch('smb_manager.os.path.exists', return_value=True),              patch('smb_manager.os.listdir', return_value=['A_B']),              patch('smb_manager.os.path.islink', return_value=True),              patch('smb_manager.os.remove') as mock_remove:
+
+            self.smb_manager.cleanup_all_symlinks()
+
+            # Verify cache cleared
+            self.assertEqual(len(self.smb_manager._active_links), 0)
+            # Verify remove called
+            mock_remove.assert_called()
+
 if __name__ == '__main__':
     unittest.main()
-
-    def test_create_symlink_calls_get_group_name(self):
-        try:
-            with patch('smb_manager.subprocess.run') as mock_run,                  patch('smb_manager.os.path.exists', side_effect=[False, False]),                  patch('smb_manager.os.remove'),                  patch('smb_manager.os.symlink'),                  patch.object(self.smb_manager, '_get_group_name', return_value='linkgroup') as mock_get_group_name:
-
-                self.smb_manager.create_symlink('subfolder')
-
-                mock_get_group_name.assert_called_with(1000)
-
-                # Verify chown called with group name
-                found = False
-                for call in mock_run.call_args_list:
-                    args = call[0][0]
-                    # args might include '-h'
-                    if 'chown' in args and 'smbuser:linkgroup' in args:
-                        found = True
-                        break
-                self.assertTrue(found, "Should call chown -h with correct group name")
-        finally:
-            pass
