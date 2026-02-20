@@ -4,6 +4,8 @@ import subprocess
 import time
 from config import GshareConfig  # type: ignore
 
+SMB_CONF_PATH = '/etc/samba/smb.conf'
+
 
 class SMBManager:
     """SMB 서비스 관리 클래스"""
@@ -61,7 +63,7 @@ class SMBManager:
    log level = 3
 """
             # 기본 설정 저장
-            with open('/etc/samba/smb.conf', 'w') as f:
+            with open(SMB_CONF_PATH, 'w') as f:
                 f.write(base_config)
 
             # 기존 Samba 사용자 존재 여부 확인
@@ -107,7 +109,7 @@ class SMBManager:
         try:
             # SMB 설정 파일 확인 (공유 설정이 있는지 확인)
             try:
-                with open('/etc/samba/smb.conf', 'r') as f:
+                with open(SMB_CONF_PATH, 'r') as f:
                     content = f.read()
                     share_name = self.config.SMB_SHARE_NAME
                     has_share_config = f"[{share_name}]" in content
@@ -173,7 +175,7 @@ class SMBManager:
             share_name = self.config.SMB_SHARE_NAME
 
             # 설정 파일 읽기
-            with open('/etc/samba/smb.conf', 'r') as f:
+            with open(SMB_CONF_PATH, 'r') as f:
                 lines = f.readlines()
 
             # 빈 줄 제거
@@ -204,7 +206,7 @@ class SMBManager:
             final_lines = global_section_lines + [share_config]
 
             # 설정 파일 저장
-            with open('/etc/samba/smb.conf', 'w') as f:
+            with open(SMB_CONF_PATH, 'w') as f:
                 f.writelines([line for line in final_lines if line.strip()])
 
             logging.debug(
@@ -254,7 +256,7 @@ class SMBManager:
         """모든 SMB 공유 비활성화"""
         try:
             # 설정 파일 읽기
-            with open('/etc/samba/smb.conf', 'r') as f:
+            with open(SMB_CONF_PATH, 'r') as f:
                 lines = f.readlines()
 
             # [global] 섹션만 유지
@@ -265,7 +267,7 @@ class SMBManager:
                 new_lines.append(line)
 
             # 설정 파일 저장
-            with open('/etc/samba/smb.conf', 'w') as f:
+            with open(SMB_CONF_PATH, 'w') as f:
                 f.writelines([line for line in new_lines if line.strip()])
 
             # Samba 서비스 중지
