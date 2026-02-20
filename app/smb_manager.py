@@ -3,6 +3,7 @@ import os
 import subprocess
 import time
 from config import GshareConfig  # type: ignore
+from typing import Optional, Tuple
 
 
 class SMBManager:
@@ -72,8 +73,7 @@ class SMBManager:
                                        capture_output=True).returncode == 0
             
             # 시스템에 사용자 존재 여부 확인
-            user_exists = subprocess.run(['id', self.config.SMB_USERNAME], 
-                                      capture_output=True).returncode == 0
+            user_exists = self._get_user_info(self.config.SMB_USERNAME) is not None
             
             # 사용자 관리 단계별 처리
             if user_in_samba:
@@ -279,6 +279,49 @@ class SMBManager:
             logging.error(f"SMB 공유 비활성화 실패: {e}")
             return False
 
+
+    def _get_user_info(self, username: str) -> Optional[Tuple[int, int]]:
+        """
+        사용자의 UID와 GID를 반환합니다.
+
+        Args:
+            username: 사용자 이름
+
+        Returns:
+            Optional[Tuple[int, int]]: (UID, GID) 튜플 (존재하지 않거나 오류 시 None)
+        """
+        try:
+            user_info = subprocess.run(
+                ['id', username], capture_output=True, text=True)
+            if user_info.returncode == 0:
+                info_parts = user_info.stdout.strip().split()
+                current_uid = int(
+                    info_parts[0].split('=')[1].split('(')[0])
+                current_gid = int(
+                    info_parts[1].split('=')[1].split('(')[0])
+                return current_uid, current_gid
+        except Exception as e:
+            logging.error(f"사용자 확인 중 오류 ({username}): {e}")
+        return None
+
+    def _get_group_name(self, gid: int) -> Optional[str]:
+        """
+        GID에 해당하는 그룹 이름을 반환합니다.
+
+        Args:
+            gid: 그룹 ID
+
+        Returns:
+            Optional[str]: 그룹 이름 (존재하지 않거나 오류 시 None)
+        """
+        try:
+            group_info = subprocess.run(
+                ['getent', 'group', str(gid)], capture_output=True, text=True)
+            if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
+                return group_info.stdout.strip().split(':')[0]
+        except Exception as e:
+            logging.error(f"그룹 확인 중 오류 ({gid}): {e}")
+        return None
     def _set_smb_user_ownership(self) -> None:
         """SMB 사용자의 UID/GID를 NFS 마운트 경로와 동일하게 설정"""
         try:
@@ -299,15 +342,10 @@ class SMBManager:
             current_gid = 0
 
             try:
-                user_info = subprocess.run(
-                    ['id', smb_username], capture_output=True, text=True)
-                if user_info.returncode == 0:  # 사용자 존재
+                user_info_tuple = self._get_user_info(smb_username)
+                if user_info_tuple:  # 사용자 존재
                     user_exists = True
-                    info_parts = user_info.stdout.strip().split()
-                    current_uid = int(
-                        info_parts[0].split('=')[1].split('(')[0])
-                    current_gid = int(
-                        info_parts[1].split('=')[1].split('(')[0])
+                    current_uid, current_gid = user_info_tuple
                     uid_gid_match = (
                         current_uid == self.nfs_uid and current_gid == self.nfs_gid)
                     logging.debug(
@@ -318,16 +356,9 @@ class SMBManager:
                 logging.error(f"사용자 확인 중 오류: {e}")
 
             # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
-            existing_group = None
-            try:
-                group_info = subprocess.run(['getent', 'group', str(
-                    self.nfs_gid)], capture_output=True, text=True)
-                if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
-                    existing_group = group_info.stdout.strip().split(':')[0]
-                    logging.debug(
-                        f"GID {self.nfs_gid}를 가진 기존 그룹 발견: {existing_group}")
-            except Exception as e:
-                logging.error(f"그룹 확인 중 오류: {e}")
+            existing_group = self._get_group_name(self.nfs_gid)
+            if existing_group:
+                logging.debug(f"GID {self.nfs_gid}를 가진 기존 그룹 발견: {existing_group}")
 
             # 사용자 처리 로직
             if not user_exists:
@@ -474,15 +505,7 @@ class SMBManager:
 
             try:
                 # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
-                existing_group = None
-                try:
-                    group_info = subprocess.run(['getent', 'group', str(
-                        self.nfs_gid)], capture_output=True, text=True)
-                    if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
-                        existing_group = group_info.stdout.strip().split(':')[
-                            0]
-                except Exception as e:
-                    logging.error(f"그룹 확인 중 오류: {e}")
+                existing_group = self._get_group_name(self.nfs_gid)
 
                 # 적절한 그룹 이름 결정
                 group_name = existing_group if existing_group else self.config.SMB_USERNAME
@@ -560,14 +583,7 @@ class SMBManager:
             # SMB 사용자의 소유권으로 변경
             try:
                 # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
-                existing_group = None
-                try:
-                    group_info = subprocess.run(['getent', 'group', str(
-                        self.nfs_gid)], capture_output=True, text=True)
-                    if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
-                        existing_group = group_info.stdout.strip().split(':')[0]
-                except Exception as e:
-                    logging.error(f"그룹 확인 중 오류: {e}")
+                existing_group = self._get_group_name(self.nfs_gid)
 
                 # 적절한 그룹 이름 결정
                 group_name = existing_group if existing_group else self.config.SMB_USERNAME
@@ -611,14 +627,7 @@ class SMBManager:
         try:
             if os.path.exists(self.links_dir):
                 # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
-                existing_group = None
-                try:
-                    group_info = subprocess.run(['getent', 'group', str(
-                        self.nfs_gid)], capture_output=True, text=True)
-                    if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
-                        existing_group = group_info.stdout.strip().split(':')[0]
-                except Exception as e:
-                    logging.error(f"그룹 확인 중 오류: {e}")
+                existing_group = self._get_group_name(self.nfs_gid)
 
                 # 적절한 그룹 이름 결정
                 group_name = existing_group if existing_group else self.config.SMB_USERNAME
