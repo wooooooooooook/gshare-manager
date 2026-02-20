@@ -49,17 +49,23 @@ class ProxmoxAPI:
         })
         logging.debug("Proxmox API 토큰 인증 설정 완료")
 
+    def _request(self, method: str, endpoint: str) -> requests.Response:
+        url = f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/{endpoint}"
+        response = self.session.request(
+            method=method,
+            url=url,
+            timeout=(self.config.PROXMOX_TIMEOUT, 10)
+        )
+        response.raise_for_status()
+        return response
+
     def _get_vm_status_data(self) -> dict:
         now = time.time()
         # 2초 캐시 (모니터링 루프 내 중복 호출 방지)
         if self._cached_status and (now - self._last_status_check < 2.0):
             return self._cached_status
 
-        response = self.session.get(
-            f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
-            timeout=self.timeout
-        )
-        response.raise_for_status()
+        response = self._request("GET", "status/current")
         data = response.json()["data"]
 
         self._cached_status = data
@@ -98,11 +104,7 @@ class ProxmoxAPI:
 
     def start_vm(self) -> bool:
         try:
-            response = self.session.post(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/start",
-                timeout=self.timeout
-            )
-            response.raise_for_status()
+            self._request("POST", "status/start")
             logging.debug(f"VM 시작 응답 받음")
 
             return True

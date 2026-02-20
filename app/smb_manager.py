@@ -23,8 +23,11 @@ class SMBManager:
         self.nfs_uid = nfs_uid
         self.nfs_gid = nfs_gid
         self.user_checked = False # 사용자 검증 완료 여부 
+
         # 초기화 작업
         self._init_smb_config()
+        # 초기 상태 설정 (파일에서 확인)
+        self._is_smb_active = self._check_smb_status_from_file()
         self._set_smb_user_ownership()
 
         # 공유용 링크 디렉토리 생성 및 권한 설정
@@ -103,26 +106,20 @@ class SMBManager:
             raise
 
     def check_smb_status(self) -> bool:
-        """SMB 서비스가 실행 중인지 확인 - 설정 파일 공유 설정 여부만 확인"""
+        """SMB 서비스가 실행 중인지 확인 - 설정 파일 공유 설정 여부만 확인 (캐시된 상태 반환)"""
+        return self._is_smb_active
+
+    def _check_smb_status_from_file(self) -> bool:
+        """SMB 설정 파일에서 실제 공유 설정 여부 확인"""
         try:
-            # SMB 설정 파일 확인 (공유 설정이 있는지 확인)
-            try:
-                with open('/etc/samba/smb.conf', 'r') as f:
-                    content = f.read()
-                    share_name = self.config.SMB_SHARE_NAME
-                    has_share_config = f"[{share_name}]" in content
-                    
-                    if has_share_config:
-                        logging.debug(f"SMB 설정 파일에 공유 설정이 있음: [{share_name}]")
-                        return True
-                    else:
-                        logging.debug("SMB 설정 파일에 공유 설정이 없음")
-                        return False
-            except Exception as e:
-                logging.error(f"SMB 설정 파일 읽기 실패: {e}")
+            if not os.path.exists('/etc/samba/smb.conf'):
                 return False
+            with open('/etc/samba/smb.conf', 'r') as f:
+                content = f.read()
+                share_name = self.config.SMB_SHARE_NAME
+                return f"[{share_name}]" in content
         except Exception as e:
-            logging.error(f"SMB 상태 확인 중 오류: {e}")
+            logging.error(f"SMB 설정 파일 확인 중 오류: {e}")
             return False
 
     def _start_samba_service(self) -> None:
@@ -207,6 +204,7 @@ class SMBManager:
             with open('/etc/samba/smb.conf', 'w') as f:
                 f.writelines([line for line in final_lines if line.strip()])
 
+            self._is_smb_active = True
             logging.debug(
                 f"SMB 설정 파일이 업데이트 되었습니다: {share_name}")
         except Exception as e:
@@ -268,6 +266,7 @@ class SMBManager:
             with open('/etc/samba/smb.conf', 'w') as f:
                 f.writelines([line for line in new_lines if line.strip()])
 
+            self._is_smb_active = False
             # Samba 서비스 중지
             self._stop_samba_service()
             

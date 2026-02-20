@@ -3,6 +3,16 @@ import os
 import yaml
 from typing import Dict, Any, Optional, List
 
+# 경로 관련 상수
+CONFIG_DIR = '/config'
+LOG_DIR = '/logs'
+CONFIG_PATH = os.path.join(CONFIG_DIR, 'config.yaml')
+TEMPLATE_PATH = os.path.join(CONFIG_DIR, 'config.yaml.template')
+INIT_FLAG_PATH = os.path.join(CONFIG_DIR, '.init_complete')
+RESTART_FLAG_PATH = os.path.join(CONFIG_DIR, '.restart_in_progress')
+LAST_SHUTDOWN_PATH = os.path.join(CONFIG_DIR, '.last_shutdown')
+LOG_FILE_PATH = os.path.join(LOG_DIR, 'gshare_manager.log')
+
 @dataclass
 class GshareConfig:
     # Proxmox android 사용량 감시
@@ -81,6 +91,8 @@ class GshareConfig:
     TRANSCODING_ENABLED: bool = False
     ## 트랜스코딩 규칙 목록
     TRANSCODING_RULES: List[Dict[str, Any]] = None
+    ## 트랜스코딩 완료 파일명
+    TRANSCODING_DONE_FILENAME: str = '.transcoding_done'
 
     def __post_init__(self):
         if self.TRANSCODING_RULES is None:
@@ -90,7 +102,7 @@ class GshareConfig:
     def load_config(cls) -> 'GshareConfig':
         """설정 파일에서 설정 로드"""
         # Docker 환경을 가정하고 설정 파일 경로 고정
-        config_path = '/config/config.yaml'
+        config_path = CONFIG_PATH
         
         try:
             if os.path.exists(config_path):
@@ -172,7 +184,8 @@ class GshareConfig:
             'MQTT_TOPIC_PREFIX': yaml_config['mqtt'].get('topic_prefix', 'gshare'),
             'HA_DISCOVERY_PREFIX': yaml_config['mqtt'].get('ha_discovery_prefix', 'homeassistant'),
             'TRANSCODING_ENABLED': yaml_config.get('transcoding', {}).get('enabled', False),
-            'TRANSCODING_RULES': yaml_config.get('transcoding', {}).get('rules', [])
+            'TRANSCODING_RULES': yaml_config.get('transcoding', {}).get('rules', []),
+            'TRANSCODING_DONE_FILENAME': yaml_config.get('transcoding', {}).get('done_filename', '.transcoding_done')
         }
 
         # NFS 설정 추가
@@ -185,7 +198,7 @@ class GshareConfig:
     def update_yaml_config(config_dict: Dict[str, Any]) -> None:
         """YAML 설정 파일 업데이트"""
         # Docker 환경을 가정하고 설정 파일 경로 고정
-        yaml_path = '/config/config.yaml'
+        yaml_path = CONFIG_PATH
         
         try:
             if os.path.exists(yaml_path):
@@ -311,7 +324,7 @@ class GshareConfig:
     @staticmethod
     def load_template_config() -> Dict[str, Any]:
         """템플릿 설정 파일 로드"""
-        template_path = '/config/config.yaml.template'
+        template_path = TEMPLATE_PATH
         
         try:
             if os.path.exists(template_path):

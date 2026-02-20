@@ -1,6 +1,5 @@
 import logging
 import json
-import threading
 import time
 from typing import Any, Dict, Optional
 import paho.mqtt.client as mqtt  # type: ignore
