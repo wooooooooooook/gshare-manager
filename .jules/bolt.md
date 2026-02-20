@@ -20,3 +20,7 @@
 ## 2026-02-20 - [SMB 링크 제거 경로의 디렉토리 스캔 비용]
 **Learning:** `SMBManager.remove_symlink`가 링크 하나 삭제할 때마다 `os.listdir + os.path.islink`로 links_dir 전체를 스캔해, 링크 수가 많을수록 O(n) syscall 비용이 반복됐다.
 **Action:** 링크 활성 상태는 메모리 캐시(`_active_links`)를 우선 사용하고, 캐시가 비었을 때만 디스크를 1회 재검증하는 패턴을 유지한다.
+
+## 2026-02-20 - [NFS Mount Probe TTL Caching]
+**Learning:** 상태 갱신 루프에서 `mount -t nfs` subprocess 호출은 회당 수 ms 비용이 있어, 루프마다 수행하면 누적 syscall 오버헤드가 커진다.
+**Action:** 마운트 상태처럼 변동이 낮은 값은 짧은 TTL(예: 5초) 캐시를 적용해 루프 내 반복 호출을 캐시 hit로 흡수한다.
