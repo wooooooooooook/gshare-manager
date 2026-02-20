@@ -9,6 +9,7 @@ from datetime import datetime
 import pytz  # type: ignore
 import os
 import threading
+import queue
 import sys
 import atexit
 from config import (GshareConfig, CONFIG_PATH, INIT_FLAG_PATH,
@@ -68,6 +69,9 @@ class FolderMonitor:
         # SMB 관리자 초기화
         logging.debug("SMB 관리자 초기화 중...")
         self.smb_manager = SMBManager(config, self.nfs_uid, self.nfs_gid)
+        # 스캔 스레드 관리
+        self._scan_queue = queue.Queue()
+        self._scan_thread = None
 
         # 서브폴더 정보 업데이트 및 초기 링크 생성은 initialize()에서 수행
         logging.debug("FolderMonitor 객체 생성됨 (초기 스캔은 지연됨)")
@@ -85,6 +89,45 @@ class FolderMonitor:
         
         elapsed_time = time.time() - start_time
         logging.info(f"초기 파일시스템 스캔 완료 - 걸린 시간: {elapsed_time:.3f}초")
+    def _scan_folders_iterative(self, path: str, root_mtime: float) -> dict[str, float]:
+        """Iteratively scan folders to avoid recursion limits and overhead."""
+        results = {}
+        stack = [(path, root_mtime)]
+
+        while stack:
+            current_path, current_mtime = stack.pop()
+            try:
+                has_files = False
+                subdirs = []
+
+                with os.scandir(current_path) as it:
+                    for entry in it:
+                        if entry.name.startswith(".") or entry.name.startswith("@"):
+                            continue
+
+                        if entry.is_file():
+                            has_files = True
+                        elif entry.is_dir(follow_symlinks=True):
+                            try:
+                                # Push directory to stack with its mtime
+                                entry_mtime = entry.stat().st_mtime
+                                subdirs.append((entry.path, entry_mtime))
+                            except OSError:
+                                pass
+
+                if has_files:
+                    rel_path = os.path.relpath(current_path, self.config.MOUNT_PATH)
+                    if rel_path != "." and not rel_path.startswith("."):
+                        results[rel_path] = current_mtime
+
+                # Extend stack with subdirs
+                stack.extend(subdirs)
+
+            except OSError:
+                pass
+
+        return results
+
 
     def _scan_folders(self) -> dict[str, float]:
         """마운트 경로의 파일이 있는 서브폴더와 수정 시간을 반환 (최적화됨)"""
@@ -101,39 +144,20 @@ class FolderMonitor:
                 root_mtime = 0.0
 
             # Start recursive scan
-            self._scan_folders_recursive(self.config.MOUNT_PATH, root_mtime, results)
-
-            return results
+            return self._scan_folders_iterative(self.config.MOUNT_PATH, root_mtime)
         except Exception as e:
             logging.error(f"폴더 스캔 중 오류: {e}")
             return {}
 
-    def _scan_folders_recursive(self, path: str, mtime_of_path: float, results: dict) -> None:
+    def _run_scan_worker(self) -> None:
+        """Background worker for folder scanning."""
         try:
-            has_files = False
-            with os.scandir(path) as it:
-                for entry in it:
-                    if entry.name.startswith('.') or entry.name.startswith('@'):
-                        continue
-
-                    if entry.is_file():
-                        has_files = True
-                    elif entry.is_dir(follow_symlinks=True):
-                        # Recursive call
-                        try:
-                            # Use cached stat if available
-                            entry_mtime = entry.stat().st_mtime
-                            self._scan_folders_recursive(entry.path, entry_mtime, results)
-                        except OSError:
-                            pass
-
-            if has_files:
-                rel_path = os.path.relpath(path, self.config.MOUNT_PATH)
-                if rel_path != '.' and not rel_path.startswith('.'):
-                    results[rel_path] = mtime_of_path
-
-        except OSError:
-            pass
+            logging.debug("백그라운드 스캔 스레드 시작")
+            result = self._scan_folders()
+            self._scan_queue.put(result)
+            logging.debug("백그라운드 스캔 완료 및 결과 큐에 추가")
+        except Exception as e:
+            logging.error(f"백그라운드 스캔 중 오류 발생: {e}")
 
     def _get_nfs_ownership(self) -> tuple[int, int]:
         """NFS 마운트 경로의 UID/GID를 반환"""
@@ -212,54 +236,62 @@ class FolderMonitor:
             f"폴더 구조 업데이트 완료 - 걸린 시간: {elapsed_time:.3f}초, 총 폴더: {len(self.previous_mtimes)}개, 새 폴더: {len(new_folders)}개, 삭제된 폴더: {len(deleted_folders)}개")
 
     def check_modifications(self) -> tuple[list[str], bool]:
-        """수정 시간이 변경된 서브폴더 목록과 VM 시작 필요 여부를 반환"""
+        """수정 시간이 변경된 서브폴더 목록과 VM 시작 필요 여부를 반환 (Async)"""
         start_time = time.time()
         changed_folders = []
         should_start_vm = False
 
-        # Use optimized scan
-        current_scan = self._scan_folders()
+        # Check for async scan results
+        try:
+            current_scan = self._scan_queue.get_nowait()
 
-        # 1. Handle Deleted Folders
-        deleted_folders = set(self.previous_mtimes.keys()) - set(current_scan.keys())
-        for folder in deleted_folders:
-            logging.info(f"폴더 삭제 감지: {folder}")
-            self.smb_manager.remove_symlink(folder)
-            if folder in self.previous_mtimes:
-                del self.previous_mtimes[folder]
+            # 1. Handle Deleted Folders
+            deleted_folders = set(self.previous_mtimes.keys()) - set(current_scan.keys())
+            for folder in deleted_folders:
+                logging.info(f"폴더 삭제 감지: {folder}")
+                self.smb_manager.remove_symlink(folder)
+                if folder in self.previous_mtimes:
+                    del self.previous_mtimes[folder]
 
-        # 2. Handle Updates (New and Modified)
-        for path, current_mtime in current_scan.items():
-            prev_mtime = self.previous_mtimes.get(path)
+            # 2. Handle Updates (New and Modified)
+            for path, current_mtime in current_scan.items():
+                prev_mtime = self.previous_mtimes.get(path)
 
-            if prev_mtime is None:
-                # New folder
-                logging.debug(f"새 폴더 감지: {path}")
-                self.previous_mtimes[path] = current_mtime
+                if prev_mtime is None:
+                    logging.debug(f"새 폴더 감지: {path}")
+                    self.previous_mtimes[path] = current_mtime
 
-            elif current_mtime != prev_mtime:
-                # Modified folder
-                last_modified = datetime.fromtimestamp(current_mtime, pytz.timezone(
-                    self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')
-                logging.info(f"폴더 수정 시간 변화 감지 ({path}): {last_modified}")
-                changed_folders.append(path)
-                self.previous_mtimes[path] = current_mtime
+                elif current_mtime != prev_mtime:
+                    last_modified = datetime.fromtimestamp(current_mtime, pytz.timezone(
+                        self.config.TIMEZONE)).strftime("%Y-%m-%d %H:%M:%S")
+                    logging.info(f"폴더 수정 시간 변화 감지 ({path}): {last_modified}")
+                    changed_folders.append(path)
+                    self.previous_mtimes[path] = current_mtime
 
-                # VM 마지막 시작 시간보다 수정 시간이 더 최근인 경우
-                if current_mtime > self.last_shutdown_time:
-                    should_start_vm = True
-                    logging.info(f"VM 시작 조건 충족 - 수정 시간: {last_modified}")
+                    if current_mtime > self.last_shutdown_time:
+                        should_start_vm = True
+                        logging.info(f"VM 시작 조건 충족 - 수정 시간: {last_modified}")
 
-        mount_targets = self._filter_mount_targets(changed_folders)
-        for path in mount_targets:
-            # 심볼릭 링크 생성
-            self.smb_manager.create_symlink(path)
+            mount_targets = self._filter_mount_targets(changed_folders)
+            for path in mount_targets:
+                self.smb_manager.create_symlink(path)
 
-        elapsed_time = time.time() - start_time
-        logging.debug(
-            f"폴더 수정 시간 확인 완료 - 걸린 시간: {elapsed_time:.3f}초, 변경된 폴더: {len(changed_folders)}개")
+            elapsed_time = time.time() - start_time
+            logging.debug(
+                f"폴더 수정 시간 확인 완료 (Async) - 걸린 시간: {elapsed_time:.3f}초, 변경된 폴더: {len(changed_folders)}개")
 
-        return changed_folders, should_start_vm
+            return changed_folders, should_start_vm
+
+        except queue.Empty:
+            pass
+
+        # Trigger new scan if needed
+        if self._scan_thread is None or not self._scan_thread.is_alive():
+            self._scan_thread = threading.Thread(target=self._run_scan_worker)
+            self._scan_thread.daemon = True
+            self._scan_thread.start()
+
+        return [], False
 
     def get_monitored_folders(self) -> dict:
         """감시 중인 모든 폴더와 수정 시간, 링크 상태를 반환"""
