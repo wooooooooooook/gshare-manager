@@ -11,7 +11,7 @@ import os
 import threading
 import sys
 import atexit
-from config import GshareConfig  # type: ignore
+from config import GshareConfig, SHUTDOWN_FILE_PATH  # type: ignore
 from proxmox_api import ProxmoxAPI
 from web_server import GshareWebServer
 from smb_manager import SMBManager
@@ -419,7 +419,7 @@ class GShareManager:
     def _load_last_shutdown_time(self) -> float:
         """VM 마지막 종료 시간을 로드 (UTC 기준)"""
         try:
-            shutdown_file_path = '/config/.last_shutdown'
+            shutdown_file_path = SHUTDOWN_FILE_PATH
             if os.path.exists(shutdown_file_path):
                 with open(shutdown_file_path, 'r') as f:
                     return float(f.read().strip())
@@ -749,7 +749,7 @@ class GShareManager:
         try:
             # UTC 기준 현재 시간
             current_time = datetime.now(pytz.UTC).timestamp()
-            shutdown_file_path = '/config/.last_shutdown'
+            shutdown_file_path = SHUTDOWN_FILE_PATH
             with open(shutdown_file_path, 'w') as f:
                 f.write(str(current_time))
             self.last_shutdown_time = current_time
