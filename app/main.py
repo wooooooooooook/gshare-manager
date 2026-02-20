@@ -127,13 +127,85 @@ class FolderMonitor:
 
         return results
 
+    def _scan_folders_hybrid(self) -> dict[str, float]:
+        """Use 'find' command to scan folders (optimized for NFS)."""
+        results = {}
+        try:
+            # Use find to get directories and their mtimes
+            # -mindepth 1: exclude root .
+            # -name ".*" -o -name "@*": match hidden/system files/dirs
+            # -prune: skip matching directories and their contents
+            # -o -type d: if not pruned, check if directory
+            # -printf ...: print if directory
+            cmd = [
+                'find', '.',
+                '-mindepth', '1',
+                '(', '-name', '.*', '-o', '-name', '@*', ')',
+                '-prune',
+                '-o',
+                '-type', 'd',
+                '-printf', r'%T@\t%P\0'
+            ]
+
+            # Run find command in the mount path
+            # capture_output=True captures stdout/stderr
+            # text=True decodes output as string (universal_newlines)
+            # errors='surrogateescape' handles invalid utf-8 filenames gracefully
+            # check=True raises CalledProcessError on non-zero exit
+            result = subprocess.run(
+                cmd,
+                cwd=self.config.MOUNT_PATH,
+                capture_output=True,
+                text=True,
+                check=True,
+                errors='surrogateescape'
+            )
+
+            # Parse output
+            if result.stdout:
+                records = result.stdout.split('\0')
+                for record in records:
+                    if not record:
+                        continue
+
+                    try:
+                        # Split by first tab only
+                        parts = record.split('\t', 1)
+                        if len(parts) != 2:
+                            continue
+
+                        mtime_str, rel_path = parts
+
+                        # Parse mtime
+                        mtime = float(mtime_str)
+                        results[rel_path] = mtime
+
+                    except ValueError:
+                        continue
+
+            return results
+
+        except subprocess.CalledProcessError as e:
+            logging.warning(f"find command failed, falling back to iterative scan: {e}")
+            raise  # Re-raise to trigger fallback
+        except Exception as e:
+            logging.warning(f"Hybrid scan error, falling back: {e}")
+            raise
+
     def _scan_folders(self) -> dict[str, float]:
         """마운트 경로의 파일이 있는 서브폴더와 수정 시간을 반환 (최적화됨)"""
-        try:
-            if not os.path.exists(self.config.MOUNT_PATH):
-                logging.error(f"마운트 경로가 존재하지 않음: {self.config.MOUNT_PATH}")
-                return {}
+        if not os.path.exists(self.config.MOUNT_PATH):
+            logging.error(f"마운트 경로가 존재하지 않음: {self.config.MOUNT_PATH}")
+            return {}
 
+        # Try hybrid scan first
+        try:
+            return self._scan_folders_hybrid()
+        except Exception:
+            # Fallback to iterative scan but suppress error if hybrid failed silently
+            pass
+
+        try:
             # Start recursive scan
             return self._scan_folders_iterative(self.config.MOUNT_PATH)
         except Exception as e:
