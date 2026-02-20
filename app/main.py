@@ -413,30 +413,68 @@ class FolderMonitor:
         except Exception as e:
             logging.error(f"최근 수정된 폴더 링크 생성 중 오류 발생: {e}")
 
+    def _has_direct_changes(self, path: str) -> bool:
+        """폴더 내에 최근 수정된 파일이 있는지 확인 (직접적인 변경 여부)"""
+        try:
+            full_path = os.path.join(self.config.MOUNT_PATH, path)
+            if not os.path.exists(full_path):
+                return False
+
+            # 디렉토리의 mtime 가져오기
+            dir_mtime = os.stat(full_path).st_mtime
+
+            # 디렉토리 내 파일 스캔
+            with os.scandir(full_path) as it:
+                for entry in it:
+                    if entry.is_file():
+                        # 파일의 수정 시간이 디렉토리 수정 시간과 매우 가까우면 직접 변경으로 간주 (2초 이내)
+                        if abs(entry.stat().st_mtime - dir_mtime) <= 2.0:
+                            return True
+            return False
+        except Exception as e:
+            logging.warning(f"직접 변경 확인 중 오류 ({path}): {e}")
+            return False
+
     def _filter_mount_targets(self, folders: list[str]) -> list[str]:
-        """변경된 폴더 중 가장 깊은 경로의 폴더만 선택 (부모 폴더 제외)"""
+        """변경된 폴더 중 중복 마운트를 방지하고 최적의 폴더 선택"""
         if not folders:
             return []
 
         folder_set = set(folders)
-        mount_targets = []
+        # 상위 폴더부터 처리하기 위해 경로 길이로 정렬 (짧은 순)
+        sorted_folders = sorted(folders, key=lambda path: len(path.split(os.sep)))
+        final_mounts = set()
 
-        # 각 폴더에 대해, 해당 폴더의 하위 폴더가 변경 목록에 있는지 확인
-        for path in folders:
-            has_child = False
-            # 경로 구분자를 붙여서 정확한 하위 폴더 매칭 (예: 'a' vs 'ab' 구분)
+        for path in sorted_folders:
+            # 1. 이미 선택된 마운트 포인트에 포함되는지 확인 (중복 방지)
+            is_covered = False
             path_prefix = path + os.sep
-
-            for other in folder_set:
-                if other != path and other.startswith(path_prefix):
-                    has_child = True
+            for mount in final_mounts:
+                if path.startswith(mount + os.sep):
+                    is_covered = True
                     break
 
-            # 하위 폴더가 없는 경우(가장 깊은 폴더인 경우)에만 마운트 대상으로 추가
-            if not has_child:
-                mount_targets.append(path)
+            if is_covered:
+                continue
 
-        return mount_targets
+            # 2. 직접적인 파일 변경이 있는지 확인
+            if self._has_direct_changes(path):
+                final_mounts.add(path)
+            else:
+                # 3. 직접 변경이 없다면, 하위 폴더가 변경 목록에 있는지 확인
+                has_child_in_set = False
+                for other in folder_set:
+                    if other != path and other.startswith(path_prefix):
+                        has_child_in_set = True
+                        break
+
+                # 하위 폴더가 변경 목록에 없다면(Leaf 노드), 선택해야 함
+                # (예: 파일 삭제되거나 감지되지 않은 변경사항 등)
+                if not has_child_in_set:
+                    final_mounts.add(path)
+                # 하위 폴더가 있다면, 하위 폴더에게 처리를 위임 (현재 폴더 스킵)
+
+        return list(final_mounts)
 
     def check_nfs_status(self) -> bool:
         """NFS 마운트가 되어 있는지 확인"""
