@@ -49,7 +49,7 @@ def create_dummy_structure(root_path, depth=3, folders_per_level=5, files_per_fo
         return
 
     for i in range(folders_per_level):
-        folder_path = os.path.join(root_path, f"folder_{depth}_{i}")
+        folder_path = os.path.join(root_path, f".hidden_{depth}_{i}" if i == 0 else f"folder_{depth}_{i}")
         os.makedirs(folder_path, exist_ok=True)
         for j in range(files_per_folder):
             with open(os.path.join(folder_path, f"file_{j}.txt"), 'w') as f:
@@ -89,11 +89,11 @@ def profile_scan(target_path=None):
                 profiler.enable()
 
                 start_time = time.time()
-                monitor._scan_folders()
+                result = monitor._scan_folders()
                 end_time = time.time()
 
                 profiler.disable()
-                print(f"Scan finished in {end_time - start_time:.4f} seconds.")
+                print(f"Scan finished in {end_time - start_time:.4f} seconds. Found {len(result)} folders.")
 
                 stats = pstats.Stats(profiler)
                 print("\n" + "="*60)
