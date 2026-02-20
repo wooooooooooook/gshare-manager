@@ -157,7 +157,7 @@ class Transcoder:
             return set()
 
     def _mark_done(self, directory: str, filename: str):
-        """ファイルを .transcoding_doneに記録"""
+        """ファイルを .transcoding_done에 기록"""
         done_file = os.path.join(directory, self.done_filename)
         try:
             with open(done_file, 'a', encoding='utf-8') as f:
@@ -194,6 +194,16 @@ class Transcoder:
                 active_rules = self._get_active_rules_for_folder(root)
 
                 for filename in files:
+                    # 임시 파일과 추적 파일 건너뛰기 (최우선)
+                    if filename == self.done_filename:
+                        continue
+                    if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
+                        continue
+
+                    # .transcoding_done 파일로 이미 처리 여부 확인 (최우선)
+                    if filename in done_set:
+                        continue
+
                     file_path = os.path.join(root, filename)
 
                     # 최적화된 규칙 매칭
@@ -213,16 +223,6 @@ class Transcoder:
                         break
 
                     if rule is None:
-                        continue
-
-                    # 임시 파일과 추적 파일 건너뛰기
-                    if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
-                        continue
-                    if filename == self.done_filename:
-                        continue
-
-                    # .transcoding_done 파일로 이미 처리 여부 확인
-                    if filename in done_set:
                         continue
 
                     # 출력 패턴 기반 건너뛰기 (보조)
@@ -447,6 +447,18 @@ class Transcoder:
                 active_rules = self._get_active_rules_for_folder(root)
 
                 for filename in files:
+                    # 임시 파일과 추적 파일 건너뛰기 (최우선)
+                    if filename == self.done_filename:
+                        continue
+                    if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
+                        logging.debug(f"임시 파일 건너뜀: {filename}")
+                        continue
+
+                    # .transcoding_done 파일로 이미 처리 여부 확인 (최우선)
+                    if filename in done_set:
+                        logging.debug(f"이미 처리됨 (건너뜀): {os.path.join(root, filename)}")
+                        continue
+
                     file_path = os.path.join(root, filename)
 
                     # 최적화된 규칙 매칭
@@ -467,19 +479,6 @@ class Transcoder:
 
                     if rule is None:
                         continue
-
-                    if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
-                        logging.debug(f"임시 파일 건너뜀: {filename}")
-                        continue
-                    if filename == self.done_filename:
-                        continue
-
-                    # .transcoding_done 파일로 이미 처리 여부 확인
-                    if filename in done_set:
-                        logging.debug(f"이미 처리됨 (건너뜀): {file_path}")
-                        continue
-
-
 
                     logging.info(f"대상 파일 발견: {filename} (규칙: {rule.get('name')})")
                     matched_files.append({
