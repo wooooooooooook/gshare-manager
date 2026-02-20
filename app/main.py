@@ -766,7 +766,7 @@ class GShareManager:
 def setup_logging():
     """기본 로깅 설정을 초기화"""
     # config.yaml에서 로그 레벨 확인
-    yaml_path = '/config/config.yaml'
+    yaml_path = GshareConfig.CONFIG_FILE_PATH
     log_level = 'INFO'  # 기본값
 
     try:
@@ -874,7 +874,7 @@ def check_config_complete():
     logging.debug("설정 완료 여부 확인 시작")
     try:
         # 모든 실행이 Docker 환경에서 이루어진다고 가정
-        config_path = '/config/config.yaml'
+        config_path = GshareConfig.CONFIG_FILE_PATH
         init_flag_path = '/config/.init_complete'
 
         # 초기화 완료 플래그 확인

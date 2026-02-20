@@ -1,10 +1,12 @@
 from dataclasses import dataclass
 import os
 import yaml
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, ClassVar
 
 @dataclass
 class GshareConfig:
+    CONFIG_FILE_PATH: ClassVar[str] = '/config/config.yaml'
+    TEMPLATE_FILE_PATH: ClassVar[str] = '/config/config.yaml.template'
     # Proxmox android 사용량 감시
     ## Proxmox API 호스트
     PROXMOX_HOST: str
@@ -90,7 +92,7 @@ class GshareConfig:
     def load_config(cls) -> 'GshareConfig':
         """설정 파일에서 설정 로드"""
         # Docker 환경을 가정하고 설정 파일 경로 고정
-        config_path = '/config/config.yaml'
+        config_path = cls.CONFIG_FILE_PATH
         
         try:
             if os.path.exists(config_path):
@@ -185,7 +187,7 @@ class GshareConfig:
     def update_yaml_config(config_dict: Dict[str, Any]) -> None:
         """YAML 설정 파일 업데이트"""
         # Docker 환경을 가정하고 설정 파일 경로 고정
-        yaml_path = '/config/config.yaml'
+        yaml_path = GshareConfig.CONFIG_FILE_PATH
         
         try:
             if os.path.exists(yaml_path):
@@ -311,7 +313,7 @@ class GshareConfig:
     @staticmethod
     def load_template_config() -> Dict[str, Any]:
         """템플릿 설정 파일 로드"""
-        template_path = '/config/config.yaml.template'
+        template_path = GshareConfig.TEMPLATE_FILE_PATH
         
         try:
             if os.path.exists(template_path):

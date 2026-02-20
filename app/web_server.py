@@ -300,7 +300,7 @@ class GshareWebServer:
     def setup(self):
         """초기 설정 페이지"""
         container_ip = self._get_container_ip()
-        config_path = '/config/config.yaml'
+        config_path = GshareConfig.CONFIG_FILE_PATH
         form_data = {}
         has_config = False
 
@@ -347,7 +347,7 @@ class GshareWebServer:
 
     def save_config(self):
         """설정 저장"""
-        config_path = '/config/config.yaml'
+        config_path = GshareConfig.CONFIG_FILE_PATH
         init_flag_path = '/config/.init_complete'
 
         logging.debug("설정 저장 시작")
@@ -558,7 +558,7 @@ class GshareWebServer:
     def get_log_level(self):
         """로그 레벨 가져오기"""
         try:
-            yaml_path = '/config/config.yaml'
+            yaml_path = GshareConfig.CONFIG_FILE_PATH
 
             if os.path.exists(yaml_path):
                 with open(yaml_path, 'r', encoding='utf-8') as f:
@@ -740,7 +740,7 @@ class GshareWebServer:
         if not self.config:
             return jsonify({"error": "설정이 로드되지 않았습니다."}), 500
 
-        yaml_path = '/config/config.yaml'
+        yaml_path = GshareConfig.CONFIG_FILE_PATH
 
         try:
             if os.path.exists(yaml_path):
@@ -805,7 +805,7 @@ class GshareWebServer:
     def get_transcoding_config(self):
         """트랜스코딩 설정 정보 제공"""
         try:
-            yaml_path = '/config/config.yaml'
+            yaml_path = GshareConfig.CONFIG_FILE_PATH
             if os.path.exists(yaml_path):
                 with open(yaml_path, 'r', encoding='utf-8') as f:
                     yaml_config = yaml.safe_load(f)
@@ -863,7 +863,7 @@ class GshareWebServer:
             
             # 스캔 전 config.yaml에서 최신 규칙 재로드
             try:
-                config_path = '/config/config.yaml'
+                config_path = GshareConfig.CONFIG_FILE_PATH
                 if os.path.exists(config_path):
                     with open(config_path, 'r', encoding='utf-8') as f:
                         yaml_config = yaml.safe_load(f)
@@ -1294,7 +1294,7 @@ class GshareWebServer:
     def export_config(self):
         """현재 설정 파일 내보내기"""
         try:
-            config_path = '/config/config.yaml'
+            config_path = GshareConfig.CONFIG_FILE_PATH
 
             if not os.path.exists(config_path):
                 logging.warning("내보낼 설정 파일이 없습니다.")
