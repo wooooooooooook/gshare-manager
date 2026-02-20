@@ -1,7 +1,7 @@
 import logging
 import json
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 import paho.mqtt.client as mqtt  # type: ignore
 from config import GshareConfig  # type: ignore
 from datetime import datetime
@@ -81,6 +81,106 @@ class MQTTManager:
         except Exception as e:
             logging.error(f"MQTT 상태 발행 중 오류: {e}")
 
+    @property
+    def _device_info(self) -> Dict[str, Any]:
+        return {
+            "identifiers": ["gshare_manager"],
+            "name": "GShare Manager",
+            "manufacturer": "wooooooooooook",
+            "model": "GShare Manager Docker",
+            "sw_version": "1.0.0"
+        }
+
+    @property
+    def _sensor_definitions(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "name": "VM Status",
+                "id": "vm_status",
+                "type": "binary_sensor",
+                "device_class": "running",
+                "value_template": "{{ 'ON' if value_json.vm_running else 'OFF' }}",
+                "icon": "mdi:server"
+            },
+            {
+                "name": "SMB Status",
+                "id": "smb_status",
+                "type": "binary_sensor",
+                "device_class": "connectivity",
+                "value_template": "{{ 'ON' if value_json.smb_running else 'OFF' }}",
+                "icon": "mdi:folder-network"
+            },
+            {
+                "name": "NFS Status",
+                "id": "nfs_status",
+                "type": "binary_sensor",
+                "device_class": "connectivity",
+                "value_template": "{{ 'ON' if value_json.nfs_mounted else 'OFF' }}",
+                "icon": "mdi:nas"
+            },
+            {
+                "name": "CPU Usage",
+                "id": "cpu_usage",
+                "type": "sensor",
+                "unit_of_measurement": "%",
+                "value_template": "{{ value_json.cpu_usage }}",
+                "icon": "mdi:cpu-64-bit"
+            },
+            {
+                "name": "Watched Folders Count",
+                "id": "watched_folders_count",
+                "type": "sensor",
+                "value_template": "{{ value_json.watched_folder_count }}",
+                "icon": "mdi:folder-multiple"
+            },
+            {
+                "name": "Last Check Time",
+                "id": "last_check_time",
+                "type": "sensor",
+                "device_class": "timestamp",
+                "value_template": "{{ value_json.last_check_time }}", # ISO 포맷 필요할 수 있음
+                "icon": "mdi:clock-check"
+            },
+            {
+                "name": "Last Action",
+                "id": "last_action",
+                "type": "sensor",
+                "value_template": "{{ value_json.last_action }}",
+                "icon": "mdi:history"
+            },
+            {
+                "name": "Last Shutdown Time",
+                "id": "last_shutdown_time",
+                "type": "sensor",
+                "device_class": "timestamp",
+                "value_template": "{{ value_json.last_shutdown_time }}",
+                "icon": "mdi:clock-end"
+            }
+        ]
+
+    def _build_discovery_payload(self, sensor: Dict[str, Any]) -> Dict[str, Any]:
+        base_topic = f"{self.config.MQTT_TOPIC_PREFIX}/state"
+        availability_topic = f"{self.config.MQTT_TOPIC_PREFIX}/status"
+        object_id = f"gshare_{sensor['id']}"
+
+        payload = {
+            "name": f"GShare {sensor['name']}",
+            "unique_id": object_id,
+            "state_topic": base_topic,
+            "availability_topic": availability_topic,
+            "payload_available": "online",
+            "payload_not_available": "offline",
+            "device": self._device_info,
+            "value_template": sensor["value_template"]
+        }
+
+        # Optional fields
+        for field in ["device_class", "unit_of_measurement", "icon"]:
+            if field in sensor:
+                payload[field] = sensor[field]
+
+        return payload
+
     def publish_discovery(self):
         """Home Assistant Discovery 메시지 발행"""
         if not self.client or not self.connected:
@@ -88,107 +188,11 @@ class MQTTManager:
 
         try:
             discovery_prefix = self.config.HA_DISCOVERY_PREFIX
-            device_info = {
-                "identifiers": ["gshare_manager"],
-                "name": "GShare Manager",
-                "manufacturer": "wooooooooooook",
-                "model": "GShare Manager Docker",
-                "sw_version": "1.0.0"
-            }
 
-            base_topic = f"{self.config.MQTT_TOPIC_PREFIX}/state"
-            availability_topic = f"{self.config.MQTT_TOPIC_PREFIX}/status"
-
-            # 센서 정의
-            sensors = [
-                {
-                    "name": "VM Status",
-                    "id": "vm_status",
-                    "type": "binary_sensor",
-                    "device_class": "running",
-                    "value_template": "{{ 'ON' if value_json.vm_running else 'OFF' }}",
-                    "icon": "mdi:server"
-                },
-                {
-                    "name": "SMB Status",
-                    "id": "smb_status",
-                    "type": "binary_sensor",
-                    "device_class": "connectivity",
-                    "value_template": "{{ 'ON' if value_json.smb_running else 'OFF' }}",
-                    "icon": "mdi:folder-network"
-                },
-                {
-                    "name": "NFS Status",
-                    "id": "nfs_status",
-                    "type": "binary_sensor",
-                    "device_class": "connectivity",
-                    "value_template": "{{ 'ON' if value_json.nfs_mounted else 'OFF' }}",
-                    "icon": "mdi:nas"
-                },
-                {
-                    "name": "CPU Usage",
-                    "id": "cpu_usage",
-                    "type": "sensor",
-                    "unit_of_measurement": "%",
-                    "value_template": "{{ value_json.cpu_usage }}",
-                    "icon": "mdi:cpu-64-bit"
-                },
-                {
-                    "name": "Watched Folders Count",
-                    "id": "watched_folders_count",
-                    "type": "sensor",
-                    "value_template": "{{ value_json.watched_folder_count }}",
-                    "icon": "mdi:folder-multiple"
-                },
-                {
-                    "name": "Last Check Time",
-                    "id": "last_check_time",
-                    "type": "sensor",
-                    "device_class": "timestamp",
-                    "value_template": "{{ value_json.last_check_time }}", # ISO 포맷 필요할 수 있음
-                    "icon": "mdi:clock-check"
-                },
-                {
-                    "name": "Last Action",
-                    "id": "last_action",
-                    "type": "sensor",
-                    "value_template": "{{ value_json.last_action }}",
-                    "icon": "mdi:history"
-                },
-                {
-                    "name": "Last Shutdown Time",
-                    "id": "last_shutdown_time",
-                    "type": "sensor",
-                    "device_class": "timestamp",
-                    "value_template": "{{ value_json.last_shutdown_time }}",
-                    "icon": "mdi:clock-end"
-                }
-            ]
-
-            for sensor in sensors:
-                component = sensor["type"]
-                object_id = f"gshare_{sensor['id']}"
-                discovery_topic = f"{discovery_prefix}/{component}/gshare/{sensor['id']}/config"
-
-                payload = {
-                    "name": f"GShare {sensor['name']}",
-                    "unique_id": object_id,
-                    "state_topic": base_topic,
-                    "availability_topic": availability_topic,
-                    "payload_available": "online",
-                    "payload_not_available": "offline",
-                    "device": device_info,
-                    "value_template": sensor["value_template"]
-                }
-
-                if "device_class" in sensor:
-                    payload["device_class"] = sensor["device_class"]
-                if "unit_of_measurement" in sensor:
-                    payload["unit_of_measurement"] = sensor["unit_of_measurement"]
-                if "icon" in sensor:
-                    payload["icon"] = sensor["icon"]
-
-                self.client.publish(discovery_topic, json.dumps(payload), retain=True)
+            for sensor in self._sensor_definitions:
+                payload = self._build_discovery_payload(sensor)
+                topic = f"{discovery_prefix}/{sensor['type']}/gshare/{sensor['id']}/config"
+                self.client.publish(topic, json.dumps(payload), retain=True)
 
             logging.info("Home Assistant Discovery 메시지 발행 완료")
 
