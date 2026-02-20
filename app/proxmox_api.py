@@ -1,4 +1,5 @@
 import logging
+import time
 import requests  # type: ignore
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -36,6 +37,10 @@ class ProxmoxAPI:
         self.session.mount("http://", adapter)
         self._set_token_auth()
 
+        # Cache for VM status
+        self._cached_status = None
+        self._last_status_check = 0
+
     def _set_token_auth(self) -> None:
         # API 토큰을 사용하여 인증 헤더 설정
         self.session.headers.update({
@@ -43,14 +48,27 @@ class ProxmoxAPI:
         })
         logging.debug("Proxmox API 토큰 인증 설정 완료")
 
+    def _get_vm_status_data(self) -> dict:
+        now = time.time()
+        # 2초 캐시 (모니터링 루프 내 중복 호출 방지)
+        if self._cached_status and (now - self._last_status_check < 2.0):
+            return self._cached_status
+
+        response = self.session.get(
+            f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
+            timeout=(self.config.PROXMOX_TIMEOUT, 10)
+        )
+        response.raise_for_status()
+        data = response.json()["data"]
+
+        self._cached_status = data
+        self._last_status_check = now
+        return data
+
     def is_vm_running(self) -> bool:
         try:
-            response = self.session.get(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
-                timeout=(self.config.PROXMOX_TIMEOUT, 10)
-            )
-            response.raise_for_status()
-            result = response.json()["data"]["status"]
+            data = self._get_vm_status_data()
+            result = data["status"]
             logging.debug(f"VM 상태 확인 응답: {result}")
             return result == "running"
         except Exception as e:
@@ -59,12 +77,8 @@ class ProxmoxAPI:
 
     def get_vm_uptime(self) -> Optional[float]:
         try:
-            response = self.session.get(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
-                timeout=(self.config.PROXMOX_TIMEOUT, 10)
-            )
-            response.raise_for_status()
-            result = response.json()["data"]["uptime"]
+            data = self._get_vm_status_data()
+            result = data["uptime"]
             logging.debug(f"VM 부팅 시간 확인 응답: {result}")
             return result
         except Exception as e:
@@ -73,12 +87,8 @@ class ProxmoxAPI:
 
     def get_cpu_usage(self) -> Optional[float]:
         try:
-            response = self.session.get(
-                f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
-                timeout=(self.config.PROXMOX_TIMEOUT, 10)
-            )
-            response.raise_for_status()
-            result = response.json()["data"]["cpu"] * 100
+            data = self._get_vm_status_data()
+            result = data["cpu"] * 100
             logging.debug(f"CPU 사용량 확인 응답: {result}")
             return result
         except Exception as e:
