@@ -89,13 +89,13 @@ class FolderMonitor:
         
         elapsed_time = time.time() - start_time
         logging.info(f"초기 파일시스템 스캔 완료 - 걸린 시간: {elapsed_time:.3f}초")
-    def _scan_folders_iterative(self, path: str, root_mtime: float) -> dict[str, float]:
+    def _scan_folders_iterative(self, path: str) -> dict[str, float]:
         """Iteratively scan folders to avoid recursion limits and overhead."""
         results = {}
-        stack = [(path, root_mtime)]
+        stack = [path]
 
         while stack:
-            current_path, current_mtime = stack.pop()
+            current_path = stack.pop()
             try:
                 has_files = False
                 subdirs = []
@@ -108,17 +108,16 @@ class FolderMonitor:
                         if entry.is_file():
                             has_files = True
                         elif entry.is_dir(follow_symlinks=True):
-                            try:
-                                # Push directory to stack with its mtime
-                                entry_mtime = entry.stat().st_mtime
-                                subdirs.append((entry.path, entry_mtime))
-                            except OSError:
-                                pass
+                            subdirs.append(entry.path)
 
                 if has_files:
-                    rel_path = os.path.relpath(current_path, self.config.MOUNT_PATH)
-                    if rel_path != "." and not rel_path.startswith("."):
-                        results[rel_path] = current_mtime
+                    try:
+                        current_mtime = os.stat(current_path).st_mtime
+                        rel_path = os.path.relpath(current_path, self.config.MOUNT_PATH)
+                        if rel_path != "." and not rel_path.startswith("."):
+                            results[rel_path] = current_mtime
+                    except OSError:
+                        pass
 
                 # Extend stack with subdirs
                 stack.extend(subdirs)
@@ -128,27 +127,18 @@ class FolderMonitor:
 
         return results
 
-
     def _scan_folders(self) -> dict[str, float]:
         """마운트 경로의 파일이 있는 서브폴더와 수정 시간을 반환 (최적화됨)"""
-        results = {}
         try:
             if not os.path.exists(self.config.MOUNT_PATH):
                 logging.error(f"마운트 경로가 존재하지 않음: {self.config.MOUNT_PATH}")
                 return {}
 
-            # Root mtime (initial stat)
-            try:
-                root_mtime = os.path.getmtime(self.config.MOUNT_PATH)
-            except OSError:
-                root_mtime = 0.0
-
             # Start recursive scan
-            return self._scan_folders_iterative(self.config.MOUNT_PATH, root_mtime)
+            return self._scan_folders_iterative(self.config.MOUNT_PATH)
         except Exception as e:
             logging.error(f"폴더 스캔 중 오류: {e}")
             return {}
-
     def _run_scan_worker(self) -> None:
         """Background worker for folder scanning."""
         try:
