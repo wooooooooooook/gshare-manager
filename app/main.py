@@ -808,9 +808,12 @@ class GShareManager:
                                 except Exception as te:
                                     logging.error(f"트랜스코딩 오류 ({folder}): {te}")
 
-                        # 변경된 폴더들의 SMB 공유 활성화
-                        if self.smb_manager.activate_smb_share():
-                            self.last_action = f"SMB 공유 활성화: {', '.join(changed_folders)}"
+                        # SMB가 비활성 상태일 때만 공유 활성화(활성 상태 재시작 방지)
+                        if mount_targets:
+                            if self.smb_manager.check_smb_status():
+                                logging.debug("SMB 공유가 이미 활성화되어 있어 재시작을 생략합니다.")
+                            elif self.smb_manager.activate_smb_share():
+                                self.last_action = f"SMB 공유 활성화: {', '.join(changed_folders)}"
 
                         # VM이 정지 상태이고 최근 수정된 파일이 있는 경우에만 시작
                         if not self.proxmox_api.is_vm_running() and should_start_vm:
