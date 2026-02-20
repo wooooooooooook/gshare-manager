@@ -12,6 +12,7 @@ class ProxmoxAPI:
         self.config = config
         self.session = requests.Session()
         self.session.verify = False
+        self.timeout = (self.config.PROXMOX_TIMEOUT, 10)
 
         # 재시도 로직 설정 (총 3회, 1초 대기)
         try:
@@ -56,7 +57,7 @@ class ProxmoxAPI:
 
         response = self.session.get(
             f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/current",
-            timeout=(self.config.PROXMOX_TIMEOUT, 10)
+            timeout=self.timeout
         )
         response.raise_for_status()
         data = response.json()["data"]
@@ -99,7 +100,7 @@ class ProxmoxAPI:
         try:
             response = self.session.post(
                 f"{self.config.PROXMOX_HOST}/nodes/{self.config.NODE_NAME}/qemu/{self.config.VM_ID}/status/start",
-                timeout=(self.config.PROXMOX_TIMEOUT, 10)
+                timeout=self.timeout
             )
             response.raise_for_status()
             logging.debug(f"VM 시작 응답 받음")
