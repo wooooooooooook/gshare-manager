@@ -410,7 +410,23 @@ class Transcoder:
             
             logging.info(f"폴더 필터링 완료: {len(subfolders)}개 중 {len(filtered_subs)}개 폴더가 규칙에 매칭됨")
             
-            for sub in filtered_subs:
+            # 최적화: 중복 스캔 방지 (상위 폴더가 포함되어 있으면 하위 폴더 제외)
+            filtered_subs.sort()
+            unique_subs = []
+            if filtered_subs:
+                unique_subs.append(filtered_subs[0])
+                for i in range(1, len(filtered_subs)):
+                    prev = unique_subs[-1]
+                    curr = filtered_subs[i]
+                    # prev가 curr의 상위 폴더인지 확인 (curr이 prev + os.sep로 시작하거나 동일한 경우)
+                    if curr == prev or curr.startswith(prev + os.sep):
+                        continue
+                    unique_subs.append(curr)
+
+            if len(unique_subs) < len(filtered_subs):
+                logging.info(f"중복/하위 폴더 제거됨: {len(filtered_subs)} -> {len(unique_subs)}개 (최적화)")
+
+            for sub in unique_subs:
                 full_path = os.path.join(folder_path, sub)
                 if os.path.exists(full_path):
                     scan_roots.append(full_path)
