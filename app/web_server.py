@@ -11,7 +11,8 @@ import pytz  # type: ignore
 import yaml  # type: ignore
 import socket
 import tempfile
-from config import GshareConfig  # type: ignore
+from config import (GshareConfig, CONFIG_PATH, INIT_FLAG_PATH,
+                    RESTART_FLAG_PATH, LOG_FILE_PATH)  # type: ignore
 import time
 import traceback
 from flask_socketio import SocketIO  # type: ignore
@@ -34,7 +35,7 @@ class GshareWebServer:
         self.manager = None
         self.config = None
         self.is_setup_complete = False
-        self.log_file = os.path.join('/logs', 'gshare_manager.log')
+        self.log_file = LOG_FILE_PATH
         # SocketIO 초기화
         self.socketio = SocketIO(self.app, cors_allowed_origins="*")
         self._setup_logging()
@@ -100,7 +101,7 @@ class GshareWebServer:
                     logging.warning(
                         "manager.current_state가 None 값입니다. 초기화가 필요할 수 있습니다.")
 
-            restart_flag_path = '/config/.restart_in_progress'
+            restart_flag_path = RESTART_FLAG_PATH
             if os.path.exists(restart_flag_path):
                 logging.debug("이전 재시작 플래그 파일이 발견되었습니다. 삭제합니다.")
                 try:
@@ -300,7 +301,7 @@ class GshareWebServer:
     def setup(self):
         """초기 설정 페이지"""
         container_ip = self._get_container_ip()
-        config_path = '/config/config.yaml'
+        config_path = CONFIG_PATH
         form_data = {}
         has_config = False
 
@@ -347,8 +348,8 @@ class GshareWebServer:
 
     def save_config(self):
         """설정 저장"""
-        config_path = '/config/config.yaml'
-        init_flag_path = '/config/.init_complete'
+        config_path = CONFIG_PATH
+        init_flag_path = INIT_FLAG_PATH
 
         logging.debug("설정 저장 시작")
 
@@ -558,7 +559,7 @@ class GshareWebServer:
     def get_log_level(self):
         """로그 레벨 가져오기"""
         try:
-            yaml_path = '/config/config.yaml'
+            yaml_path = CONFIG_PATH
 
             if os.path.exists(yaml_path):
                 with open(yaml_path, 'r', encoding='utf-8') as f:
@@ -740,7 +741,7 @@ class GshareWebServer:
         if not self.config:
             return jsonify({"error": "설정이 로드되지 않았습니다."}), 500
 
-        yaml_path = '/config/config.yaml'
+        yaml_path = CONFIG_PATH
 
         try:
             if os.path.exists(yaml_path):
@@ -805,7 +806,7 @@ class GshareWebServer:
     def get_transcoding_config(self):
         """트랜스코딩 설정 정보 제공"""
         try:
-            yaml_path = '/config/config.yaml'
+            yaml_path = CONFIG_PATH
             if os.path.exists(yaml_path):
                 with open(yaml_path, 'r', encoding='utf-8') as f:
                     yaml_config = yaml.safe_load(f)
@@ -863,7 +864,7 @@ class GshareWebServer:
             
             # 스캔 전 config.yaml에서 최신 규칙 재로드
             try:
-                config_path = '/config/config.yaml'
+                config_path = CONFIG_PATH
                 if os.path.exists(config_path):
                     with open(config_path, 'r', encoding='utf-8') as f:
                         yaml_config = yaml.safe_load(f)
@@ -1294,7 +1295,7 @@ class GshareWebServer:
     def export_config(self):
         """현재 설정 파일 내보내기"""
         try:
-            config_path = '/config/config.yaml'
+            config_path = CONFIG_PATH
 
             if not os.path.exists(config_path):
                 logging.warning("내보낼 설정 파일이 없습니다.")
@@ -1343,7 +1344,7 @@ class GshareWebServer:
             logging.info("앱 재시작 요청 받음")
             logging.info("──────────────────────────────────────────────────")
 
-            restart_flag_path = '/config/.restart_in_progress'
+            restart_flag_path = RESTART_FLAG_PATH
             with open(restart_flag_path, 'w') as f:
                 f.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
@@ -1360,7 +1361,7 @@ class GshareWebServer:
     def check_restart_status(self):
         """서버 재시작 상태 확인 엔드포인트"""
         try:
-            restart_flag_path = '/config/.restart_in_progress'
+            restart_flag_path = RESTART_FLAG_PATH
 
             if os.path.exists(restart_flag_path):
                 return jsonify({"restart_complete": False})
@@ -1429,7 +1430,7 @@ class GshareWebServer:
         logging.info("──────────────────────────────────────────────────")
 
         try:
-            restart_flag_path = '/config/.restart_in_progress'
+            restart_flag_path = RESTART_FLAG_PATH
 
             try:
                 flask_port = int(os.environ.get('FLASK_PORT', 5000))
