@@ -298,6 +298,61 @@ class GshareWebServer:
             logging.error(traceback.format_exc())
             return f"<h1>에러가 발생했습니다</h1><p>{str(e)}</p><pre>{traceback.format_exc()}</pre>", 500
 
+    def _config_to_form_data(self, yaml_config, mask_secrets=False):
+        """설정 데이터를 폼 데이터로 변환"""
+        creds = yaml_config.get('credentials', {})
+        proxmox = yaml_config.get('proxmox', {})
+        proxmox_cpu = proxmox.get('cpu', {})
+        mount = yaml_config.get('mount', {})
+        nfs = yaml_config.get('nfs', {})
+        smb = yaml_config.get('smb', {})
+        mqtt = yaml_config.get('mqtt', {})
+        transcoding = yaml_config.get('transcoding', {})
+
+        form_data = {
+            'PROXMOX_HOST': creds.get('proxmox_host', ''),
+            'NODE_NAME': proxmox.get('node_name', ''),
+            'VM_ID': proxmox.get('vm_id', ''),
+            'PROXMOX_TIMEOUT': proxmox.get('timeout', 5),
+            'CPU_THRESHOLD': proxmox_cpu.get('threshold', 10),
+            'CHECK_INTERVAL': proxmox_cpu.get('check_interval', 60),
+            'THRESHOLD_COUNT': proxmox_cpu.get('threshold_count', 3),
+            'MOUNT_PATH': mount.get('path', '/mnt/gshare'),
+            'GET_FOLDER_SIZE_TIMEOUT': mount.get('folder_size_timeout', 30),
+            'NFS_PATH': nfs.get('path', ''),
+            'SHUTDOWN_WEBHOOK_URL': creds.get('shutdown_webhook_url', ''),
+            'SMB_USERNAME': creds.get('smb_username', ''),
+            'SMB_PASSWORD': creds.get('smb_password', ''),
+            'SMB_SHARE_NAME': smb.get('share_name', 'gshare'),
+            'SMB_COMMENT': smb.get('comment', 'GShare SMB 공유'),
+            'SMB_GUEST_OK': 'yes' if smb.get('guest_ok', False) else 'no',
+            'SMB_READ_ONLY': 'yes' if smb.get('read_only', True) else 'no',
+            'SMB_LINKS_DIR': smb.get('links_dir', '/mnt/gshare_links'),
+            'SMB_PORT': smb.get('port', 445),
+            'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
+            'LOG_LEVEL': yaml_config.get('log_level', 'INFO'),
+            'MQTT_BROKER': mqtt.get('broker', ''),
+            'MQTT_PORT': mqtt.get('port', 1883),
+            'MQTT_USERNAME': creds.get('mqtt_username', ''),
+            'MQTT_PASSWORD': creds.get('mqtt_password', ''),
+            'MQTT_TOPIC_PREFIX': mqtt.get('topic_prefix', 'gshare'),
+            'HA_DISCOVERY_PREFIX': mqtt.get('ha_discovery_prefix', 'homeassistant'),
+            'TOKEN_ID': creds.get('token_id', ''),
+            'SECRET': creds.get('secret', ''),
+            'TRANSCODING_ENABLED': transcoding.get('enabled', False),
+            'TRANSCODING_RULES': transcoding.get('rules', [])
+        }
+
+        if mask_secrets:
+            if form_data['SECRET']:
+                form_data['SECRET'] = '********'
+            if form_data['SMB_PASSWORD']:
+                form_data['SMB_PASSWORD'] = '********'
+            if form_data['MQTT_PASSWORD']:
+                form_data['MQTT_PASSWORD'] = '********'
+
+        return form_data
+
     def setup(self):
         """초기 설정 페이지"""
         container_ip = self._get_container_ip()
@@ -311,34 +366,7 @@ class GshareWebServer:
                     yaml_config = yaml.safe_load(f)
                     has_config = True
 
-                form_data = {
-                    'PROXMOX_HOST': yaml_config.get('credentials', {}).get('proxmox_host', ''),
-                    'TOKEN_ID': yaml_config.get('credentials', {}).get('token_id', ''),
-                    'SECRET': yaml_config.get('credentials', {}).get('secret', ''),
-                    'NODE_NAME': yaml_config.get('proxmox', {}).get('node_name', ''),
-                    'VM_ID': yaml_config.get('proxmox', {}).get('vm_id', ''),
-                    'CPU_THRESHOLD': yaml_config.get('proxmox', {}).get('cpu', {}).get('threshold', 10),
-                    'CHECK_INTERVAL': yaml_config.get('proxmox', {}).get('cpu', {}).get('check_interval', 60),
-                    'THRESHOLD_COUNT': yaml_config.get('proxmox', {}).get('cpu', {}).get('threshold_count', 3),
-                    'MOUNT_PATH': yaml_config.get('mount', {}).get('path', '/mnt/gshare'),
-                    'GET_FOLDER_SIZE_TIMEOUT': yaml_config.get('mount', {}).get('folder_size_timeout', 30),
-                    'NFS_PATH': yaml_config.get('nfs', {}).get('path', ''),
-                    'SHUTDOWN_WEBHOOK_URL': yaml_config.get('credentials', {}).get('shutdown_webhook_url', ''),
-                    'SMB_USERNAME': yaml_config.get('credentials', {}).get('smb_username', ''),
-                    'SMB_PASSWORD': yaml_config.get('credentials', {}).get('smb_password', ''),
-                    'SMB_SHARE_NAME': yaml_config.get('smb', {}).get('share_name', 'gshare'),
-                    'SMB_COMMENT': yaml_config.get('smb', {}).get('comment', 'GShare SMB 공유'),
-                    'SMB_GUEST_OK': yaml_config.get('smb', {}).get('guest_ok', 'no'),
-                    'SMB_READ_ONLY': yaml_config.get('smb', {}).get('read_only', 'yes'),
-                    'SMB_LINKS_DIR': yaml_config.get('smb', {}).get('links_dir', '/mnt/gshare_links'),
-                    'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
-                    'MQTT_BROKER': yaml_config.get('mqtt', {}).get('broker', ''),
-                    'MQTT_PORT': yaml_config.get('mqtt', {}).get('port', 1883),
-                    'MQTT_USERNAME': yaml_config.get('credentials', {}).get('mqtt_username', ''),
-                    'MQTT_PASSWORD': yaml_config.get('credentials', {}).get('mqtt_password', ''),
-                    'MQTT_TOPIC_PREFIX': yaml_config.get('mqtt', {}).get('topic_prefix', 'gshare'),
-                    'HA_DISCOVERY_PREFIX': yaml_config.get('mqtt', {}).get('ha_discovery_prefix', 'homeassistant')
-                }
+                form_data = self._config_to_form_data(yaml_config, mask_secrets=False)
                 logging.debug("기존 설정 파일 로드 성공")
             except Exception as e:
                 logging.error(f"설정 파일 로드 중 오류 발생: {e}")
@@ -771,41 +799,7 @@ class GshareWebServer:
             else:
                 yaml_config = {}
 
-            config_data = {
-                'PROXMOX_HOST': yaml_config.get('credentials', {}).get('proxmox_host', ''),
-                'NODE_NAME': yaml_config.get('proxmox', {}).get('node_name', ''),
-                'VM_ID': yaml_config.get('proxmox', {}).get('vm_id', ''),
-                'CPU_THRESHOLD': yaml_config.get('proxmox', {}).get('cpu', {}).get('threshold', 10),
-                'CHECK_INTERVAL': yaml_config.get('proxmox', {}).get('cpu', {}).get('check_interval', 60),
-                'THRESHOLD_COUNT': yaml_config.get('proxmox', {}).get('cpu', {}).get('threshold_count', 3),
-                'MOUNT_PATH': yaml_config.get('mount', {}).get('path', ''),
-                'GET_FOLDER_SIZE_TIMEOUT': yaml_config.get('mount', {}).get('folder_size_timeout', 30),
-                'NFS_PATH': yaml_config.get('nfs', {}).get('path', ''),
-                'SHUTDOWN_WEBHOOK_URL': yaml_config.get('credentials', {}).get('shutdown_webhook_url', ''),
-                'SMB_SHARE_NAME': yaml_config.get('smb', {}).get('share_name', 'gshare'),
-                'SMB_COMMENT': yaml_config.get('smb', {}).get('comment', 'GShare SMB 공유'),
-                'SMB_GUEST_OK': 'yes' if yaml_config.get('smb', {}).get('guest_ok', False) else 'no',
-                'SMB_READ_ONLY': 'yes' if yaml_config.get('smb', {}).get('read_only', True) else 'no',
-                'SMB_LINKS_DIR': yaml_config.get('smb', {}).get('links_dir', '/mnt/gshare_links'),
-                'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
-                'MQTT_BROKER': yaml_config.get('mqtt', {}).get('broker', ''),
-                'MQTT_PORT': yaml_config.get('mqtt', {}).get('port', 1883),
-                'MQTT_TOPIC_PREFIX': yaml_config.get('mqtt', {}).get('topic_prefix', 'gshare'),
-                'HA_DISCOVERY_PREFIX': yaml_config.get('mqtt', {}).get('ha_discovery_prefix', 'homeassistant')
-            }
-
-            if 'TOKEN_ID' in yaml_config.get('credentials', {}):
-                config_data['TOKEN_ID'] = yaml_config['credentials']['token_id']
-            if 'SECRET' in yaml_config.get('credentials', {}):
-                config_data['SECRET'] = '********'
-            if 'SMB_USERNAME' in yaml_config.get('credentials', {}):
-                config_data['SMB_USERNAME'] = yaml_config['credentials']['smb_username']
-            if 'SMB_PASSWORD' in yaml_config.get('credentials', {}):
-                config_data['SMB_PASSWORD'] = '********'
-            if 'MQTT_USERNAME' in yaml_config.get('credentials', {}):
-                config_data['MQTT_USERNAME'] = yaml_config['credentials']['mqtt_username']
-            if 'MQTT_PASSWORD' in yaml_config.get('credentials', {}):
-                config_data['MQTT_PASSWORD'] = '********'
+            config_data = self._config_to_form_data(yaml_config, mask_secrets=True)
 
             return jsonify(config_data)
         except Exception as e:
