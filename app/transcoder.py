@@ -16,6 +16,7 @@ class Transcoder:
         self.config = config
         self.enabled = config.TRANSCODING_ENABLED
         self.rules = config.TRANSCODING_RULES or []
+        self.done_filename = config.TRANSCODING_DONE_FILENAME
         self._build_optimized_rules()
         self._processing = False  # 중복 실행 방지 플래그
         self._scan_cancel = False  # 스캔 취소 플래그
@@ -45,8 +46,8 @@ class Transcoder:
         self.config = config
         self.enabled = config.TRANSCODING_ENABLED
         self.rules = config.TRANSCODING_RULES or []
+        self.done_filename = config.TRANSCODING_DONE_FILENAME
         self._build_optimized_rules()
-
     def _build_optimized_rules(self):
         """규칙의 확장자를 미리 정규화하여 최적화된 구조 생성"""
         self._optimized_rules = []
@@ -143,11 +144,10 @@ class Transcoder:
             return optimized['original']
         return None
 
-    DONE_FILENAME = '.transcoding_done'
 
     def _load_done_list(self, directory: str) -> set:
         """디렉토리의 .transcoding_done 파일에서 이미 처리된 파일 목록을 로드"""
-        done_file = os.path.join(directory, self.DONE_FILENAME)
+        done_file = os.path.join(directory, self.done_filename)
         if not os.path.exists(done_file):
             return set()
         try:
@@ -158,7 +158,7 @@ class Transcoder:
 
     def _mark_done(self, directory: str, filename: str):
         """ファイルを .transcoding_doneに記録"""
-        done_file = os.path.join(directory, self.DONE_FILENAME)
+        done_file = os.path.join(directory, self.done_filename)
         try:
             with open(done_file, 'a', encoding='utf-8') as f:
                 f.write(f"{filename}\n")
@@ -218,7 +218,7 @@ class Transcoder:
                     # 임시 파일과 추적 파일 건너뛰기
                     if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
                         continue
-                    if filename == self.DONE_FILENAME:
+                    if filename == self.done_filename:
                         continue
 
                     # .transcoding_done 파일로 이미 처리 여부 확인
@@ -471,7 +471,7 @@ class Transcoder:
                     if filename.endswith('.tmp') or '.transcoding_tmp.' in filename:
                         logging.debug(f"임시 파일 건너뜀: {filename}")
                         continue
-                    if filename == self.DONE_FILENAME:
+                    if filename == self.done_filename:
                         continue
 
                     # .transcoding_done 파일로 이미 처리 여부 확인

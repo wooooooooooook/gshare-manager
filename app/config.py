@@ -91,6 +91,8 @@ class GshareConfig:
     TRANSCODING_ENABLED: bool = False
     ## 트랜스코딩 규칙 목록
     TRANSCODING_RULES: List[Dict[str, Any]] = None
+    ## 트랜스코딩 완료 파일명
+    TRANSCODING_DONE_FILENAME: str = '.transcoding_done'
 
     def __post_init__(self):
         if self.TRANSCODING_RULES is None:
@@ -182,7 +184,8 @@ class GshareConfig:
             'MQTT_TOPIC_PREFIX': yaml_config['mqtt'].get('topic_prefix', 'gshare'),
             'HA_DISCOVERY_PREFIX': yaml_config['mqtt'].get('ha_discovery_prefix', 'homeassistant'),
             'TRANSCODING_ENABLED': yaml_config.get('transcoding', {}).get('enabled', False),
-            'TRANSCODING_RULES': yaml_config.get('transcoding', {}).get('rules', [])
+            'TRANSCODING_RULES': yaml_config.get('transcoding', {}).get('rules', []),
+            'TRANSCODING_DONE_FILENAME': yaml_config.get('transcoding', {}).get('done_filename', '.transcoding_done')
         }
 
         # NFS 설정 추가
