@@ -11,7 +11,8 @@ import os
 import threading
 import sys
 import atexit
-from config import GshareConfig  # type: ignore
+from config import (GshareConfig, CONFIG_PATH, INIT_FLAG_PATH,
+                    LAST_SHUTDOWN_PATH, LOG_DIR, LOG_FILE_PATH)  # type: ignore
 from proxmox_api import ProxmoxAPI
 from web_server import GshareWebServer
 from smb_manager import SMBManager
@@ -419,7 +420,7 @@ class GShareManager:
     def _load_last_shutdown_time(self) -> float:
         """VM 마지막 종료 시간을 로드 (UTC 기준)"""
         try:
-            shutdown_file_path = '/config/.last_shutdown'
+            shutdown_file_path = LAST_SHUTDOWN_PATH
             if os.path.exists(shutdown_file_path):
                 with open(shutdown_file_path, 'r') as f:
                     return float(f.read().strip())
@@ -749,7 +750,7 @@ class GShareManager:
         try:
             # UTC 기준 현재 시간
             current_time = datetime.now(pytz.UTC).timestamp()
-            shutdown_file_path = '/config/.last_shutdown'
+            shutdown_file_path = LAST_SHUTDOWN_PATH
             with open(shutdown_file_path, 'w') as f:
                 f.write(str(current_time))
             self.last_shutdown_time = current_time
@@ -766,7 +767,7 @@ class GShareManager:
 def setup_logging():
     """기본 로깅 설정을 초기화"""
     # config.yaml에서 로그 레벨 확인
-    yaml_path = '/config/config.yaml'
+    yaml_path = CONFIG_PATH
     log_level = 'INFO'  # 기본값
 
     try:
@@ -786,9 +787,9 @@ def setup_logging():
     os.environ['LOG_LEVEL'] = log_level
 
     # 로그 디렉토리 확인 및 생성
-    log_dir = '/logs'
+    log_dir = LOG_DIR
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, 'gshare_manager.log')
+    log_file = LOG_FILE_PATH
 
     # 로거 및 포맷터 설정
     formatter = logging.Formatter(
@@ -874,8 +875,8 @@ def check_config_complete():
     logging.debug("설정 완료 여부 확인 시작")
     try:
         # 모든 실행이 Docker 환경에서 이루어진다고 가정
-        config_path = '/config/config.yaml'
-        init_flag_path = '/config/.init_complete'
+        config_path = CONFIG_PATH
+        init_flag_path = INIT_FLAG_PATH
 
         # 초기화 완료 플래그 확인
         init_flag_exists = os.path.exists(init_flag_path)
@@ -949,7 +950,7 @@ if __name__ == "__main__":
     gshare_web_server = GshareWebServer()
     try:
         # 초기화 완료 플래그 경로
-        init_flag_path = '/config/.init_complete'
+        init_flag_path = INIT_FLAG_PATH
 
         # 설정 완료 여부 확인
         setup_completed = check_config_complete()
