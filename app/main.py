@@ -1,4 +1,5 @@
 import logging
+from bisect import bisect_right
 from logging.handlers import RotatingFileHandler
 import time
 from dataclasses import dataclass, asdict
@@ -437,6 +438,15 @@ class FolderMonitor:
             return []
 
         folder_set = set(folders)
+        lexicographic_paths = sorted(folder_set)
+
+        # 성능 최적화: O(n) 루프 안에서 전체 폴더셋을 다시 순회(O(n^2))하지 않고,
+        # 정렬 + 이진 탐색으로 하위 폴더 존재 여부를 O(log n)에 판별한다.
+        def has_child_folder(path: str) -> bool:
+            path_prefix = path + os.sep
+            next_idx = bisect_right(lexicographic_paths, path)
+            return next_idx < len(lexicographic_paths) and lexicographic_paths[next_idx].startswith(path_prefix)
+
         # 상위 폴더부터 처리하기 위해 경로 길이로 정렬 (짧은 순)
         sorted_folders = sorted(folders, key=lambda path: len(path.split(os.sep)))
         final_mounts = set()
@@ -444,7 +454,6 @@ class FolderMonitor:
         for path in sorted_folders:
             # 1. 이미 선택된 마운트 포인트에 포함되는지 확인 (중복 방지)
             is_covered = False
-            path_prefix = path + os.sep
             for mount in final_mounts:
                 if path.startswith(mount + os.sep):
                     is_covered = True
@@ -458,11 +467,7 @@ class FolderMonitor:
                 final_mounts.add(path)
             else:
                 # 3. 직접 변경이 없다면, 하위 폴더가 변경 목록에 있는지 확인
-                has_child_in_set = False
-                for other in folder_set:
-                    if other != path and other.startswith(path_prefix):
-                        has_child_in_set = True
-                        break
+                has_child_in_set = has_child_folder(path)
 
                 # 하위 폴더가 변경 목록에 없다면(Leaf 노드), 선택해야 함
                 # (예: 파일 삭제되거나 감지되지 않은 변경사항 등)

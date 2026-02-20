@@ -8,3 +8,7 @@
 ## 2025-05-18 - [FolderMonitor Perf]
 **Learning:** Frequent syscalls like `os.path.exists` in a tight loop (e.g., status reporting every tick for thousands of items) can block the event loop and degrade performance.
 **Action:** Use memory caching for file status (e.g., `set` of active symlinks) when possible, updating the cache on file operations instead of polling the disk.
+
+## 2026-02-20 - [Mount Target Selection Complexity]
+**Learning:** `FolderMonitor._filter_mount_targets` had an O(n²) child-folder detection loop (`for path` × `for other in folder_set`) that can dominate scan cycles when many folders change at once.
+**Action:** Keep path collections lexicographically sorted and use binary search prefix checks for descendant existence to keep the hot path closer to O(n log n).
