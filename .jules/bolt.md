@@ -16,3 +16,7 @@
 ## 2026-02-20 - [Timezone Object Reuse in Monitor Loop]
 **Learning:** `pytz.timezone(self.config.TIMEZONE)` was being recreated repeatedly in hot paths (`update_state`, folder change formatting). In this codebase's monitor-driven architecture, that adds avoidable lookup overhead every cycle.
 **Action:** Cache timezone objects once per manager/monitor instance (`self.local_tz`) and reuse for all timestamp formatting/conversion in looped code paths.
+
+## 2026-02-20 - [SMB 링크 제거 경로의 디렉토리 스캔 비용]
+**Learning:** `SMBManager.remove_symlink`가 링크 하나 삭제할 때마다 `os.listdir + os.path.islink`로 links_dir 전체를 스캔해, 링크 수가 많을수록 O(n) syscall 비용이 반복됐다.
+**Action:** 링크 활성 상태는 메모리 캐시(`_active_links`)를 우선 사용하고, 캐시가 비었을 때만 디스크를 1회 재검증하는 패턴을 유지한다.
