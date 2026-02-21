@@ -197,11 +197,55 @@ class FolderMonitor:
             return results
 
         except subprocess.CalledProcessError as e:
-            logging.warning(f"find command failed, falling back to iterative scan: {e}")
-            raise  # Re-raise to trigger fallback
+            logging.warning(f"GNU find scan failed, trying portable scan mode: {e}")
+            return self._scan_folders_find_portable()
         except Exception as e:
-            logging.warning(f"Hybrid scan error, falling back: {e}")
-            raise
+            logging.warning(f"Hybrid scan error, trying portable scan mode: {e}")
+            return self._scan_folders_find_portable()
+
+    def _scan_folders_find_portable(self) -> dict[str, float]:
+        """Portable scan mode without find -printf (busybox 호환)."""
+        results = {}
+
+        cmd = [
+            'find', '.',
+            '(', '-name', '.*', '-o', '-name', '@*', ')',
+            '-prune',
+            '-o',
+            '-type', 'f',
+            '-print0'
+        ]
+
+        result = subprocess.run(
+            cmd,
+            cwd=self.config.MOUNT_PATH,
+            capture_output=True,
+            text=True,
+            check=True,
+            errors='surrogateescape'
+        )
+
+        if not result.stdout:
+            return results
+
+        folders = set()
+        for file_path in result.stdout.split('\0'):
+            if not file_path:
+                continue
+            folder = os.path.dirname(file_path)
+            if folder.startswith('./'):
+                folder = folder[2:]
+            if folder and folder != '.':
+                folders.add(folder)
+
+        for folder in folders:
+            try:
+                abs_folder = os.path.join(self.config.MOUNT_PATH, folder)
+                results[folder] = os.stat(abs_folder).st_mtime
+            except OSError:
+                continue
+
+        return results
 
     def _scan_folders(self) -> dict[str, float]:
         """마운트 경로의 파일이 있는 서브폴더와 수정 시간을 반환 (최적화됨)"""
