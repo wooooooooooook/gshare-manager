@@ -5,6 +5,7 @@ import shlex
 import queue
 import threading
 import time
+from functools import lru_cache
 from typing import Optional, Dict, Any, List, Callable
 from config import GshareConfig  # type: ignore
 
@@ -110,7 +111,7 @@ class Transcoder:
 
         return None
 
-    def _is_skippable_file(self, filename: str, done_set: set) -> bool:
+    def _is_skippable_file(self, filename: str, done_set: Any) -> bool:
         """스캔/트랜스코딩 공통 건너뛰기 조건"""
         if filename == self.done_filename:
             return True
@@ -128,7 +129,12 @@ class Transcoder:
             if files:
                 logging.info(f"{log_prefix}디렉토리 진입: {root} (검색 대상 파일 수: {len(files)})")
 
-            done_set = self._load_done_list(root)
+            # Optimization: check if done_file is in files list to avoid syscall
+            if self.done_filename in files:
+                done_set = self._load_done_list(root)
+            else:
+                done_set = frozenset()
+
             active_rules = self._get_active_rules_for_folder(root)
 
             for filename in files:
@@ -219,17 +225,23 @@ class Transcoder:
             return optimized['original']
         return None
 
+    @lru_cache(maxsize=1024)
+    def _read_done_file_content(self, filepath: str, mtime: float) -> frozenset:
+        """Cache the content of .transcoding_done file based on mtime"""
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return frozenset(line.strip() for line in f if line.strip())
+        except Exception:
+            return frozenset()
 
-    def _load_done_list(self, directory: str) -> set:
+    def _load_done_list(self, directory: str) -> frozenset:
         """디렉토리의 .transcoding_done 파일에서 이미 처리된 파일 목록을 로드"""
         done_file = os.path.join(directory, self.done_filename)
-        if not os.path.exists(done_file):
-            return set()
         try:
-            with open(done_file, 'r', encoding='utf-8') as f:
-                return set(line.strip() for line in f if line.strip())
-        except Exception:
-            return set()
+            stat_result = os.stat(done_file)
+            return self._read_done_file_content(done_file, stat_result.st_mtime)
+        except (FileNotFoundError, OSError):
+            return frozenset()
 
     def _mark_done(self, directory: str, filename: str):
         """ファイルを .transcoding_done에 기록"""
