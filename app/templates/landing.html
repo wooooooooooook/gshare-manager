@@ -132,6 +132,8 @@
         </div>
         
         <form id="setup-form" action="/save-config" method="post">
+            <input type="hidden" id="transcodingEnabledHidden" name="TRANSCODING_ENABLED" value="{{ 'true' if form_data.get('TRANSCODING_ENABLED', False) else 'false' }}">
+            <input type="hidden" id="transcodingRulesHidden" name="TRANSCODING_RULES" value='{{ form_data.get("TRANSCODING_RULES", []) | tojson }}'>
             <ul class="nav nav-tabs" id="setupTabs" role="tablist">
                 <li class="nav-item">
                     <a class="nav-link active" id="proxmox-tab" data-toggle="tab" href="#proxmox" role="tab">Proxmox API</a>
@@ -483,6 +485,7 @@
         // 폼 제출 전 유효성 검사
         document.getElementById('setup-form').addEventListener('submit', async function(e) {
             e.preventDefault(); // 항상 먼저 제출을 방지
+            saveTranscodingConfig();
             
             const requiredFields = document.querySelectorAll('input[required]');
             let allValid = true;
@@ -881,6 +884,7 @@
                 if (enabled) enabled.checked = data.enabled || false;
                 transcodingRules = data.rules || [];
                 renderTranscodingRules();
+                saveTranscodingConfig();
             }).catch(err => console.error('트랜스코딩 설정 로드 오류:', err));
         }
 
@@ -896,8 +900,11 @@
 
         function saveTranscodingConfig() {
             const enabledEl = document.getElementById('transcodingEnabled');
-            fetch('/update_transcoding_config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !!(enabledEl && enabledEl.checked), rules: transcodingRules }) })
-                .catch(err => console.error('트랜스코딩 설정 저장 오류:', err));
+            const enabledHidden = document.getElementById('transcodingEnabledHidden');
+            const rulesHidden = document.getElementById('transcodingRulesHidden');
+            const enabled = !!(enabledEl && enabledEl.checked);
+            if (enabledHidden) enabledHidden.value = enabled ? 'true' : 'false';
+            if (rulesHidden) rulesHidden.value = JSON.stringify(transcodingRules);
         }
 
         function startTranscodingScan() {

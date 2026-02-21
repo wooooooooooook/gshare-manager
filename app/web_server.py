@@ -1,4 +1,5 @@
 import logging
+import json
 from flask import Flask, jsonify, render_template, request, redirect, url_for  # type: ignore
 import threading
 import subprocess
@@ -390,6 +391,17 @@ class GshareWebServer:
         try:
             form_data = request.form.to_dict()
 
+            transcoding_enabled_raw = str(form_data.get('TRANSCODING_ENABLED', 'false')).strip().lower()
+            transcoding_enabled = transcoding_enabled_raw in ('true', '1', 'yes', 'on')
+            transcoding_rules_raw = form_data.get('TRANSCODING_RULES', '[]')
+            try:
+                transcoding_rules = json.loads(transcoding_rules_raw) if transcoding_rules_raw else []
+                if not isinstance(transcoding_rules, list):
+                    transcoding_rules = []
+            except json.JSONDecodeError:
+                logging.warning('TRANSCODING_RULES JSON 파싱 실패, 빈 목록으로 저장합니다.')
+                transcoding_rules = []
+
             config_dict = {
                 'PROXMOX_HOST': form_data.get('PROXMOX_HOST', ''),
                 'NODE_NAME': form_data.get('NODE_NAME', ''),
@@ -421,6 +433,8 @@ class GshareWebServer:
                 'HA_DISCOVERY_PREFIX': form_data.get('HA_DISCOVERY_PREFIX', 'homeassistant'),
                 'MONITOR_MODE': form_data.get('MONITOR_MODE', 'event'),
                 'EVENT_AUTH_TOKEN': form_data.get('EVENT_AUTH_TOKEN', ''),
+                'TRANSCODING_ENABLED': transcoding_enabled,
+                'TRANSCODING_RULES': transcoding_rules,
                 'SAVE_TIME': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
 
