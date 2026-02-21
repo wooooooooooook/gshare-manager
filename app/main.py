@@ -53,8 +53,17 @@ def _is_nfs_mount_present(mount_path: str, nfs_path: Optional[str] = None) -> bo
                     continue
                 if os.path.realpath(target) != target_mount:
                     continue
-                if target_nfs and source.rstrip('/') != target_nfs:
-                    continue
+
+                # NAS 주소는 IP/호스트명으로 다르게 설정될 수 있어 export 경로 기준으로도 허용한다.
+                if target_nfs:
+                    mounted_source = source.rstrip('/')
+                    target_source = target_nfs.rstrip('/')
+                    if mounted_source != target_source:
+                        mounted_export = mounted_source.split(':', 1)[-1]
+                        target_export = target_source.split(':', 1)[-1]
+                        if mounted_export != target_export:
+                            continue
+
                 return True
     except Exception as e:
         logging.debug(f"/proc/mounts 기반 NFS 확인 실패: {e}")
@@ -77,6 +86,7 @@ class State:
     smb_running: bool
     check_interval: int
     nfs_mounted: bool = False
+    monitor_mode: str = 'event'
 
     def to_dict(self):
         data = asdict(self)
@@ -909,7 +919,8 @@ class GShareManager:
                 monitored_folders=monitored_folders,
                 smb_running=smb_running,
                 check_interval=self.config.CHECK_INTERVAL,
-                nfs_mounted=nfs_mounted
+                nfs_mounted=nfs_mounted,
+                monitor_mode=self.config.MONITOR_MODE
             )
             return current_state
         except Exception as e:
@@ -928,7 +939,8 @@ class GShareManager:
                 last_shutdown_time="-",
                 monitored_folders={},
                 smb_running=False,
-                check_interval=60  # 기본값 60초
+                check_interval=60,  # 기본값 60초
+                monitor_mode='event'
             )
 
     def monitor(self) -> None:

@@ -98,8 +98,17 @@ class GshareWebServer:
                         continue
                     if os.path.realpath(target) != target_mount:
                         continue
-                    if target_nfs and source.rstrip('/') != target_nfs:
-                        continue
+
+                    # NAS 주소는 IP/호스트명으로 다르게 설정될 수 있어 export 경로 기준으로도 허용한다.
+                    if target_nfs:
+                        mounted_source = source.rstrip('/')
+                        target_source = target_nfs.rstrip('/')
+                        if mounted_source != target_source:
+                            mounted_export = mounted_source.split(':', 1)[-1]
+                            target_export = target_source.split(':', 1)[-1]
+                            if mounted_export != target_export:
+                                continue
+
                     return True
         except Exception as e:
             logging.debug(f"/proc/mounts 기반 NFS 확인 실패: {e}")
@@ -165,7 +174,8 @@ class GshareWebServer:
             last_shutdown_time="-",
             monitored_folders={},
             smb_running=False,
-            check_interval=60
+            check_interval=60,
+            monitor_mode='event'
         )
 
     def _get_container_ip(self):
