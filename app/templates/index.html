@@ -31,7 +31,7 @@
 	</style>
 </head>
 
-<body class="bg-gray-100 p-4">
+<body class="bg-gray-100 p-4" data-monitor-mode="{{ state.get('monitor_mode', 'event') }}">
 	<div class="max-w-7xl mx-auto">
 		<!-- 상단 헤더 -->
 		<div class="flex items-center justify-between mb-4 p-4 rounded-md text-gray-800">
@@ -91,8 +91,8 @@
 					</div>
 				</div>
 				<!-- NFS 경고 메시지 추가 -->
-				<div
-					class="bg-red-50 text-red-700 p-2 rounded-lg mb-2 border border-red-200 {% if state['nfs_status'] == 'ON' %}hidden{% endif %}">
+				<div id="nfsWarning"
+					class="bg-red-50 text-red-700 p-2 rounded-lg mb-2 border border-red-200 {% if state['nfs_status'] == 'ON' or state.get('monitor_mode', 'event') == 'event' %}hidden{% endif %}">
 					<div class="flex items-center gap-1">
 						<svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
 							stroke-width="1.5" stroke="currentColor">

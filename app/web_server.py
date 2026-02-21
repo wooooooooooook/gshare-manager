@@ -98,8 +98,17 @@ class GshareWebServer:
                         continue
                     if os.path.realpath(target) != target_mount:
                         continue
-                    if target_nfs and source.rstrip('/') != target_nfs:
-                        continue
+
+                    # NAS 주소는 IP/호스트명으로 다르게 설정될 수 있어 export 경로 기준으로도 허용한다.
+                    if target_nfs:
+                        mounted_source = source.rstrip('/')
+                        target_source = target_nfs.rstrip('/')
+                        if mounted_source != target_source:
+                            mounted_export = mounted_source.split(':', 1)[-1]
+                            target_export = target_source.split(':', 1)[-1]
+                            if mounted_export != target_export:
+                                continue
+
                     return True
         except Exception as e:
             logging.debug(f"/proc/mounts 기반 NFS 확인 실패: {e}")
@@ -165,7 +174,8 @@ class GshareWebServer:
             last_shutdown_time="-",
             monitored_folders={},
             smb_running=False,
-            check_interval=60
+            check_interval=60,
+            monitor_mode='event'
         )
 
     def _get_container_ip(self):
@@ -313,17 +323,17 @@ class GshareWebServer:
 
             if self.manager:
                 try:
-                    current_state = self.manager.current_state
-                    return render_template('index.html', state=current_state, config=self.config, version=version)
+                    current_state = self.manager.current_state or self._get_default_state()
+                    return render_template('index.html', state=current_state.to_dict(), config=self.config, version=version)
                 except Exception as e:
                     logging.error(f"manager.current_state 사용 중 에러: {e}")
                     logging.error(traceback.format_exc())
-                    return render_template('index.html', state=self._get_default_state(), config=self.config, version=version)
+                    return render_template('index.html', state=self._get_default_state().to_dict(), config=self.config, version=version)
             else:
                 logging.info("manager가 없음, 기본 상태 사용")
                 default_state = self._get_default_state()
                 logging.info(f"기본 상태 생성 완료: {default_state is not None}")
-                return render_template('index.html', state=default_state, config=None, version=version)
+                return render_template('index.html', state=default_state.to_dict(), config=None, version=version)
         except Exception as e:
             logging.error(f"메인 페이지 렌더링 중 에러 발생: {e}")
             logging.error(traceback.format_exc())

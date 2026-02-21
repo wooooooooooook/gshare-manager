@@ -87,6 +87,7 @@ let logHovered = false;
 let autoScrollLog = true; // 자동 스크롤 상태 변수 추가
 let socket = null; // Socket.IO 객체
 let userScrolled = false; // userScrolled 변수를 전역 변수로 이동
+let monitorMode = 'event';
 
 // state를 콘솔에 로깅하는 함수
 function logStateToConsole(state) {
@@ -217,6 +218,10 @@ function updateUI(data) {
     // check_interval 업데이트
     if (data.check_interval) {
         checkInterval = data.check_interval;
+    }
+
+    if (data.monitor_mode) {
+        monitorMode = data.monitor_mode;
     }
 
     // 필수 요소들 존재 여부 확인 및 업데이트
@@ -433,6 +438,11 @@ window.onload = function () {
     const initialSMBStatus = document.querySelector('.smb-status span').innerText;
     updateSMBStatus(initialSMBStatus);
 
+    const initialMonitorMode = document.body?.dataset?.monitorMode;
+    if (initialMonitorMode) {
+        monitorMode = initialMonitorMode;
+    }
+
     // 초기 NFS 상태에 따라 컨테이너 표시 설정
     const initialNFSStatus = document.querySelector('.nfs-status span').innerText;
     updateNFSStatus(initialNFSStatus);
@@ -642,7 +652,7 @@ function updateNFSStatus(status) {
     const nfsStatusSpan = document.querySelector('.nfs-status span:first-child');
     const statusIcon = document.querySelector('.nfs-status span:last-child');
     const smbPanel = document.querySelector('.smb-status-container').closest('.flex.flex-col');
-    const nfsWarning = document.querySelector('.bg-red-50.text-red-700.p-2.rounded-lg.mb-2.border.border-red-200');
+    const nfsWarning = document.getElementById('nfsWarning');
 
     if (!nfsStatusContainer) {
         console.error('NFS 상태 컨테이너를 찾을 수 없습니다.');
@@ -705,9 +715,13 @@ function updateNFSStatus(status) {
             console.warn('NFS 상태 아이콘을 찾을 수 없습니다.');
         }
 
-        // NFS 경고 메시지 표시
+        // NFS 경고 메시지 표시 (polling 모드에서만 표시)
         if (nfsWarning) {
-            nfsWarning.classList.remove('hidden');
+            if (monitorMode === 'polling') {
+                nfsWarning.classList.remove('hidden');
+            } else {
+                nfsWarning.classList.add('hidden');
+            }
         }
 
         // SMB 패널 비활성화
