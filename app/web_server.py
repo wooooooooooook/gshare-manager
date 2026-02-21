@@ -323,17 +323,17 @@ class GshareWebServer:
 
             if self.manager:
                 try:
-                    current_state = self.manager.current_state
-                    return render_template('index.html', state=current_state, config=self.config, version=version)
+                    current_state = self.manager.current_state or self._get_default_state()
+                    return render_template('index.html', state=current_state.to_dict(), config=self.config, version=version)
                 except Exception as e:
                     logging.error(f"manager.current_state 사용 중 에러: {e}")
                     logging.error(traceback.format_exc())
-                    return render_template('index.html', state=self._get_default_state(), config=self.config, version=version)
+                    return render_template('index.html', state=self._get_default_state().to_dict(), config=self.config, version=version)
             else:
                 logging.info("manager가 없음, 기본 상태 사용")
                 default_state = self._get_default_state()
                 logging.info(f"기본 상태 생성 완료: {default_state is not None}")
-                return render_template('index.html', state=default_state, config=None, version=version)
+                return render_template('index.html', state=default_state.to_dict(), config=None, version=version)
         except Exception as e:
             logging.error(f"메인 페이지 렌더링 중 에러 발생: {e}")
             logging.error(traceback.format_exc())
