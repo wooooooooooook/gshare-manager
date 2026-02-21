@@ -603,8 +603,11 @@ class GShareManager:
         """GShareManager 초기화 수행 (무거운 작업 포함)"""
         logging.debug("GShareManager 초기화 작업 시작...")
         
-        # FolderMonitor 초기화 (스캔 수행)
-        self.folder_monitor.initialize()
+        # FolderMonitor 초기화 (이벤트 모드에서는 대규모 스캔 생략)
+        if self.config.MONITOR_MODE == 'polling':
+            self.folder_monitor.initialize()
+        else:
+            logging.info('이벤트 수신 모드 활성화: 폴링 초기 스캔을 생략합니다.')
         
         # 초기 상태 업데이트
         self.current_state = self.update_state()
@@ -748,6 +751,41 @@ class GShareManager:
             # 오류 발생 시 전체 상태 업데이트 (monitored_folders는 업데이트 안 함)
             self.current_state = self.update_state(update_monitored_folders=False)
 
+
+    def handle_folder_event(self, folder_path: str) -> tuple[bool, str]:
+        """NAS 이벤트 기반으로 전달된 폴더를 즉시 처리"""
+        try:
+            normalized = (folder_path or '').strip().strip('/')
+            if not normalized:
+                return False, '폴더 경로가 비어 있습니다.'
+
+            event_mtime = time.time()
+            self.folder_monitor.previous_mtimes[normalized] = event_mtime
+            mount_targets = self.folder_monitor._filter_mount_targets([normalized])
+            if not mount_targets:
+                mount_targets = [normalized]
+
+            for folder in mount_targets:
+                self.smb_manager.create_symlink(folder)
+
+            if mount_targets:
+                if self.smb_manager.check_smb_status():
+                    logging.debug('SMB 공유가 이미 활성화되어 있어 재시작을 생략합니다.')
+                elif self.smb_manager.activate_smb_share():
+                    self.last_action = f"SMB 공유 활성화(이벤트): {', '.join(mount_targets)}"
+
+            if not self.proxmox_api.is_vm_running():
+                self.last_action = 'VM 시작(이벤트)'
+                if self.proxmox_api.start_vm():
+                    logging.info('VM 시작 성공 (이벤트 기반)')
+                else:
+                    logging.error('VM 시작 실패 (이벤트 기반)')
+
+            return True, ', '.join(mount_targets)
+        except Exception as e:
+            logging.error(f'이벤트 처리 실패: {e}')
+            return False, str(e)
+
     def update_state(self, update_monitored_folders=True) -> State:
         try:
             logging.debug(f"상태 업데이트, update_monitored_folders: {update_monitored_folders}")
@@ -854,36 +892,39 @@ class GShareManager:
 
                 last_vm_status = current_vm_status
 
-                try:
-                    logging.debug("폴더 수정 시간 변화 확인 중")
-                    changed_folders, should_start_vm, mount_targets = self.folder_monitor.check_modifications()
-                    if changed_folders:
-                        # 변경된 폴더에 대해 트랜스코딩 실행 (SMB 활성화 전)
-                        if self.transcoder.enabled:
-                            transcode_targets = mount_targets if mount_targets else changed_folders
-                            for folder in transcode_targets:
-                                try:
-                                    folder_full_path = os.path.join(self.config.MOUNT_PATH, folder)
-                                    self.transcoder.process_folder(folder_full_path)
-                                except Exception as te:
-                                    logging.error(f"트랜스코딩 오류 ({folder}): {te}")
+                if self.config.MONITOR_MODE == 'polling':
+                    try:
+                        logging.debug("폴더 수정 시간 변화 확인 중")
+                        changed_folders, should_start_vm, mount_targets = self.folder_monitor.check_modifications()
+                        if changed_folders:
+                            # 변경된 폴더에 대해 트랜스코딩 실행 (SMB 활성화 전)
+                            if self.transcoder.enabled:
+                                transcode_targets = mount_targets if mount_targets else changed_folders
+                                for folder in transcode_targets:
+                                    try:
+                                        folder_full_path = os.path.join(self.config.MOUNT_PATH, folder)
+                                        self.transcoder.process_folder(folder_full_path)
+                                    except Exception as te:
+                                        logging.error(f"트랜스코딩 오류 ({folder}): {te}")
 
-                        # SMB가 비활성 상태일 때만 공유 활성화(활성 상태 재시작 방지)
-                        if mount_targets:
-                            if self.smb_manager.check_smb_status():
-                                logging.debug("SMB 공유가 이미 활성화되어 있어 재시작을 생략합니다.")
-                            elif self.smb_manager.activate_smb_share():
-                                self.last_action = f"SMB 공유 활성화: {', '.join(changed_folders)}"
+                            # SMB가 비활성 상태일 때만 공유 활성화(활성 상태 재시작 방지)
+                            if mount_targets:
+                                if self.smb_manager.check_smb_status():
+                                    logging.debug("SMB 공유가 이미 활성화되어 있어 재시작을 생략합니다.")
+                                elif self.smb_manager.activate_smb_share():
+                                    self.last_action = f"SMB 공유 활성화: {', '.join(changed_folders)}"
 
-                        # VM이 정지 상태이고 최근 수정된 파일이 있는 경우에만 시작
-                        if not self.proxmox_api.is_vm_running() and should_start_vm:
-                            self.last_action = "VM 시작"
-                            if self.proxmox_api.start_vm():
-                                logging.info("VM 시작 성공")
-                            else:
-                                logging.error("VM 시작 실패")
-                except Exception as e:
-                    logging.error(f"파일시스템 모니터링 중 오류: {e}")
+                            # VM이 정지 상태이고 최근 수정된 파일이 있는 경우에만 시작
+                            if not self.proxmox_api.is_vm_running() and should_start_vm:
+                                self.last_action = "VM 시작"
+                                if self.proxmox_api.start_vm():
+                                    logging.info("VM 시작 성공")
+                                else:
+                                    logging.error("VM 시작 실패")
+                    except Exception as e:
+                        logging.error(f"파일시스템 모니터링 중 오류: {e}")
+                else:
+                    logging.debug("이벤트 수신 모드이므로 폴링 스캔을 건너뜁니다.")
 
                 try:
                     if self.proxmox_api.is_vm_running():

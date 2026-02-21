@@ -1,0 +1,11 @@
+services:
+  nas_event_relay:
+    build: .
+    container_name: nas_event_relay
+    restart: unless-stopped
+    environment:
+      - WATCH_PATH=/watch
+      - GSHARE_EVENT_URL=http://<gshare-host>:5000/api/folder-event
+      - EVENT_AUTH_TOKEN=<same-token-as-gshare>
+    volumes:
+      - <nas-source-path>:/watch:ro

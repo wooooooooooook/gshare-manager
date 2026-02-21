@@ -1,6 +1,6 @@
 # GShare Manager
 
-GShare Manager는 Proxmox 환경에서 Android VM을 효율적으로 관리하기 위한 자동화 도구입니다. NAS 등의 공유 폴더를 모니터링하다가 파일 변경이 감지되면 VM을 자동으로 시작하고, VM의 사용량이 감소하면 자동으로 종료하는 기능을 제공합니다.
+GShare Manager는 Proxmox 환경에서 Android VM을 효율적으로 관리하기 위한 자동화 도구입니다. 기본 동작은 NAS에서 전달되는 inotify 이벤트를 수신해 폴더를 SMB 공유하고 VM을 자동으로 시작하며, VM의 사용량이 감소하면 자동으로 종료합니다.
 
 ## 주요 기능
 
@@ -56,3 +56,19 @@ docker compose up -d --build
 ## 라이선스
 
 MIT License
+
+
+## NAS 이벤트 수신(inotify) 구성
+
+폴링 대신 NAS에서 inotify 이벤트를 직접 전송하려면 `nas-event-relay/`를 NAS에 배포하세요.
+
+1. NAS에서 `nas-event-relay/docker-compose.yml`의 값을 환경에 맞게 수정
+   - `GSHARE_EVENT_URL`: gshare_manager의 `/api/folder-event` 주소
+   - `EVENT_AUTH_TOKEN`: GShare 설정의 이벤트 인증 토큰과 동일하게 설정
+   - 볼륨: 원본 파일이 생성되는 NAS 경로를 `/watch`로 마운트
+2. NAS에서 `docker compose up -d --build` 실행
+3. GShare 설정 페이지의 모니터링 탭에서
+   - 감시 방식: `이벤트 수신 (event)`
+   - 이벤트 인증 토큰: relay와 동일 값
+
+이후 새 파일 생성/이동 이벤트가 발생하면 해당 폴더명이 GShare로 전달되고 SMB 공유 및 VM 시작이 순차 수행됩니다.

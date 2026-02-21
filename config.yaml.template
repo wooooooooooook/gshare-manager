@@ -32,6 +32,7 @@ credentials:
   shutdown_webhook_url: ""  # MacroDroid 종료 웹훅 URL
   smb_username: ""  # SMB 사용자 이름
   smb_password: ""  # SMB 비밀번호
+  event_auth_token: ""  # NAS 이벤트 인증 토큰
 
 # 시스템 설정
 timezone: "Asia/Seoul"  # 시간대 
@@ -48,3 +49,6 @@ transcoding:
   #   ffmpeg_options: "-c:v copy -c:a aac"
   #   output_pattern: "{{filename}}.transcoded.{{ext}}"
   #   delete_original: true
+# 감시 방식 설정
+monitoring:
+  mode: "event"  # event 또는 polling

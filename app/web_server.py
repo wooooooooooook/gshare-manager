@@ -177,6 +177,8 @@ class GshareWebServer:
         self.app.add_url_rule('/get_config', 'get_config', self.get_config)
         self.app.add_url_rule('/update_config', 'update_config',
                               self.update_config, methods=['POST'])
+        self.app.add_url_rule('/api/folder-event', 'folder_event',
+                              self.folder_event, methods=['POST'])
         self.app.add_url_rule(
             '/test_proxmox_api', 'test_proxmox_api', self.test_proxmox_api, methods=['POST'])
         self.app.add_url_rule('/test_nfs', 'test_nfs',
@@ -337,6 +339,8 @@ class GshareWebServer:
             'MQTT_PASSWORD': creds.get('mqtt_password', ''),
             'MQTT_TOPIC_PREFIX': mqtt.get('topic_prefix', 'gshare'),
             'HA_DISCOVERY_PREFIX': mqtt.get('ha_discovery_prefix', 'homeassistant'),
+            'MONITOR_MODE': yaml_config.get('monitoring', {}).get('mode', 'event'),
+            'EVENT_AUTH_TOKEN': creds.get('event_auth_token', ''),
             'TOKEN_ID': creds.get('token_id', ''),
             'SECRET': creds.get('secret', ''),
             'TRANSCODING_ENABLED': transcoding.get('enabled', False),
@@ -350,6 +354,8 @@ class GshareWebServer:
                 form_data['SMB_PASSWORD'] = '********'
             if form_data['MQTT_PASSWORD']:
                 form_data['MQTT_PASSWORD'] = '********'
+            if form_data['EVENT_AUTH_TOKEN']:
+                form_data['EVENT_AUTH_TOKEN'] = '********'
 
         return form_data
 
@@ -413,6 +419,8 @@ class GshareWebServer:
                 'MQTT_PASSWORD': form_data.get('MQTT_PASSWORD', ''),
                 'MQTT_TOPIC_PREFIX': form_data.get('MQTT_TOPIC_PREFIX', 'gshare'),
                 'HA_DISCOVERY_PREFIX': form_data.get('HA_DISCOVERY_PREFIX', 'homeassistant'),
+                'MONITOR_MODE': form_data.get('MONITOR_MODE', 'event'),
+                'EVENT_AUTH_TOKEN': form_data.get('EVENT_AUTH_TOKEN', ''),
                 'SAVE_TIME': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
 
@@ -449,6 +457,39 @@ class GshareWebServer:
         except Exception as e:
             logging.error(f"설정 저장 중 오류 발생: {e}")
             return render_template('landing.html', error=str(e), form_data=request.form)
+
+    def folder_event(self):
+        """NAS에서 전달한 폴더 이벤트를 처리"""
+        try:
+            if self.manager is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 503
+
+            payload = request.get_json(silent=True) or {}
+            folder = (payload.get('folder') or payload.get('folder_path') or '').strip()
+            token = request.headers.get('X-GShare-Token', '')
+            if not token:
+                token = (payload.get('token') or '').strip()
+
+            expected_token = (getattr(self.config, 'EVENT_AUTH_TOKEN', '') or '').strip() if self.config else ''
+            if expected_token and token != expected_token:
+                return jsonify({"status": "error", "message": "인증 실패"}), 401
+
+            if not folder:
+                return jsonify({"status": "error", "message": "folder 필드가 필요합니다."}), 400
+
+            success, detail = self.manager.handle_folder_event(folder)
+            if not success:
+                return jsonify({"status": "error", "message": f"이벤트 처리 실패: {detail}"}), 500
+
+            self.manager.current_state = self.manager.update_state(update_monitored_folders=True)
+            self.emit_state_update()
+            if self.manager.mqtt_manager:
+                self.manager.mqtt_manager.publish_state(self.manager.current_state)
+
+            return jsonify({"status": "success", "message": "이벤트 처리 완료", "mounted": detail})
+        except Exception as e:
+            logging.error(f"폴더 이벤트 API 오류: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
 
     def show_settings(self):
         return redirect(url_for('setup'))
@@ -1274,7 +1315,9 @@ class GshareWebServer:
                     'MQTT_USERNAME': yaml_config.get('credentials', {}).get('mqtt_username', ''),
                     'MQTT_PASSWORD': yaml_config.get('credentials', {}).get('mqtt_password', ''),
                     'MQTT_TOPIC_PREFIX': yaml_config.get('mqtt', {}).get('topic_prefix', 'gshare'),
-                    'HA_DISCOVERY_PREFIX': yaml_config.get('mqtt', {}).get('ha_discovery_prefix', 'homeassistant')
+                    'HA_DISCOVERY_PREFIX': yaml_config.get('mqtt', {}).get('ha_discovery_prefix', 'homeassistant'),
+                    'MONITOR_MODE': yaml_config.get('monitoring', {}).get('mode', 'event'),
+                    'EVENT_AUTH_TOKEN': yaml_config.get('credentials', {}).get('event_auth_token', '')
                 }
 
                 temp_config_path = '/tmp/imported_config.yaml'

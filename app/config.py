@@ -94,6 +94,10 @@ class GshareConfig:
     ## 트랜스코딩 완료 파일명
     TRANSCODING_DONE_FILENAME: str = '.transcoding_done'
 
+    # 이벤트 수신 기반 감시 설정
+    MONITOR_MODE: str = 'event'
+    EVENT_AUTH_TOKEN: str = ''
+
     def __post_init__(self):
         if self.TRANSCODING_RULES is None:
             self.TRANSCODING_RULES = []
@@ -185,7 +189,9 @@ class GshareConfig:
             'HA_DISCOVERY_PREFIX': yaml_config['mqtt'].get('ha_discovery_prefix', 'homeassistant'),
             'TRANSCODING_ENABLED': yaml_config.get('transcoding', {}).get('enabled', False),
             'TRANSCODING_RULES': yaml_config.get('transcoding', {}).get('rules', []),
-            'TRANSCODING_DONE_FILENAME': yaml_config.get('transcoding', {}).get('done_filename', '.transcoding_done')
+            'TRANSCODING_DONE_FILENAME': yaml_config.get('transcoding', {}).get('done_filename', '.transcoding_done'),
+            'MONITOR_MODE': yaml_config.get('monitoring', {}).get('mode', 'event'),
+            'EVENT_AUTH_TOKEN': yaml_config.get('credentials', {}).get('event_auth_token', '')
         }
 
         # NFS 설정 추가
@@ -215,6 +221,7 @@ class GshareConfig:
                     'credentials': {},
                     'nfs': {},
                     'mqtt': {},
+                    'monitoring': {},
                     'timezone': 'Asia/Seoul',
                     'log_level': 'INFO'
                 }
@@ -227,12 +234,13 @@ class GshareConfig:
                 'credentials': {},
                 'nfs': {},
                 'mqtt': {},
+                'monitoring': {},
                 'timezone': 'Asia/Seoul',
                 'log_level': 'INFO'
             }
 
         # 필수 섹션이 없는 경우 초기화
-        required_sections = ['proxmox', 'mount', 'smb', 'credentials', 'nfs', 'mqtt']
+        required_sections = ['proxmox', 'mount', 'smb', 'credentials', 'nfs', 'mqtt', 'monitoring']
         for section in required_sections:
             if section not in yaml_config or yaml_config[section] is None:
                 yaml_config[section] = {}
@@ -303,6 +311,11 @@ class GshareConfig:
             yaml_config['credentials']['mqtt_username'] = config_dict['MQTT_USERNAME']
         if 'MQTT_PASSWORD' in config_dict:
             yaml_config['credentials']['mqtt_password'] = config_dict['MQTT_PASSWORD']
+        if 'EVENT_AUTH_TOKEN' in config_dict:
+            yaml_config['credentials']['event_auth_token'] = config_dict['EVENT_AUTH_TOKEN']
+
+        if 'MONITOR_MODE' in config_dict:
+            yaml_config['monitoring']['mode'] = config_dict['MONITOR_MODE']
         
         # NFS 설정 저장
         if 'NFS_PATH' in config_dict:
@@ -360,7 +373,8 @@ class GshareConfig:
             'smb': {'share_name': 'gshare', 'comment': 'GShare SMB 공유', 'guest_ok': False, 'read_only': True, 'links_dir': '/mnt/gshare_links', 'port': 445},
             'nfs': {'path': ''},
             'mqtt': {'broker': '', 'port': 1883, 'topic_prefix': 'gshare', 'ha_discovery_prefix': 'homeassistant'},
-            'credentials': {'proxmox_host': '', 'token_id': '', 'secret': '', 'shutdown_webhook_url': '', 'smb_username': '', 'smb_password': '', 'mqtt_username': '', 'mqtt_password': ''},
+            'monitoring': {'mode': 'event'},
+            'credentials': {'proxmox_host': '', 'token_id': '', 'secret': '', 'shutdown_webhook_url': '', 'smb_username': '', 'smb_password': '', 'mqtt_username': '', 'mqtt_password': '', 'event_auth_token': ''},
             'timezone': 'Asia/Seoul',
             'transcoding': {'enabled': False, 'rules': []}
         }
