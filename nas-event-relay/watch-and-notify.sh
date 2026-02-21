@@ -57,9 +57,13 @@ echo "Watching recursively: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES)"
 
 inotifywait -m -r \
   -e close_write -e moved_to -e create \
-  --format '%w%f' "$WATCH_PATH" | while read -r changed; do
+  --format '%e|%w%f' "$WATCH_PATH" | while IFS='|' read -r event changed; do
   if is_excluded_path "$changed" "$EXCLUDED_DIR_NAMES"; then
     continue
+  fi
+
+  if [[ "$event" == *"CLOSE_WRITE"* ]]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] mtime detected: $changed"
   fi
 
   if [[ -d "$changed" ]]; then
