@@ -152,6 +152,9 @@
                     <a class="nav-link" id="mqtt-tab" data-toggle="tab" href="#mqtt" role="tab">MQTT 설정</a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link" id="transcoding-tab" data-toggle="tab" href="#transcoding" role="tab">트랜스코딩</a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link" id="other-tab" data-toggle="tab" href="#other" role="tab">기타 설정</a>
                 </li>
             </ul>
@@ -367,10 +370,46 @@
                             <div id="mqtt-test-result" class="mt-2" style="display: none;"></div>
                         </div>
                         <button type="button" class="btn btn-secondary" onclick="prevTab('smb-tab')">이전</button>
-                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('other-tab')">다음</button>
+                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('transcoding-tab')">다음</button>
                     </div>
                 </div>
                 
+                <!-- 트랜스코딩 설정 -->
+                <div class="tab-pane fade" id="transcoding" role="tabpanel" aria-labelledby="transcoding-tab">
+                    <div class="form-section">
+                        <h3>트랜스코딩 설정</h3>
+                        <div class="custom-control custom-switch mb-3">
+                            <input type="checkbox" class="custom-control-input" id="transcodingEnabled" onchange="saveTranscodingConfig()">
+                            <label class="custom-control-label" for="transcodingEnabled">트랜스코딩 활성화</label>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="mb-0">규칙 목록</h6>
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="addTranscodingRule()">+ 규칙 추가</button>
+                        </div>
+                        <div id="transcodingRules" class="mb-2"></div>
+                        <div id="transcodingEmpty" class="text-muted small mb-3">규칙이 없습니다. "규칙 추가" 버튼으로 등록하세요.</div>
+                        <div class="mb-3">
+                            <button type="button" id="scanTranscodingBtn" class="btn btn-sm btn-outline-success" onclick="startTranscodingScan()">기존 폴더 스캔</button>
+                            <button type="button" id="cancelScanBtn" class="btn btn-sm btn-outline-danger d-none" onclick="cancelTranscodingScan()">스캔 취소</button>
+                        </div>
+                        <div id="transcodingProgress" class="d-none border rounded p-3 bg-light mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span id="transcodingProgressMsg" class="small text-muted">대기 중...</span>
+                                <span id="transcodingProgressPercent" class="small font-weight-bold text-primary">0%</span>
+                            </div>
+                            <div class="progress" style="height: 8px;">
+                                <div id="transcodingProgressBar" class="progress-bar bg-primary" role="progressbar" style="width:0%"></div>
+                            </div>
+                            <div class="d-flex justify-content-between mt-2 small text-muted">
+                                <span id="transcodingProgressFile" class="text-truncate" style="max-width: 55%;"></span>
+                                <span><span class="text-success">✓ <span id="transcodingCompleted">0</span></span> / <span class="text-danger">✗ <span id="transcodingFailed">0</span></span> / <span id="transcodingCurrent">0</span>/<span id="transcodingTotal">0</span></span>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-secondary" onclick="prevTab('mqtt-tab')">이전</button>
+                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('other-tab')">다음</button>
+                    </div>
+                </div>
+
                 <!-- 기타 설정 -->
                 <div class="tab-pane fade" id="other" role="tabpanel" aria-labelledby="other-tab">
                     <div class="form-section">
@@ -393,7 +432,7 @@
                                 <option value="ERROR" {% if form_data.get('LOG_LEVEL') == 'ERROR' %}selected{% endif %}>ERROR</option>
                             </select>
                         </div>
-                        <button type="button" class="btn btn-secondary" onclick="prevTab('mqtt-tab')">이전</button>
+                        <button type="button" class="btn btn-secondary" onclick="prevTab('transcoding-tab')">이전</button>
                         <button type="submit" class="btn btn-success">설정 완료</button>
                     </div>
                 </div>
@@ -432,7 +471,7 @@
         }
         
         function updateProgressBar(tabId) {
-            const tabs = ['proxmox-tab', 'nfs-tab', 'vm-tab', 'monitoring-tab', 'smb-tab', 'mqtt-tab', 'other-tab'];
+            const tabs = ['proxmox-tab', 'nfs-tab', 'vm-tab', 'monitoring-tab', 'smb-tab', 'mqtt-tab', 'transcoding-tab', 'other-tab'];
             const currentIndex = tabs.indexOf(tabId);
             const progressPercentage = ((currentIndex + 1) / tabs.length) * 100;
             
@@ -801,6 +840,117 @@
                 $('.fa-chevron-up').removeClass('fa-chevron-up').addClass('fa-chevron-down');
             });
         });
-    </script>
+    
+        let transcodingRules = [];
+
+        function escapeHtml(text) {
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return String(text || '').replace(/[&<>"']/g, m => map[m]);
+        }
+
+        function renderTranscodingRules() {
+            const container = document.getElementById('transcodingRules');
+            const empty = document.getElementById('transcodingEmpty');
+            if (!container || !empty) return;
+            if (transcodingRules.length === 0) {
+                container.innerHTML = '';
+                empty.classList.remove('d-none');
+                return;
+            }
+            empty.classList.add('d-none');
+            container.innerHTML = transcodingRules.map((rule, index) => {
+                const exts = (rule.file_extensions || []).join(', ');
+                return `<div class="card mb-2"><div class="card-body p-2">
+                    <div class="form-row">
+                        <div class="form-group col-md-3 mb-1"><label class="small mb-1">규칙 이름</label><input class="form-control form-control-sm" value="${escapeHtml(rule.name || '')}" onchange="updateRule(${index}, 'name', this.value)"></div>
+                        <div class="form-group col-md-3 mb-1"><label class="small mb-1">폴더 패턴</label><input class="form-control form-control-sm" value="${escapeHtml(rule.folder_pattern || '')}" onchange="updateRule(${index}, 'folder_pattern', this.value)"></div>
+                        <div class="form-group col-md-3 mb-1"><label class="small mb-1">확장자(콤마)</label><input class="form-control form-control-sm" value="${escapeHtml(exts)}" onchange="updateRuleExtensions(${index}, this.value)"></div>
+                        <div class="form-group col-md-3 mb-1"><label class="small mb-1">출력 패턴</label><input class="form-control form-control-sm" value="${escapeHtml(rule.output_pattern || '{{filename}}.transcoded.{{ext}}')}" onchange="updateRule(${index}, 'output_pattern', this.value)"></div>
+                    </div>
+                    <div class="form-row align-items-end">
+                        <div class="form-group col-md-10 mb-1"><label class="small mb-1">FFmpeg 옵션</label><input class="form-control form-control-sm" value="${escapeHtml(rule.ffmpeg_options || '')}" onchange="updateRule(${index}, 'ffmpeg_options', this.value)"></div>
+                        <div class="form-group col-md-2 mb-1 text-right"><button type="button" class="btn btn-sm btn-outline-danger" onclick="removeTranscodingRule(${index})">삭제</button></div>
+                    </div>
+                </div></div>`;
+            }).join('');
+        }
+
+        function loadTranscodingConfig() {
+            fetch('/get_transcoding_config').then(r => r.json()).then(data => {
+                const enabled = document.getElementById('transcodingEnabled');
+                if (enabled) enabled.checked = data.enabled || false;
+                transcodingRules = data.rules || [];
+                renderTranscodingRules();
+            }).catch(err => console.error('트랜스코딩 설정 로드 오류:', err));
+        }
+
+        function addTranscodingRule() {
+            transcodingRules.push({ name: `규칙 ${transcodingRules.length + 1}`, folder_pattern: '', file_extensions: ['mp4'], ffmpeg_options: '-c:v copy -c:a aac', output_pattern: '{{filename}}.transcoded.{{ext}}' });
+            renderTranscodingRules();
+            saveTranscodingConfig();
+        }
+
+        function removeTranscodingRule(index) { transcodingRules.splice(index, 1); renderTranscodingRules(); saveTranscodingConfig(); }
+        function updateRule(index, field, value) { transcodingRules[index][field] = value; saveTranscodingConfig(); }
+        function updateRuleExtensions(index, value) { transcodingRules[index].file_extensions = value.split(',').map(v => v.trim()).filter(Boolean); saveTranscodingConfig(); }
+
+        function saveTranscodingConfig() {
+            const enabledEl = document.getElementById('transcodingEnabled');
+            fetch('/update_transcoding_config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !!(enabledEl && enabledEl.checked), rules: transcodingRules }) })
+                .catch(err => console.error('트랜스코딩 설정 저장 오류:', err));
+        }
+
+        function startTranscodingScan() {
+            if (!confirm('기존 폴더를 스캔하여 트랜스코딩을 시작하시겠습니까?')) return;
+            const scanBtn = document.getElementById('scanTranscodingBtn');
+            const cancelBtn = document.getElementById('cancelScanBtn');
+            const progressDiv = document.getElementById('transcodingProgress');
+            if (scanBtn) scanBtn.disabled = true;
+            if (cancelBtn) cancelBtn.classList.remove('d-none');
+            if (progressDiv) progressDiv.classList.remove('d-none');
+            updateProgressUI({ phase: 'scanning', total_files: 0, current_index: 0, completed: 0, failed: 0, message: '폴더 스캔 중...' });
+            fetch('/scan_transcoding', { method: 'POST' }).then(r => r.json()).then(data => {
+                if (data.status !== 'success') {
+                    alert('오류: ' + data.message);
+                    resetScanUI();
+                }
+            }).catch(err => { console.error('스캔 시작 오류:', err); resetScanUI(); });
+        }
+
+        function cancelTranscodingScan() { fetch('/cancel_transcoding_scan', { method: 'POST' }).catch(() => {}); }
+
+        function updateProgressUI(data) {
+            const byId = (id) => document.getElementById(id);
+            if (!byId('transcodingProgressMsg')) return;
+            byId('transcodingProgressMsg').textContent = data.message || '';
+            byId('transcodingProgressFile').textContent = data.current_file || '';
+            byId('transcodingCompleted').textContent = data.completed || 0;
+            byId('transcodingFailed').textContent = data.failed || 0;
+            byId('transcodingCurrent').textContent = data.current_index || 0;
+            byId('transcodingTotal').textContent = data.total_files || 0;
+            const total = data.total_files || 0;
+            const current = data.current_index || 0;
+            const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+            byId('transcodingProgressPercent').textContent = percent + '%';
+            byId('transcodingProgressBar').style.width = percent + '%';
+            if (data.phase === 'done' || data.phase === 'error') resetScanUI();
+        }
+
+        function resetScanUI() {
+            const scanBtn = document.getElementById('scanTranscodingBtn');
+            const cancelBtn = document.getElementById('cancelScanBtn');
+            if (scanBtn) scanBtn.disabled = false;
+            if (cancelBtn) cancelBtn.classList.add('d-none');
+        }
+
+        loadTranscodingConfig();
+        fetch('/get_scan_status').then(r => r.json()).then(data => {
+            if (data.is_processing || (data.phase && data.phase !== 'idle')) {
+                const progressDiv = document.getElementById('transcodingProgress');
+                if (progressDiv) progressDiv.classList.remove('d-none');
+                updateProgressUI(data);
+            }
+        }).catch(() => {});
+</script>
 </body>
 </html> 
