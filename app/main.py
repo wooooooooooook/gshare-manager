@@ -33,6 +33,35 @@ gshare_manager = None
 gshare_web_server = None
 
 
+def _is_nfs_mount_present(mount_path: str, nfs_path: Optional[str] = None) -> bool:
+    """/proc/mounts 기준으로 nfs/nfs4 마운트 여부를 확인한다."""
+    try:
+        target_mount = os.path.realpath(mount_path)
+        target_nfs = nfs_path.rstrip('/') if nfs_path else None
+
+        with open('/proc/mounts', 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+
+                source = parts[0].replace('\\040', ' ')
+                target = parts[1].replace('\\040', ' ')
+                fs_type = parts[2]
+
+                if fs_type not in ('nfs', 'nfs4'):
+                    continue
+                if os.path.realpath(target) != target_mount:
+                    continue
+                if target_nfs and source.rstrip('/') != target_nfs:
+                    continue
+                return True
+    except Exception as e:
+        logging.debug(f"/proc/mounts 기반 NFS 확인 실패: {e}")
+
+    return False
+
+
 @dataclass
 class State:
     last_check_time: str
@@ -448,40 +477,26 @@ class FolderMonitor:
         if (now - self._folder_list_checked_at) < self._folder_list_ttl:
             return self._folder_list_cache
 
-        cmd = [
-            'find', '.',
-            '-mindepth', '1',
-            '(', '-name', '.*', '-o', '-name', '@*', ')',
-            '-prune',
-            '-o',
-            '-type', 'd',
-            '-printf', '%P\0'
-        ]
-
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=self.config.MOUNT_PATH,
-                capture_output=True,
-                text=True,
-                check=True,
-                errors='surrogateescape'
-            )
-
             paths = []
-            for raw_path in result.stdout.split('\0'):
-                if not raw_path:
-                    continue
-                path = raw_path[2:] if raw_path.startswith('./') else raw_path
-                if path and path != '.':
-                    paths.append(path)
+            root = self.config.MOUNT_PATH
+            stack = [('', root)]
+
+            while stack:
+                rel_path, current_path = stack.pop()
+                with os.scandir(current_path) as it:
+                    for entry in it:
+                        if not entry.is_dir(follow_symlinks=False):
+                            continue
+                        if entry.name.startswith('.') or entry.name.startswith('@'):
+                            continue
+
+                        child_rel_path = os.path.join(rel_path, entry.name) if rel_path else entry.name
+                        paths.append(child_rel_path)
+                        stack.append((child_rel_path, entry.path))
 
             self._folder_list_cache = sorted(set(paths))
             self._folder_list_checked_at = now
-            return self._folder_list_cache
-
-        except subprocess.CalledProcessError as e:
-            logging.warning(f"폴더 목록 조회 실패(find): {e}")
             return self._folder_list_cache
         except Exception as e:
             logging.warning(f"폴더 목록 조회 중 오류: {e}")
@@ -597,12 +612,7 @@ class FolderMonitor:
             if self._nfs_status_cache is not None and (now - self._nfs_status_checked_at) < self._nfs_status_ttl:
                 return self._nfs_status_cache
 
-            # mount 명령어로 현재 마운트된 NFS 리스트 확인
-            mount_check = subprocess.run(
-                ['mount', '-t', 'nfs'], capture_output=True, text=True)
-
-            # NFS_PATH와 MOUNT_PATH가 모두 출력에 있으면 마운트된 것으로 판단
-            is_mounted = self.config.NFS_PATH in mount_check.stdout and self.config.MOUNT_PATH in mount_check.stdout
+            is_mounted = _is_nfs_mount_present(self.config.MOUNT_PATH, self.config.NFS_PATH)
             self._nfs_status_cache = is_mounted
             self._nfs_status_checked_at = now
             return is_mounted
@@ -709,9 +719,7 @@ class GShareManager:
                 logging.debug(f"마운트 디렉토리 생성: {mount_path}")
 
             # 이미 마운트되어 있는지 확인
-            mount_check = subprocess.run(
-                ['mount', '-t', 'nfs'], capture_output=True, text=True)
-            if nfs_path in mount_check.stdout and mount_path in mount_check.stdout:
+            if _is_nfs_mount_present(mount_path, nfs_path):
                 logging.debug(
                     f"NFS가 이미 마운트되어 있습니다: {nfs_path} -> {mount_path}")
                 return

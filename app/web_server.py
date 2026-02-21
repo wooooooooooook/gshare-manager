@@ -78,6 +78,34 @@ class GshareWebServer:
             logging.error(f"앱 버전 읽기 실패: {e}")
             return "Unknown"
 
+    def _is_nfs_mount_present(self, mount_path: str, nfs_path: str = None) -> bool:
+        """/proc/mounts 기준으로 nfs/nfs4 마운트 여부를 확인한다."""
+        try:
+            target_mount = os.path.realpath(mount_path)
+            target_nfs = nfs_path.rstrip('/') if nfs_path else None
+
+            with open('/proc/mounts', 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) < 3:
+                        continue
+
+                    source = parts[0].replace('\\040', ' ')
+                    target = parts[1].replace('\\040', ' ')
+                    fs_type = parts[2]
+
+                    if fs_type not in ('nfs', 'nfs4'):
+                        continue
+                    if os.path.realpath(target) != target_mount:
+                        continue
+                    if target_nfs and source.rstrip('/') != target_nfs:
+                        continue
+                    return True
+        except Exception as e:
+            logging.debug(f"/proc/mounts 기반 NFS 확인 실패: {e}")
+
+        return False
+
     def _setup_logging(self):
         """로깅 설정"""
         # 프로덕션 모드에서는 Flask 로그 비활성화
@@ -792,14 +820,7 @@ class GshareWebServer:
             
             try:
                 # 현재 마운트 상태 확인
-                mount_check = subprocess.run(['mount'], capture_output=True, text=True)
-                is_mounted = False
-                
-                # 마운트 목록에서 해당 경로 검색
-                for line in mount_check.stdout.splitlines():
-                    if mount_path in line and ('nfs' in line or 'type nfs' in line):
-                        is_mounted = True
-                        break
+                is_mounted = self._is_nfs_mount_present(mount_path, self.manager.config.NFS_PATH)
                         
                 if is_mounted:
                     # NFS 마운트 해제 시도
@@ -820,13 +841,7 @@ class GshareWebServer:
                 self.manager._mount_nfs()
                 
                 # 마운트 상태 다시 확인
-                mount_check = subprocess.run(['mount'], capture_output=True, text=True)
-                is_mounted = False
-                
-                for line in mount_check.stdout.splitlines():
-                    if mount_path in line and ('nfs' in line or 'type nfs' in line):
-                        is_mounted = True
-                        break
+                is_mounted = self._is_nfs_mount_present(mount_path, self.manager.config.NFS_PATH)
                 
                 if is_mounted:
                     return jsonify({"status": "success", "message": "NFS가 성공적으로 재마운트되었습니다."})
