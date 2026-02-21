@@ -73,6 +73,7 @@ MIT License
    - 이벤트 인증 토큰: relay와 동일 값
 
 이후 새 파일 생성/이동 이벤트가 발생하면 해당 폴더명이 GShare로 전달되고 SMB 공유 및 VM 시작이 순차 수행됩니다.
+파일 쓰기 완료(`close_write`)로 수정시간(mtime) 변화가 감지되면 relay 컨테이너 로그에 감지 경로를 남깁니다.
 
 > relay는 재귀 감시(`inotifywait -r`)를 사용하며, Synology DSM 메타데이터 디렉토리(기본: `@eaDir`)는 이벤트 전송에서 제외합니다.
 > 추가 제외 디렉토리가 필요하면 `EXCLUDED_DIR_NAMES` 환경변수에 쉼표로 구분해 지정하세요. 예: `@eaDir,#recycle`
