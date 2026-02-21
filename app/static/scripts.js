@@ -1486,6 +1486,7 @@ let transcodingRules = [];
 function toggleTranscodingPanel() {
     const panel = document.getElementById('transcodingPanel');
     const chevron = document.getElementById('transcodingChevron');
+    if (!panel || !chevron) return;
 
     if (panel.classList.contains('hidden')) {
         panel.classList.remove('hidden');
@@ -1501,7 +1502,8 @@ function loadTranscodingConfig() {
     fetch('/get_transcoding_config')
         .then(response => response.json())
         .then(data => {
-            document.getElementById('transcodingEnabled').checked = data.enabled || false;
+            const enabledInput = document.getElementById('transcodingEnabled');
+            if (enabledInput) enabledInput.checked = data.enabled || false;
             transcodingRules = data.rules || [];
             updateTranscodingStatus(data.enabled);
             renderTranscodingRules();
@@ -1527,6 +1529,7 @@ function updateTranscodingStatus(enabled) {
 function renderTranscodingRules() {
     const container = document.getElementById('transcodingRules');
     const emptyMsg = document.getElementById('transcodingEmpty');
+    if (!container || !emptyMsg) return;
 
     if (transcodingRules.length === 0) {
         container.innerHTML = '';
@@ -1537,69 +1540,24 @@ function renderTranscodingRules() {
     emptyMsg.classList.add('hidden');
 
     let html = '';
-    transcodingRules.forEach((rule, index) => {
+    transcodingRules.forEach((rule) => {
         const extensions = (rule.file_extensions || []).join(', ');
         html += `
             <div class="bg-gray-50 rounded-lg p-3 border border-gray-200">
                 <div class="flex items-center justify-between mb-2">
-                    <input type="text" value="${escapeHtml(rule.name || '')}" 
-                        onchange="updateRule(${index}, 'name', this.value)"
-                        placeholder="규칙 이름" 
-                        class="text-sm font-medium text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none px-1 py-0.5 w-48">
-                    <button onclick="removeTranscodingRule(${index})" 
-                        class="text-xs px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded border border-red-200 transition-colors">
-                        삭제
-                    </button>
+                    <span class="text-sm font-medium text-gray-800">${escapeHtml(rule.name || '이름 없는 규칙')}</span>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <div>
-                        <label class="text-xs text-gray-500 block mb-0.5">폴더 패턴</label>
-                        <input type="text" value="${escapeHtml(rule.folder_pattern || '')}"
-                            onchange="updateRule(${index}, 'folder_pattern', this.value)"
-                            placeholder="예: DScam"
-                            class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded bg-white focus:border-blue-500 focus:outline-none">
-                    </div>
-                    <div>
-                        <label class="text-xs text-gray-500 block mb-0.5">파일 확장자 (쉼표 구분)</label>
-                        <input type="text" value="${escapeHtml(extensions)}"
-                            onchange="updateRuleExtensions(${index}, this.value)"
-                            placeholder="예: .mp4, .avi"
-                            class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded bg-white focus:border-blue-500 focus:outline-none">
-                    </div>
-                    <div class="md:col-span-2">
-                        <label class="text-xs text-gray-500 block mb-0.5">FFmpeg 옵션</label>
-                        <input type="text" value="${escapeHtml(rule.ffmpeg_options || '')}"
-                            onchange="updateRule(${index}, 'ffmpeg_options', this.value)"
-                            placeholder="예: -c:v copy -c:a aac"
-                            class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded bg-white focus:border-blue-500 focus:outline-none font-mono">
-                    </div>
-                    <div class="md:col-span-2">
-                        <label class="text-xs text-gray-500 block mb-0.5">출력 파일명 패턴 (<code class="text-blue-600">{{filename}}</code> = 원본이름, <code class="text-blue-600">{{ext}}</code> = 확장자)</label>
-                        <input type="text" value="${escapeHtml(rule.output_pattern || '{{filename}}.transcoded.{{ext}}')}"
-                            onchange="updateRule(${index}, 'output_pattern', this.value)"
-                            placeholder="예: {{filename}}.transcoded.{{ext}}"
-                            class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded bg-white focus:border-blue-500 focus:outline-none font-mono">
-                    </div>
-                </div>
-                <div class="mt-2">
-                    <label class="flex items-center gap-1.5 cursor-pointer">
-                        <input type="checkbox" ${rule.delete_original !== false ? 'checked' : ''}
-                            onchange="updateRule(${index}, 'delete_original', this.checked)"
-                            class="w-3.5 h-3.5 rounded">
-                        <span class="text-xs text-gray-600">원본 파일 삭제 (변환 파일로 대체)</span>
-                    </label>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-700">
+                    <div><span class="text-gray-500">폴더 패턴:</span> ${escapeHtml(rule.folder_pattern || '-')}</div>
+                    <div><span class="text-gray-500">파일 확장자:</span> ${escapeHtml(extensions || '-')}</div>
+                    <div class="md:col-span-2"><span class="text-gray-500">FFmpeg 옵션:</span> <code class="text-[11px]">${escapeHtml(rule.ffmpeg_options || '-')}</code></div>
+                    <div class="md:col-span-2"><span class="text-gray-500">출력 패턴:</span> ${escapeHtml(rule.output_pattern || '{{filename}}.transcoded.{{ext}}')}</div>
                 </div>
             </div>
         `;
     });
 
     container.innerHTML = html;
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 function addTranscodingRule() {
@@ -1637,7 +1595,8 @@ function updateRuleExtensions(index, value) {
 }
 
 function saveTranscodingConfig() {
-    const enabled = document.getElementById('transcodingEnabled').checked;
+    const enabledInput = document.getElementById('transcodingEnabled');
+    const enabled = enabledInput ? enabledInput.checked : false;
     updateTranscodingStatus(enabled);
 
     fetch('/update_transcoding_config', {
@@ -1665,6 +1624,8 @@ document.addEventListener('DOMContentLoaded', function () {
         .then(response => response.json())
         .then(data => {
             updateTranscodingStatus(data.enabled || false);
+            transcodingRules = data.rules || [];
+            renderTranscodingRules();
         })
         .catch(() => { });
 
@@ -1711,10 +1672,12 @@ function startTranscodingScan() {
     const cancelBtn = document.getElementById('cancelScanBtn');
     const progressDiv = document.getElementById('transcodingProgress');
 
-    scanBtn.disabled = true;
-    scanBtn.classList.add('opacity-50', 'cursor-not-allowed');
-    cancelBtn.classList.remove('hidden');
-    progressDiv.classList.remove('hidden');
+    if (scanBtn) {
+        scanBtn.disabled = true;
+        scanBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+    if (cancelBtn) cancelBtn.classList.remove('hidden');
+    if (progressDiv) progressDiv.classList.remove('hidden');
 
     // 진행상황 초기화
     updateProgressUI({ phase: 'scanning', total_files: 0, current_index: 0, current_file: '', completed: 0, failed: 0, message: '폴더 스캔 중...' });
@@ -1798,7 +1761,9 @@ function resetScanUI() {
     const scanBtn = document.getElementById('scanTranscodingBtn');
     const cancelBtn = document.getElementById('cancelScanBtn');
 
-    scanBtn.disabled = false;
-    scanBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-    cancelBtn.classList.add('hidden');
+    if (scanBtn) {
+        scanBtn.disabled = false;
+        scanBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+    if (cancelBtn) cancelBtn.classList.add('hidden');
 }
