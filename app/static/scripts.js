@@ -14,6 +14,14 @@ function parseDate(dateStr) {
     }
 }
 
+function toSortableTimestamp(dateStr) {
+    const parsed = parseDate(dateStr);
+    if (!parsed || isNaN(parsed.getTime())) {
+        return Number.NEGATIVE_INFINITY;
+    }
+    return parsed.getTime();
+}
+
 // get_time_ago 함수
 function get_time_ago(timestamp_str) {
     try {
@@ -261,7 +269,7 @@ function updateUI(data) {
     if (data.monitored_folders && Object.keys(data.monitored_folders).length > 0) {
         // mtime 기준으로 정렬된 폴더 배열 생성
         const sortedFolders = Object.entries(data.monitored_folders).sort((a, b) => {
-            return new Date(b[1].mtime) - new Date(a[1].mtime);
+            return toSortableTimestamp(b[1].mtime) - toSortableTimestamp(a[1].mtime);
         });
 
         // 백그라운드로 폴더 목록 처리를 위해 requestAnimationFrame 사용
@@ -898,7 +906,7 @@ function generateFolderListHtml(sortedFolders, showToggleButtons = true, action 
                             <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                             </svg>
-                            <span class="readable-time">${get_time_ago(info.mtime)}</span>
+                            <span class="readable-time">${info.mtime === '-' ? '수정시간 수집 중' : get_time_ago(info.mtime)}</span>
                             <span class="hidden time-string">${info.mtime}</span>
                         </div>
                     </div>
@@ -1003,7 +1011,7 @@ function updateFolderState() {
             if (data.monitored_folders && Object.keys(data.monitored_folders).length > 0) {
                 // mtime 기준으로 정렬된 폴더 배열 생성
                 const sortedFolders = Object.entries(data.monitored_folders).sort((a, b) => {
-                    return new Date(b[1].mtime) - new Date(a[1].mtime);
+                    return toSortableTimestamp(b[1].mtime) - toSortableTimestamp(a[1].mtime);
                 });
 
                 // 대규모 폴더 리스트 처리 최적화
@@ -1206,7 +1214,7 @@ function updateFolderContainer(containerId, folderData, action) {
 
                 if (timeString && readableTime && timeString.innerText !== info.mtime) {
                     timeString.innerText = info.mtime;
-                    readableTime.innerText = getCachedTimeAgo(info.mtime);
+                    readableTime.innerText = info.mtime === '-' ? '수정시간 수집 중' : getCachedTimeAgo(info.mtime);
                     existingItem.dataset.mtime = info.mtime;
                 }
             } else {
@@ -1233,7 +1241,7 @@ function updateFolderContainer(containerId, folderData, action) {
                 }
 
                 // 캐시된 시간 가져오기
-                const cachedTimeAgo = getCachedTimeAgo(info.mtime);
+                const cachedTimeAgo = info.mtime === '-' ? '수정시간 수집 중' : getCachedTimeAgo(info.mtime);
 
                 newItem.innerHTML = `
                     <div class="flex-1 overflow-hidden">
