@@ -11,7 +11,7 @@ sys.modules['web_server'] = MagicMock()
 sys.modules['transcoder'] = MagicMock()
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app'))
-from main import FolderMonitor
+from main import FolderMonitor  # noqa: E402
 
 
 class DummyConfig:
@@ -44,6 +44,24 @@ class TestFolderMonitorFindFallback(unittest.TestCase):
             self.assertIn('A', result)
             self.assertIn('B/C', result)
             self.assertEqual(mock_run.call_count, 2)
+
+
+class TestFolderMonitorListSubfolders(unittest.TestCase):
+    @patch('main.SMBManager')
+    @patch('main.FolderMonitor._get_nfs_ownership', return_value=(1000, 1000))
+    def test_list_subfolders_find_command_uses_escaped_null_delimiter(self, _mock_ownership, _mock_smb):
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, 'alpha'))
+
+            monitor = FolderMonitor(DummyConfig(root), MagicMock(), 0.0)
+
+            with patch('main.subprocess.run', return_value=MagicMock(stdout='alpha\0')) as mock_run:
+                result = monitor._list_subfolders_without_mtime()
+
+            self.assertEqual(result, ['alpha'])
+            cmd = mock_run.call_args.args[0]
+            self.assertIn(r'%P\0', cmd)
+            self.assertNotIn('%P\x00', cmd)
 
 
 if __name__ == '__main__':

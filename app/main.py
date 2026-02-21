@@ -455,7 +455,7 @@ class FolderMonitor:
             '-prune',
             '-o',
             '-type', 'd',
-            '-printf', '%P\0'
+            '-printf', r'%P\0'
         ]
 
         try:
