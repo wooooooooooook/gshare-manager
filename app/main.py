@@ -83,6 +83,9 @@ class FolderMonitor:
         self._nfs_status_cache: Optional[bool] = None
         self._nfs_status_checked_at = 0.0
         self._nfs_status_ttl = 5.0
+        self._folder_list_cache: list[str] = []
+        self._folder_list_checked_at = 0.0
+        self._folder_list_ttl = 10.0
 
         # 서브폴더 정보 업데이트 및 초기 링크 생성은 initialize()에서 수행
         logging.debug("FolderMonitor 객체 생성됨 (초기 스캔은 지연됨)")
@@ -411,23 +414,78 @@ class FolderMonitor:
 
     def get_monitored_folders(self) -> dict:
         """감시 중인 모든 폴더와 수정 시간, 링크 상태를 반환"""
-        folder_times = []
-        for path, mtime in self.previous_mtimes.items():
-            folder_times.append((path, mtime))
+        folders_with_mtime: dict[str, Optional[float]] = dict(self.previous_mtimes)
 
-        folder_times.sort(key=lambda x: x[1], reverse=True)
+        # 이벤트 모드/초기 폴링 단계에서는 mtime 수집 전에도 폴더 목록을 먼저 보여준다.
+        for path in self._list_subfolders_without_mtime():
+            if path not in folders_with_mtime:
+                folders_with_mtime[path] = None
+
+        def sort_key(item: tuple[str, Optional[float]]) -> tuple[int, float, str]:
+            path, mtime = item
+            # mtime가 있는 항목 우선, 이후 최신순, 마지막으로 경로명 순 정렬
+            return (0 if mtime is not None else 1, -(mtime or 0.0), path)
 
         monitored_folders = {}
-        for path, mtime in folder_times:
+        for path, mtime in sorted(folders_with_mtime.items(), key=sort_key):
             # 실제 심볼릭 링크가 존재하는지 확인 (메모리 캐시 사용)
             is_mounted = self.smb_manager.is_link_active(path)
+            mtime_str = datetime.fromtimestamp(mtime, self.local_tz).strftime('%Y-%m-%d %H:%M:%S') if mtime is not None else '-'
 
             monitored_folders[path] = {
-                'mtime': datetime.fromtimestamp(mtime, self.local_tz).strftime('%Y-%m-%d %H:%M:%S'),
+                'mtime': mtime_str,
                 'is_mounted': is_mounted
             }
 
         return monitored_folders
+
+    def _list_subfolders_without_mtime(self) -> list[str]:
+        """mtime 수집 없이 마운트된 하위 폴더 목록만 반환 (짧은 TTL 캐시 사용)."""
+        if not os.path.exists(self.config.MOUNT_PATH):
+            return []
+
+        now = time.monotonic()
+        if (now - self._folder_list_checked_at) < self._folder_list_ttl:
+            return self._folder_list_cache
+
+        cmd = [
+            'find', '.',
+            '-mindepth', '1',
+            '(', '-name', '.*', '-o', '-name', '@*', ')',
+            '-prune',
+            '-o',
+            '-type', 'd',
+            '-printf', '%P\0'
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=self.config.MOUNT_PATH,
+                capture_output=True,
+                text=True,
+                check=True,
+                errors='surrogateescape'
+            )
+
+            paths = []
+            for raw_path in result.stdout.split('\0'):
+                if not raw_path:
+                    continue
+                path = raw_path[2:] if raw_path.startswith('./') else raw_path
+                if path and path != '.':
+                    paths.append(path)
+
+            self._folder_list_cache = sorted(set(paths))
+            self._folder_list_checked_at = now
+            return self._folder_list_cache
+
+        except subprocess.CalledProcessError as e:
+            logging.warning(f"폴더 목록 조회 실패(find): {e}")
+            return self._folder_list_cache
+        except Exception as e:
+            logging.warning(f"폴더 목록 조회 중 오류: {e}")
+            return self._folder_list_cache
 
     def _create_links_for_recently_modified(self) -> None:
         """마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성"""
