@@ -301,7 +301,7 @@ class SMBManager:
             # 심볼릭 링크 제거
             self.cleanup_all_symlinks()
 
-            logging.info(f"SMB 공유 비활성화 성공")
+            logging.info("SMB 공유 비활성화 성공")
             return True
         except Exception as e:
             logging.error(f"SMB 공유 비활성화 실패: {e}")
