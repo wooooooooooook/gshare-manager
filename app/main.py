@@ -437,13 +437,15 @@ class GShareManager:
         """GShareManager 초기화 수행 (무거운 작업 포함)"""
         logging.debug("GShareManager 초기화 작업 시작...")
 
-        # 폴링/이벤트 모드 상관없이 시작 시 최초 1회 폴더 목록과 수정 시간을 수집합니다.
-        mode_str = "폴링" if getattr(self.config, 'MONITOR_MODE', 'polling') == 'polling' else "이벤트"
-        logging.info(f'{mode_str} 모드: 초기 1회 폴더 스캔을 백그라운드에서 시작합니다.')
-        
-        self.initial_scan_in_progress = True
-        self._initial_scan_thread = threading.Thread(target=self._run_initial_scan_async, daemon=True)
-        self._initial_scan_thread.start()
+        # FolderMonitor 초기화 (polling 모드는 비동기 초기 스캔으로 실행)
+        if self.config.MONITOR_MODE == 'polling':
+            logging.info('폴링 모드 초기 스캔을 백그라운드에서 시작합니다.')
+            self.initial_scan_in_progress = True
+            self._initial_scan_thread = threading.Thread(target=self._run_initial_scan_async, daemon=True)
+            self._initial_scan_thread.start()
+        else:
+            logging.info('이벤트 수신 모드 활성화: 폴링 초기 스캔을 생략합니다.')
+            self.initial_scan_in_progress = False
 
         # 초기 상태 업데이트
         self.current_state = self.update_state()
