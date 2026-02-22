@@ -149,6 +149,32 @@ class FolderMonitor:
 
         elapsed_time = time.time() - start_time
         logging.info(f"초기 파일시스템 스캔 완료 - 걸린 시간: {elapsed_time:.3f}초")
+
+    def _get_nfs_ownership(self) -> tuple[int, int]:
+        """마운트 경로의 소유자 UID/GID를 반환한다.
+
+        마운트 경로가 아직 없거나 stat 조회에 실패하면 일반적인 컨테이너 기본값(1000:1000)을 사용한다.
+        """
+        default_uid = 1000
+        default_gid = 1000
+
+        try:
+            mount_path = self.config.MOUNT_PATH
+            if not mount_path:
+                logging.warning("마운트 경로가 비어 있어 기본 UID/GID(1000/1000)를 사용합니다.")
+                return default_uid, default_gid
+
+            if not os.path.exists(mount_path):
+                logging.warning(
+                    f"마운트 경로가 존재하지 않아 기본 UID/GID(1000/1000)를 사용합니다: {mount_path}")
+                return default_uid, default_gid
+
+            stat_info = os.stat(mount_path)
+            return stat_info.st_uid, stat_info.st_gid
+        except Exception as e:
+            logging.warning(f"NFS 소유자 UID/GID 조회 실패, 기본값(1000/1000) 사용: {e}")
+            return default_uid, default_gid
+
     def _prime_folders_with_ls_scan(self) -> None:
         """ls 기반으로 폴더 목록을 먼저 수집해 초기 상태를 빠르게 준비"""
         try:
@@ -437,13 +463,15 @@ class GShareManager:
         """GShareManager 초기화 수행 (무거운 작업 포함)"""
         logging.debug("GShareManager 초기화 작업 시작...")
 
-        # 폴링/이벤트 모드 상관없이 시작 시 최초 1회 폴더 목록과 수정 시간을 수집합니다.
-        mode_str = "폴링" if getattr(self.config, 'MONITOR_MODE', 'polling') == 'polling' else "이벤트"
-        logging.info(f'{mode_str} 모드: 초기 1회 폴더 스캔을 백그라운드에서 시작합니다.')
-        
-        self.initial_scan_in_progress = True
-        self._initial_scan_thread = threading.Thread(target=self._run_initial_scan_async, daemon=True)
-        self._initial_scan_thread.start()
+        # FolderMonitor 초기화 (polling 모드는 비동기 초기 스캔으로 실행)
+        if self.config.MONITOR_MODE == 'polling':
+            logging.info('폴링 모드 초기 스캔을 백그라운드에서 시작합니다.')
+            self.initial_scan_in_progress = True
+            self._initial_scan_thread = threading.Thread(target=self._run_initial_scan_async, daemon=True)
+            self._initial_scan_thread.start()
+        else:
+            logging.info('이벤트 수신 모드 활성화: 폴링 초기 스캔을 생략합니다.')
+            self.initial_scan_in_progress = False
 
         # 초기 상태 업데이트
         self.current_state = self.update_state()
