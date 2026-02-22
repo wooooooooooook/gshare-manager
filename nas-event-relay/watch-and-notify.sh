@@ -116,6 +116,11 @@ watch_included="${watch_counts##*|}"
 
 echo "Watching recursively: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE, watch_dirs_total: $watch_total, watch_dirs_effective: $watch_included)"
 
+watch_counts="$(count_watch_targets)"
+watch_total="${watch_counts%%|*}"
+watch_included="${watch_counts##*|}"
+echo "Watch target summary: watch_dirs_total=$watch_total watch_dirs_effective=$watch_included"
+
 inotifywait -m -r \
   -e close_write -e moved_to -e create \
   --format '%e|%w%f' "$WATCH_PATH" | while IFS='|' read -r event changed; do
