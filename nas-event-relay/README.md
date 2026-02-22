@@ -4,9 +4,6 @@
 
 ## 로그 해석
 
-- 기존에는 `CLOSE_WRITE`일 때만 로그가 찍혀서, `CREATE`/`MOVED_TO` 위주 워크로드에서는 "아무 로그가 없는 것처럼" 보일 수 있었습니다.
-- 현재는 감지된 이벤트마다 `event=<...> path=<...>` 로그를 출력하고, 웹훅 전송 성공/실패도 별도 로그로 남깁니다.
-
 - 시작 시 `Watching recursively: ...` 로그를 즉시 출력하고, 이어서 `Watch target summary: watch_dirs_total=... watch_dirs_effective=...` 로그로 디렉토리 집계를 출력합니다.
 - 전송은 최대 3회(짧은 간격) 재시도하며, 실패 시 `curl_exit`/`http_code`를 함께 로그로 남깁니다.
   - 예: `curl_exit=7`은 대상 서버 연결 실패(서버 미기동/네트워크 경로 문제)

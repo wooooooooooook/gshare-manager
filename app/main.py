@@ -980,9 +980,10 @@ class GShareManager:
             nfs_mounted = False
 
             # monitored_folders 업데이트 여부 확인
-            if not update_monitored_folders and previous_state is not None:
-                # 이전 monitored_folders 재사용
-                monitored_folders = getattr(previous_state, 'monitored_folders', {})
+            if not update_monitored_folders:
+                # 초기 상태 계산 포함: 강제 스캔 없이 이전 값만 재사용(없으면 빈 값 유지)
+                if previous_state is not None:
+                    monitored_folders = getattr(previous_state, 'monitored_folders', {})
             elif hasattr(self, 'folder_monitor'):
                 try:
                     monitored_folders = self.folder_monitor.get_monitored_folders()
