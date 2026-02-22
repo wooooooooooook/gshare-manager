@@ -134,15 +134,32 @@ class FolderMonitor:
         """초기 파일시스템 스캔 및 링크 생성 수행"""
         logging.info("초기 파일시스템 스캔 시작...")
         start_time = time.time()
-        
-        # 서브폴더 정보 업데이트
+
+        # 1단계: ls 기반 폴더명 선수집 (빠른 초기 표시 목적)
+        self._prime_folders_with_ls_scan()
+
+        # 2단계: mtime 정밀 스캔
         self._update_subfolder_mtimes()
 
         # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성
         self._create_links_for_recently_modified()
-        
+
         elapsed_time = time.time() - start_time
         logging.info(f"초기 파일시스템 스캔 완료 - 걸린 시간: {elapsed_time:.3f}초")
+    def _prime_folders_with_ls_scan(self) -> None:
+        """ls 기반으로 폴더 목록을 먼저 수집해 초기 상태를 빠르게 준비"""
+        try:
+            folders = self._list_subfolders_without_mtime()
+            added = 0
+            for folder in folders:
+                if folder not in self.previous_mtimes:
+                    # mtime 스캔 전 단계에서는 플레이스홀더 값 사용
+                    self.previous_mtimes[folder] = 0.0
+                    added += 1
+            logging.info(f"초기 ls 스캔 완료 - 폴더 {len(folders)}개 확인, 신규 {added}개 반영")
+        except Exception as e:
+            logging.warning(f"초기 ls 스캔 실패, mtime 스캔으로 계속 진행: {e}")
+
     def _scan_folders_iterative(self, path: str) -> dict[str, float]:
         """Iteratively scan folders to avoid recursion limits and overhead."""
         results = {}
