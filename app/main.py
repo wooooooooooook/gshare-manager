@@ -185,8 +185,6 @@ class FolderMonitor:
         """Use 'find' command to scan folders (optimized for NFS)."""
         results = {}
         try:
-            scan_interval = int(getattr(self.config, "CHECK_INTERVAL", 60) or 60)
-            scan_timeout_seconds = max(30, scan_interval * 5)
             # Use find to get directories and their mtimes
             # -mindepth 1: exclude root .
             # -name ".*" -o -name "@*": match hidden/system files/dirs
@@ -214,8 +212,7 @@ class FolderMonitor:
                 capture_output=True,
                 text=True,
                 check=True,
-                errors='surrogateescape',
-                timeout=scan_timeout_seconds,
+                errors='surrogateescape'
             )
 
             # Parse output
@@ -242,10 +239,6 @@ class FolderMonitor:
 
             return results
 
-        except subprocess.TimeoutExpired:
-            logging.warning(
-                f"GNU find 스캔이 {scan_timeout_seconds}초를 초과했습니다. portable 스캔 모드로 전환합니다.")
-            return self._scan_folders_find_portable()
         except subprocess.CalledProcessError as e:
             logging.warning(f"GNU find scan failed, trying portable scan mode: {e}")
             return self._scan_folders_find_portable()
@@ -272,8 +265,7 @@ class FolderMonitor:
             capture_output=True,
             text=True,
             check=True,
-            errors='surrogateescape',
-            timeout=max(30, int(getattr(self.config, "CHECK_INTERVAL", 60) or 60) * 5),
+            errors='surrogateescape'
         )
 
         if not result.stdout:
@@ -747,19 +739,38 @@ class GShareManager:
     def initialize(self) -> None:
         """GShareManager 초기화 수행 (무거운 작업 포함)"""
         logging.debug("GShareManager 초기화 작업 시작...")
-        
-        # FolderMonitor 초기화 (이벤트 모드에서는 대규모 스캔 생략)
+
+        # FolderMonitor 초기화 (polling 모드는 비동기 초기 스캔으로 실행)
         if self.config.MONITOR_MODE == 'polling':
-            self.folder_monitor.initialize()
+            logging.info('폴링 모드 초기 스캔을 백그라운드에서 시작합니다.')
+            self.initial_scan_in_progress = True
+            self._initial_scan_thread = threading.Thread(target=self._run_initial_scan_async, daemon=True)
+            self._initial_scan_thread.start()
         else:
             logging.info('이벤트 수신 모드 활성화: 폴링 초기 스캔을 생략합니다.')
+            self.initial_scan_in_progress = False
 
-        self.initial_scan_in_progress = False
-        
         # 초기 상태 업데이트
         self.current_state = self.update_state()
-        
+
         logging.debug("GShareManager 초기화 작업 완료")
+
+    def _run_initial_scan_async(self) -> None:
+        """초기 폴더 스캔을 백그라운드에서 수행"""
+        logging.info('초기 폴더 스캔(비동기) 시작')
+        try:
+            self.folder_monitor.initialize()
+            logging.info('초기 폴더 스캔(비동기) 완료')
+        except Exception as e:
+            logging.error(f'초기 폴더 스캔(비동기) 실패: {e}')
+        finally:
+            self.initial_scan_in_progress = False
+            try:
+                self.current_state = self.update_state(update_monitored_folders=True)
+                if gshare_web_server:
+                    gshare_web_server.emit_state_update()
+            except Exception as e:
+                logging.error(f'비동기 초기 스캔 후 상태 업데이트 실패: {e}')
 
     def _load_last_shutdown_time(self) -> float:
         """VM 마지막 종료 시간을 로드 (UTC 기준)"""
