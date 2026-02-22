@@ -61,6 +61,21 @@ class TestFolderMonitorListSubfolders(unittest.TestCase):
 
             self.assertEqual(result, ['alpha', 'alpha/beta'])
 
+    @patch('main.SMBManager')
+    @patch('main.FolderMonitor._get_nfs_ownership', return_value=(1000, 1000))
+    def test_list_subfolders_prefers_ls_tree_when_available(self, _mock_ownership, _mock_smb):
+        with tempfile.TemporaryDirectory() as root:
+            monitor = FolderMonitor(DummyConfig(root), MagicMock(), 0.0)
+            ls_output = '.:\nalpha/\nbeta/\n\n./alpha:\nchild/\n\n./beta:\n\n./alpha/child:\n'
+
+            with patch('main.subprocess.run', return_value=MagicMock(stdout=ls_output)) as mock_run:
+                result = monitor._list_subfolders_without_mtime()
+
+            self.assertEqual(result, ['alpha', 'alpha/child', 'beta'])
+            args, kwargs = mock_run.call_args
+            self.assertEqual(args[0], ['ls', '-1RF'])
+            self.assertEqual(kwargs.get('cwd'), root)
+
 
 class TestNfsMountPresence(unittest.TestCase):
     def test_is_nfs_mount_present_parses_proc_mounts(self):
