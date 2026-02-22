@@ -116,8 +116,25 @@ class SMBManager:
             logging.error(f"SMB 기본 설정 초기화 실패: {e}")
             raise
 
+    def _check_samba_process_status(self) -> bool:
+        """smbd 프로세스가 실행 중인지 확인"""
+        try:
+            result = subprocess.run(
+                ['pgrep', '-x', 'smbd'],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return result.returncode == 0
+        except Exception as e:
+            logging.error(f"Samba 프로세스 상태 확인 중 오류: {e}")
+            return False
+
     def check_smb_status(self) -> bool:
-        """SMB 서비스가 실행 중인지 확인 - 설정 파일 공유 설정 여부만 확인 (캐시된 상태 반환)"""
+        """SMB 공유 설정 및 smbd 프로세스 실행 여부를 함께 확인"""
+        config_active = self._check_smb_status_from_file()
+        process_active = self._check_samba_process_status()
+        self._is_smb_active = config_active and process_active
         return self._is_smb_active
 
     def _check_smb_status_from_file(self) -> bool:
@@ -145,7 +162,7 @@ class SMBManager:
             
             # 서비스 시작 확인
             time.sleep(1)
-            if not self.check_smb_status():
+            if not self._check_samba_process_status():
                 logging.warning("Samba 서비스 시작 후에도 실행되지 않는 것으로 확인됩니다.")
                 
         except Exception as e:
