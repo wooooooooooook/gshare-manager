@@ -166,6 +166,7 @@ class GshareConfig:
             'CPU_THRESHOLD': yaml_config['proxmox']['cpu'].get('threshold') or 10.0,
             'CHECK_INTERVAL': yaml_config['proxmox']['cpu'].get('check_interval') or 60,
             'THRESHOLD_COUNT': yaml_config['proxmox']['cpu'].get('threshold_count') or 3,
+            'MOUNT_PATH': yaml_config['mount'].get('path', '/mnt/gshare'),
             'SHUTDOWN_WEBHOOK_URL': yaml_config['credentials'].get('shutdown_webhook_url', ''),
             'SMB_SHARE_NAME': yaml_config['smb'].get('share_name', 'gshare'),
             'SMB_USERNAME': yaml_config['credentials'].get('smb_username', ''),
