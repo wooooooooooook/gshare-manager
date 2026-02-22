@@ -70,7 +70,10 @@
 		<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
 			<!-- NFS 마운트 상태 패널 -->
 			<div class="border border-gray-200 rounded-md p-2 bg-white flex flex-col max-h-[40vh]">
-				<h3 class="font-medium mb-2">From NAS</h3>
+				<div class="flex items-center gap-2 mb-2">
+					<h3 class="font-medium">From NAS</h3>
+					<span id="totalFolderCountbadge" class="hidden text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium border border-blue-200"></span>
+				</div>
 				<div id="nfsScanNotice"
 					class="bg-blue-50 text-blue-700 p-2 rounded-lg mb-2 border border-blue-200 {% if not state.get('initial_scan_in_progress', False) %}hidden{% endif %}">
 					<div class="flex items-center gap-1">

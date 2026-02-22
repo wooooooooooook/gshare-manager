@@ -231,6 +231,18 @@ function updateUI(data) {
         monitorMode = data.monitor_mode;
     }
 
+    // 총 감시 폴더 개수 표시
+    const totalFolderBadge = document.getElementById('totalFolderCountbadge');
+    if (totalFolderBadge && data.monitored_folders) {
+        const totalCount = Object.keys(data.monitored_folders).length;
+        if (totalCount > 0) {
+            totalFolderBadge.innerText = `${totalCount}개 감시중`;
+            totalFolderBadge.classList.remove('hidden');
+        } else {
+            totalFolderBadge.classList.add('hidden');
+        }
+    }
+
     hasReceivedStateUpdate = true;
     initialScanInProgress = Boolean(data.initial_scan_in_progress);
 
