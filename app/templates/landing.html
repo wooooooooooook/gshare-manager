@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,6 +13,7 @@
             padding-top: 20px;
             background-color: #f5f5f5;
         }
+
         .setup-container {
             max-width: 800px;
             margin: 0 auto;
@@ -20,72 +22,84 @@
             border-radius: 10px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
         }
+
         .setup-header {
             text-align: center;
             margin-bottom: 30px;
         }
+
         .form-section {
             margin-bottom: 30px;
             padding: 20px;
             border: 1px solid #eee;
             border-radius: 5px;
         }
+
         .form-section h3 {
             margin-bottom: 20px;
             padding-bottom: 10px;
             border-bottom: 1px solid #eee;
         }
+
         .btn-next {
             float: right;
         }
+
         .tab-content {
             padding-top: 20px;
         }
+
         .alert-info {
             background-color: #e8f4f8;
             border-color: #d1ecf1;
         }
+
         #progress-bar {
             margin-bottom: 30px;
         }
+
         .alert-danger {
             margin-bottom: 20px;
         }
+
         .hidden {
             display: none;
         }
     </style>
 </head>
+
 <body>
     <div class="container setup-container">
         <div class="setup-header">
             <h1>GShare 설정</h1>
             <p>앱을 사용하기 위한 필수 설정을 구성해주세요.</p>
         </div>
-        
+
         {% if has_config %}
         <div class="alert alert-info">
             <i class="fas fa-info-circle"></i> 기존 설정 파일이 감지되었습니다. 설정 값이 미리 채워져 있습니다. 필요에 따라 수정한 후 저장하세요.
         </div>
         {% endif %}
-        
+
         {% if error %}
         <div class="alert alert-danger">
             <i class="fas fa-exclamation-triangle"></i> {{ error }}
         </div>
         {% endif %}
-        
+
         <div class="progress" id="progress-bar">
-            <div class="progress-bar" role="progressbar" style="width: 16.67%;" aria-valuenow="16.67" aria-valuemin="0" aria-valuemax="100">1/6</div>
+            <div class="progress-bar" role="progressbar" style="width: 16.67%;" aria-valuenow="16.67" aria-valuemin="0"
+                aria-valuemax="100">1/6</div>
         </div>
-        
+
         <!-- 설정 파일 접기/펼치기 버튼 -->
         <div class="text-center mb-4">
-            <button class="btn btn-sm btn-outline-primary" type="button" data-toggle="collapse" data-target="#configImportExport" aria-expanded="false" aria-controls="configImportExport">
+            <button class="btn btn-sm btn-outline-primary" type="button" data-toggle="collapse"
+                data-target="#configImportExport" aria-expanded="false" aria-controls="configImportExport">
                 <i class="fas fa-cog"></i> 설정 파일 불러오기/내보내기 <i class="fas fa-chevron-down ml-1"></i>
             </button>
         </div>
-        
+
         <!-- 설정 파일 업로드 -->
         <div class="collapse" id="configImportExport">
             <div class="card mb-4">
@@ -95,17 +109,21 @@
                 <div class="card-body">
                     <div class="row">
                         <div class="col-md-8">
-                            <form id="import-config-form" action="/import-config" method="post" enctype="multipart/form-data">
+                            <form id="import-config-form" action="/import-config" method="post"
+                                enctype="multipart/form-data">
                                 <div class="form-group">
                                     <label for="config-file">YAML 설정 파일 업로드</label>
                                     <div class="input-group">
                                         <div class="custom-file">
-                                            <input type="file" class="custom-file-input" id="config-file" name="config_file" accept=".yaml,.yml">
+                                            <input type="file" class="custom-file-input" id="config-file"
+                                                name="config_file" accept=".yaml,.yml">
                                             <label class="custom-file-label" for="config-file">파일 선택...</label>
                                         </div>
                                         <div class="input-group-append">
                                             <button class="btn btn-outline-primary" type="submit">
-                                                <span id="upload-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                                                <span id="upload-spinner"
+                                                    class="spinner-border spinner-border-sm d-none" role="status"
+                                                    aria-hidden="true"></span>
                                                 업로드
                                             </button>
                                         </div>
@@ -130,13 +148,16 @@
                 </div>
             </div>
         </div>
-        
+
         <form id="setup-form" action="/save-config" method="post">
-            <input type="hidden" id="transcodingEnabledHidden" name="TRANSCODING_ENABLED" value="{{ 'true' if form_data.get('TRANSCODING_ENABLED', False) else 'false' }}">
-            <input type="hidden" id="transcodingRulesHidden" name="TRANSCODING_RULES" value='{{ form_data.get("TRANSCODING_RULES", []) | tojson }}'>
+            <input type="hidden" id="transcodingEnabledHidden" name="TRANSCODING_ENABLED"
+                value="{{ 'true' if form_data.get('TRANSCODING_ENABLED', False) else 'false' }}">
+            <input type="hidden" id="transcodingRulesHidden" name="TRANSCODING_RULES"
+                value='{{ form_data.get("TRANSCODING_RULES", []) | tojson }}'>
             <ul class="nav nav-tabs" id="setupTabs" role="tablist">
                 <li class="nav-item">
-                    <a class="nav-link active" id="proxmox-tab" data-toggle="tab" href="#proxmox" role="tab">Proxmox API</a>
+                    <a class="nav-link active" id="proxmox-tab" data-toggle="tab" href="#proxmox" role="tab">Proxmox
+                        API</a>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link" id="nfs-tab" data-toggle="tab" href="#nfs" role="tab">NFS 설정</a>
@@ -160,7 +181,7 @@
                     <a class="nav-link" id="other-tab" data-toggle="tab" href="#other" role="tab">기타 설정</a>
                 </li>
             </ul>
-            
+
             <div class="tab-content" id="setupTabContent">
                 <!-- Proxmox API 설정 -->
                 <div class="tab-pane fade show active" id="proxmox" role="tabpanel" aria-labelledby="proxmox-tab">
@@ -168,34 +189,42 @@
                         <h3>Proxmox API 설정</h3>
                         <div class="form-group">
                             <label for="proxmox_host">Proxmox 호스트 API 주소</label>
-                            <input type="text" class="form-control" id="proxmox_host" name="PROXMOX_HOST" required placeholder="https://proxmox.example.com:8006" value="{{ form_data.get('PROXMOX_HOST', '') }}">
+                            <input type="text" class="form-control" id="proxmox_host" name="PROXMOX_HOST" required
+                                placeholder="https://proxmox.example.com:8006"
+                                value="{{ form_data.get('PROXMOX_HOST', '') }}">
                             <small class="form-text text-muted">https://로 시작하여 /api2/json로 끝나는 전체 URL을 입력하세요.</small>
                         </div>
                         <div class="form-group">
                             <label for="node_name">Proxmox 노드 이름</label>
-                            <input type="text" class="form-control" id="node_name" name="NODE_NAME" required placeholder="pve" value="{{ form_data.get('NODE_NAME', '') }}">
+                            <input type="text" class="form-control" id="node_name" name="NODE_NAME" required
+                                placeholder="pve" value="{{ form_data.get('NODE_NAME', '') }}">
                         </div>
                         <div class="form-group">
                             <label for="vm_id">Android VM ID</label>
-                            <input type="text" class="form-control" id="vm_id" name="VM_ID" required placeholder="100" value="{{ form_data.get('VM_ID', '') }}">
+                            <input type="text" class="form-control" id="vm_id" name="VM_ID" required placeholder="100"
+                                value="{{ form_data.get('VM_ID', '') }}">
                         </div>
                         <div class="form-group">
                             <label for="proxmox_timeout">API 연결 타임아웃 (초)</label>
-                            <input type="number" class="form-control" id="proxmox_timeout" name="PROXMOX_TIMEOUT" value="{{ form_data.get('PROXMOX_TIMEOUT', 5) }}" min="1" required>
+                            <input type="number" class="form-control" id="proxmox_timeout" name="PROXMOX_TIMEOUT"
+                                value="{{ form_data.get('PROXMOX_TIMEOUT', 5) }}" min="1" required>
                             <small class="form-text text-muted">기본값: 5초. 네트워크가 느릴 경우 늘려주세요.</small>
                         </div>
                         <div class="form-group">
                             <label for="token_id">API 토큰 ID</label>
-                            <input type="text" class="form-control" id="token_id" name="TOKEN_ID" required placeholder="user@pam!token" value="{{ form_data.get('TOKEN_ID', '') }}">
+                            <input type="text" class="form-control" id="token_id" name="TOKEN_ID" required
+                                placeholder="user@pam!token" value="{{ form_data.get('TOKEN_ID', '') }}">
                             <small class="form-text text-muted">Proxmox API 토큰 ID를 입력하세요 (예: user@pam!token)</small>
                         </div>
                         <div class="form-group">
                             <label for="secret">API 토큰 시크릿</label>
-                            <input type="password" class="form-control" id="secret" name="SECRET" required value="{{ form_data.get('SECRET', '') }}">
+                            <input type="password" class="form-control" id="secret" name="SECRET" required
+                                value="{{ form_data.get('SECRET', '') }}">
                         </div>
                         <div class="form-group">
                             <button type="button" class="btn btn-info" onclick="testProxmoxAPI()">
-                                <span id="test-proxmox-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                                <span id="test-proxmox-spinner" class="spinner-border spinner-border-sm d-none"
+                                    role="status" aria-hidden="true"></span>
                                 API 연결 테스트
                             </button>
                             <div id="proxmox-test-result" class="mt-2" style="display: none;"></div>
@@ -203,7 +232,7 @@
                         <button type="button" class="btn btn-primary btn-next" onclick="nextTab('nfs-tab')">다음</button>
                     </div>
                 </div>
-                
+
                 <!-- NFS 설정 -->
                 <div class="tab-pane fade" id="nfs" role="tabpanel" aria-labelledby="nfs-tab">
                     <div class="card mb-4">
@@ -214,7 +243,8 @@
                             <div class="alert alert-info">
                                 <i class="fas fa-info-circle"></i>
                                 NAS NFS 허용 IP에는 이 컨테이너를 실행 중인 도커 호스트(LXC 등)의 실제 LAN 주소를 등록하세요.<br>
-                                <small class="text-muted">※ 도커 브리지(예: 172.17.x.x)나 컨테이너 내부 IP가 아니라, NAS에서 직접 접근 가능한 호스트/LXC의 LAN 주소입니다.</small><br>
+                                <small class="text-muted">※ 도커 브리지(예: 172.17.x.x)나 컨테이너 내부 IP가 아니라, NAS에서 직접 접근 가능한
+                                    호스트/LXC의 LAN 주소입니다.</small><br>
                                 예시: <code>192.168.x.x:/mnt/gshare *(rw,sync,no_subtree_check)</code>
                             </div>
                             <div class="alert alert-warning">
@@ -223,128 +253,153 @@
                             </div>
                             <div class="form-group hidden">
                                 <label for="mount_path">로컬 마운트 경로</label>
-                                <input type="text" class="form-control" id="mount_path" name="MOUNT_PATH" required placeholder="/mnt/gshare" value="{{ form_data.get('MOUNT_PATH', '/mnt/gshare') }}">
+                                <input type="text" class="form-control" id="mount_path" name="MOUNT_PATH" required
+                                    placeholder="/mnt/gshare" value="{{ form_data.get('MOUNT_PATH', '/mnt/gshare') }}">
                                 <small class="form-text text-muted">NFS 공유를 마운트할 로컬 경로를 입력하세요.</small>
                             </div>
                             <div class="form-group">
                                 <label for="NFS_PATH">NFS 경로</label>
                                 <div class="input-group">
-                                    <input type="text" class="form-control" id="NFS_PATH" name="NFS_PATH" value="{{ form_data.get('NFS_PATH', '') }}" placeholder="예: 192.168.1.100:/volume1/gshare">
+                                    <input type="text" class="form-control" id="NFS_PATH" name="NFS_PATH"
+                                        value="{{ form_data.get('NFS_PATH', '') }}"
+                                        placeholder="예: 192.168.1.100:/volume1/gshare">
                                     <div class="input-group-append">
                                         <button type="button" class="btn btn-info" onclick="testNFS()">
-                                            <span id="test-nfs-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                                            <span id="test-nfs-spinner" class="spinner-border spinner-border-sm d-none"
+                                                role="status" aria-hidden="true"></span>
                                             테스트
                                         </button>
                                     </div>
                                 </div>
-                                <small class="form-text text-muted">NFS 서버의 공유 경로를 입력하세요. (예: 192.168.1.100:/volume1/gshare)</small>
+                                <small class="form-text text-muted">NFS 서버의 공유 경로를 입력하세요. (예:
+                                    192.168.1.100:/volume1/gshare)</small>
                                 <div id="nfs-test-result" class="mt-2" style="display: none;"></div>
                             </div>
-                            <div class="form-group">
-                                <label for="folder_size_timeout">폴더 용량 확인 시간 초과(초)</label>
-                                <input type="number" class="form-control" id="folder_size_timeout" name="GET_FOLDER_SIZE_TIMEOUT" required value="{{ form_data.get('GET_FOLDER_SIZE_TIMEOUT', 30) }}">
-                                <small class="form-text text-muted">폴더 용량 계산 1회가 이 시간을 넘기면 해당 계산을 중단합니다. (주기 간격 옵션이 아닙니다)</small>
-                            </div>
+
                             <div class="form-group">
                                 <label for="monitor_mode">NFS 폴더 감시 방식</label>
-                                <select class="form-control" id="monitor_mode" name="MONITOR_MODE" onchange="toggleMonitorModeFields()">
-                                    <option value="event" {% if form_data.get('MONITOR_MODE', 'event') == 'event' %}selected{% endif %}>이벤트 수신 (event)</option>
-                                    <option value="polling" {% if form_data.get('MONITOR_MODE') == 'polling' %}selected{% endif %}>주기 스캔 (polling)</option>
+                                <select class="form-control" id="monitor_mode" name="MONITOR_MODE"
+                                    onchange="toggleMonitorModeFields()">
+                                    <option value="event" {% if form_data.get('MONITOR_MODE', 'event' )=='event'
+                                        %}selected{% endif %}>이벤트 수신 (event)</option>
+                                    <option value="polling" {% if form_data.get('MONITOR_MODE')=='polling' %}selected{%
+                                        endif %}>주기 스캔 (polling)</option>
                                 </select>
-                                <small class="form-text text-muted">NAS 이벤트 전달이 가능하면 event를 권장합니다. 불가능한 경우 polling 모드로 NFS 폴더를 주기 스캔합니다.</small>
+                                <small class="form-text text-muted">NAS 이벤트 전달이 가능하면 event를 권장합니다. 불가능한 경우 polling 모드로
+                                    NFS 폴더를 주기 스캔합니다.</small>
                             </div>
                             <div class="form-group" id="event-auth-token-group">
                                 <label for="event_auth_token">이벤트 인증 토큰</label>
-                                <input type="text" class="form-control" id="event_auth_token" name="EVENT_AUTH_TOKEN" value="{{ form_data.get('EVENT_AUTH_TOKEN', '') }}" autocomplete="off">
-                                <small class="form-text text-muted">event 모드에서 `/api/folder-event` 요청의 `X-GShare-Token` 값과 동일해야 합니다.</small>
+                                <input type="text" class="form-control" id="event_auth_token" name="EVENT_AUTH_TOKEN"
+                                    value="{{ form_data.get('EVENT_AUTH_TOKEN', '') }}" autocomplete="off">
+                                <small class="form-text text-muted">event 모드에서 `/api/folder-event` 요청의 `X-GShare-Token`
+                                    값과 동일해야 합니다.</small>
                             </div>
                             <button type="button" class="btn btn-secondary" onclick="prevTab('proxmox-tab')">이전</button>
-                            <button type="button" class="btn btn-primary btn-next" onclick="nextTab('vm-tab')">다음</button>
+                            <button type="button" class="btn btn-primary btn-next"
+                                onclick="nextTab('vm-tab')">다음</button>
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- VM 설정 -->
                 <div class="tab-pane fade" id="vm" role="tabpanel" aria-labelledby="vm-tab">
                     <div class="form-section">
                         <h3>VM 설정</h3>
                         <div class="form-group">
                             <label for="shutdown_webhook">MacroDroid 종료 웹훅 URL</label>
-                            <input type="text" class="form-control" id="shutdown_webhook" name="SHUTDOWN_WEBHOOK_URL" required placeholder="https://example.com/webhook" value="{{ form_data.get('SHUTDOWN_WEBHOOK_URL', '') }}">
+                            <input type="text" class="form-control" id="shutdown_webhook" name="SHUTDOWN_WEBHOOK_URL"
+                                required placeholder="https://example.com/webhook"
+                                value="{{ form_data.get('SHUTDOWN_WEBHOOK_URL', '') }}">
                             <small class="form-text text-muted">Android VM을 종료할 때 사용할 웹훅 URL을 입력하세요.</small>
                         </div>
                         <button type="button" class="btn btn-secondary" onclick="prevTab('nfs-tab')">이전</button>
-                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('monitoring-tab')">다음</button>
+                        <button type="button" class="btn btn-primary btn-next"
+                            onclick="nextTab('monitoring-tab')">다음</button>
                     </div>
                 </div>
-                
+
                 <!-- 모니터링 설정 -->
                 <div class="tab-pane fade" id="monitoring" role="tabpanel" aria-labelledby="monitoring-tab">
                     <div class="form-section">
                         <h3>VM 모니터링 설정</h3>
                         <div class="form-group">
                             <label for="cpu_threshold">CPU 사용량 임계치(%)</label>
-                            <input type="number" class="form-control" id="cpu_threshold" name="CPU_THRESHOLD" required value="{{ form_data.get('CPU_THRESHOLD', 10) }}" min="1" max="100">
+                            <input type="number" class="form-control" id="cpu_threshold" name="CPU_THRESHOLD" required
+                                value="{{ form_data.get('CPU_THRESHOLD', 10) }}" min="1" max="100">
                             <small class="form-text text-muted">이 값 이하로 CPU 사용량이 떨어지면 VM을 종료합니다.</small>
                         </div>
                         <div class="form-group">
                             <label for="check_interval">VM 상태/CPU 체크 간격(초)</label>
-                            <input type="number" class="form-control" id="check_interval" name="CHECK_INTERVAL" required value="{{ form_data.get('CHECK_INTERVAL', 60) }}" min="10">
-                            <small class="form-text text-muted">이 간격으로 VM 상태와 CPU를 확인합니다. polling 모드에서는 NFS 폴더 스캔도 같은 간격으로 수행됩니다.</small>
+                            <input type="number" class="form-control" id="check_interval" name="CHECK_INTERVAL" required
+                                value="{{ form_data.get('CHECK_INTERVAL', 60) }}" min="10">
+                            <small class="form-text text-muted">이 간격으로 VM 상태와 CPU를 확인합니다. polling 모드에서는 NFS 폴더 스캔도 같은
+                                간격으로 수행됩니다.</small>
                         </div>
                         <div class="form-group">
                             <label for="threshold_count">임계치 체크 횟수</label>
-                            <input type="number" class="form-control" id="threshold_count" name="THRESHOLD_COUNT" required value="{{ form_data.get('THRESHOLD_COUNT', 3) }}" min="1">
+                            <input type="number" class="form-control" id="threshold_count" name="THRESHOLD_COUNT"
+                                required value="{{ form_data.get('THRESHOLD_COUNT', 3) }}" min="1">
                             <small class="form-text text-muted">연속으로 이 횟수만큼 임계치 이하로 측정되면 VM을 종료합니다.</small>
                         </div>
                         <button type="button" class="btn btn-secondary" onclick="prevTab('vm-tab')">이전</button>
                         <button type="button" class="btn btn-primary btn-next" onclick="nextTab('smb-tab')">다음</button>
                     </div>
                 </div>
-                
+
                 <!-- SMB 공유 설정 -->
                 <div class="tab-pane fade" id="smb" role="tabpanel" aria-labelledby="smb-tab">
                     <div class="form-section">
                         <h3>SMB 공유 설정</h3>
                         <div class="form-group">
                             <label for="smb_username">SMB 사용자 이름</label>
-                            <input type="text" class="form-control" id="smb_username" name="SMB_USERNAME" required value="{{ form_data.get('SMB_USERNAME', '') }}">
+                            <input type="text" class="form-control" id="smb_username" name="SMB_USERNAME" required
+                                value="{{ form_data.get('SMB_USERNAME', '') }}">
                         </div>
                         <div class="form-group">
                             <label for="smb_password">SMB 비밀번호</label>
-                            <input type="password" class="form-control" id="smb_password" name="SMB_PASSWORD" required value="{{ form_data.get('SMB_PASSWORD', '') }}">
+                            <input type="password" class="form-control" id="smb_password" name="SMB_PASSWORD" required
+                                value="{{ form_data.get('SMB_PASSWORD', '') }}">
                         </div>
                         <div class="form-group">
                             <label for="smb_share_name">SMB 공유 이름</label>
-                            <input type="text" class="form-control" id="smb_share_name" name="SMB_SHARE_NAME" required value="{{ form_data.get('SMB_SHARE_NAME', 'gshare') }}">
+                            <input type="text" class="form-control" id="smb_share_name" name="SMB_SHARE_NAME" required
+                                value="{{ form_data.get('SMB_SHARE_NAME', 'gshare') }}">
                         </div>
                         <div class="form-group hidden">
                             <label for="smb_port">SMB 포트</label>
-                            <input type="number" class="form-control" id="smb_port" name="SMB_PORT" required min="1" max="65535" value="{{ form_data.get('SMB_PORT', 445) }}">
+                            <input type="number" class="form-control" id="smb_port" name="SMB_PORT" required min="1"
+                                max="65535" value="{{ form_data.get('SMB_PORT', 445) }}">
                             <small class="form-text text-muted">기본 SMB 포트는 445입니다. 포트 충돌이 있을 경우 변경하세요.</small>
                         </div>
-                        
+
                         <div class="form-group hidden">
                             <label for="smb_comment">SMB 설명</label>
-                            <input type="text" class="form-control" id="smb_comment" name="SMB_COMMENT" value="{{ form_data.get('SMB_COMMENT', 'GShare SMB 공유') }}">
+                            <input type="text" class="form-control" id="smb_comment" name="SMB_COMMENT"
+                                value="{{ form_data.get('SMB_COMMENT', 'GShare SMB 공유') }}">
                         </div>
                         <div class="form-group">
                             <label for="smb_guest_ok">게스트 접근 허용</label>
                             <select class="form-control" id="smb_guest_ok" name="SMB_GUEST_OK">
-                                <option value="no" {% if form_data.get('SMB_GUEST_OK') != 'yes' %}selected{% endif %}>아니오</option>
-                                <option value="yes" {% if form_data.get('SMB_GUEST_OK') == 'yes' %}selected{% endif %}>예</option>
+                                <option value="no" {% if form_data.get('SMB_GUEST_OK') !='yes' %}selected{% endif %}>아니오
+                                </option>
+                                <option value="yes" {% if form_data.get('SMB_GUEST_OK')=='yes' %}selected{% endif %}>예
+                                </option>
                             </select>
                         </div>
                         <div class="form-group">
                             <label for="smb_read_only">읽기 전용</label>
                             <select class="form-control" id="smb_read_only" name="SMB_READ_ONLY">
-                                <option value="no" {% if form_data.get('SMB_READ_ONLY') != 'yes' %}selected{% endif %}>아니오</option>
-                                <option value="yes" {% if form_data.get('SMB_READ_ONLY') == 'yes' %}selected{% endif %}>예</option>
+                                <option value="no" {% if form_data.get('SMB_READ_ONLY') !='yes' %}selected{% endif %}>
+                                    아니오</option>
+                                <option value="yes" {% if form_data.get('SMB_READ_ONLY')=='yes' %}selected{% endif %}>예
+                                </option>
                             </select>
                         </div>
                         <div class="form-group hidden">
                             <label for="smb_links_dir">SMB 링크 디렉토리</label>
-                            <input type="text" class="form-control" id="smb_links_dir" name="SMB_LINKS_DIR" value="{{ form_data.get('SMB_LINKS_DIR', '/mnt/gshare_links') }}">
+                            <input type="text" class="form-control" id="smb_links_dir" name="SMB_LINKS_DIR"
+                                value="{{ form_data.get('SMB_LINKS_DIR', '/mnt/gshare_links') }}">
                         </div>
                         <button type="button" class="btn btn-secondary" onclick="prevTab('monitoring-tab')">이전</button>
                         <button type="button" class="btn btn-primary btn-next" onclick="nextTab('mqtt-tab')">다음</button>
@@ -357,73 +412,90 @@
                         <h3>MQTT 설정</h3>
                         <div class="form-group">
                             <label for="mqtt_broker">브로커 호스트</label>
-                            <input type="text" class="form-control" id="mqtt_broker" name="MQTT_BROKER" placeholder="예: 192.168.1.100" value="{{ form_data.get('MQTT_BROKER', '') }}">
+                            <input type="text" class="form-control" id="mqtt_broker" name="MQTT_BROKER"
+                                placeholder="예: 192.168.1.100" value="{{ form_data.get('MQTT_BROKER', '') }}">
                         </div>
                         <div class="form-group">
                             <label for="mqtt_port">포트</label>
-                            <input type="number" class="form-control" id="mqtt_port" name="MQTT_PORT" value="{{ form_data.get('MQTT_PORT', 1883) }}">
+                            <input type="number" class="form-control" id="mqtt_port" name="MQTT_PORT"
+                                value="{{ form_data.get('MQTT_PORT', 1883) }}">
                         </div>
                         <div class="form-group">
                             <label for="mqtt_username">사용자 이름</label>
-                            <input type="text" class="form-control" id="mqtt_username" name="MQTT_USERNAME" value="{{ form_data.get('MQTT_USERNAME', '') }}">
+                            <input type="text" class="form-control" id="mqtt_username" name="MQTT_USERNAME"
+                                value="{{ form_data.get('MQTT_USERNAME', '') }}">
                         </div>
                         <div class="form-group">
                             <label for="mqtt_password">비밀번호</label>
-                            <input type="password" class="form-control" id="mqtt_password" name="MQTT_PASSWORD" value="{{ form_data.get('MQTT_PASSWORD', '') }}">
+                            <input type="password" class="form-control" id="mqtt_password" name="MQTT_PASSWORD"
+                                value="{{ form_data.get('MQTT_PASSWORD', '') }}">
                         </div>
                         <div class="form-group">
                             <label for="mqtt_topic_prefix">토픽 접두사</label>
-                            <input type="text" class="form-control" id="mqtt_topic_prefix" name="MQTT_TOPIC_PREFIX" value="{{ form_data.get('MQTT_TOPIC_PREFIX', 'gshare') }}">
+                            <input type="text" class="form-control" id="mqtt_topic_prefix" name="MQTT_TOPIC_PREFIX"
+                                value="{{ form_data.get('MQTT_TOPIC_PREFIX', 'gshare') }}">
                         </div>
                         <div class="form-group">
                             <label for="ha_discovery_prefix">Home Assistant Discovery 접두사</label>
-                            <input type="text" class="form-control" id="ha_discovery_prefix" name="HA_DISCOVERY_PREFIX" value="{{ form_data.get('HA_DISCOVERY_PREFIX', 'homeassistant') }}">
+                            <input type="text" class="form-control" id="ha_discovery_prefix" name="HA_DISCOVERY_PREFIX"
+                                value="{{ form_data.get('HA_DISCOVERY_PREFIX', 'homeassistant') }}">
                         </div>
                         <div class="form-group">
                             <button type="button" class="btn btn-info" onclick="testMQTT()">
-                                <span id="test-mqtt-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                                <span id="test-mqtt-spinner" class="spinner-border spinner-border-sm d-none"
+                                    role="status" aria-hidden="true"></span>
                                 연결 테스트
                             </button>
                             <div id="mqtt-test-result" class="mt-2" style="display: none;"></div>
                         </div>
                         <button type="button" class="btn btn-secondary" onclick="prevTab('smb-tab')">이전</button>
-                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('transcoding-tab')">다음</button>
+                        <button type="button" class="btn btn-primary btn-next"
+                            onclick="nextTab('transcoding-tab')">다음</button>
                     </div>
                 </div>
-                
+
                 <!-- 트랜스코딩 설정 -->
                 <div class="tab-pane fade" id="transcoding" role="tabpanel" aria-labelledby="transcoding-tab">
                     <div class="form-section">
                         <h3>트랜스코딩 설정</h3>
                         <div class="custom-control custom-switch mb-3">
-                            <input type="checkbox" class="custom-control-input" id="transcodingEnabled" onchange="saveTranscodingConfig()">
+                            <input type="checkbox" class="custom-control-input" id="transcodingEnabled"
+                                onchange="saveTranscodingConfig()">
                             <label class="custom-control-label" for="transcodingEnabled">트랜스코딩 활성화</label>
                         </div>
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <h6 class="mb-0">규칙 목록</h6>
-                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="addTranscodingRule()">+ 규칙 추가</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary"
+                                onclick="addTranscodingRule()">+ 규칙 추가</button>
                         </div>
                         <div id="transcodingRules" class="mb-2"></div>
                         <div id="transcodingEmpty" class="text-muted small mb-3">규칙이 없습니다. "규칙 추가" 버튼으로 등록하세요.</div>
                         <div class="mb-3">
-                            <button type="button" id="scanTranscodingBtn" class="btn btn-sm btn-outline-success" onclick="startTranscodingScan()">기존 폴더 스캔</button>
-                            <button type="button" id="cancelScanBtn" class="btn btn-sm btn-outline-danger d-none" onclick="cancelTranscodingScan()">스캔 취소</button>
+                            <button type="button" id="scanTranscodingBtn" class="btn btn-sm btn-outline-success"
+                                onclick="startTranscodingScan()">기존 폴더 스캔</button>
+                            <button type="button" id="cancelScanBtn" class="btn btn-sm btn-outline-danger d-none"
+                                onclick="cancelTranscodingScan()">스캔 취소</button>
                         </div>
                         <div id="transcodingProgress" class="d-none border rounded p-3 bg-light mb-3">
                             <div class="d-flex justify-content-between mb-1">
                                 <span id="transcodingProgressMsg" class="small text-muted">대기 중...</span>
-                                <span id="transcodingProgressPercent" class="small font-weight-bold text-primary">0%</span>
+                                <span id="transcodingProgressPercent"
+                                    class="small font-weight-bold text-primary">0%</span>
                             </div>
                             <div class="progress" style="height: 8px;">
-                                <div id="transcodingProgressBar" class="progress-bar bg-primary" role="progressbar" style="width:0%"></div>
+                                <div id="transcodingProgressBar" class="progress-bar bg-primary" role="progressbar"
+                                    style="width:0%"></div>
                             </div>
                             <div class="d-flex justify-content-between mt-2 small text-muted">
                                 <span id="transcodingProgressFile" class="text-truncate" style="max-width: 55%;"></span>
-                                <span><span class="text-success">✓ <span id="transcodingCompleted">0</span></span> / <span class="text-danger">✗ <span id="transcodingFailed">0</span></span> / <span id="transcodingCurrent">0</span>/<span id="transcodingTotal">0</span></span>
+                                <span><span class="text-success">✓ <span id="transcodingCompleted">0</span></span> /
+                                    <span class="text-danger">✗ <span id="transcodingFailed">0</span></span> / <span
+                                        id="transcodingCurrent">0</span>/<span id="transcodingTotal">0</span></span>
                             </div>
                         </div>
                         <button type="button" class="btn btn-secondary" onclick="prevTab('mqtt-tab')">이전</button>
-                        <button type="button" class="btn btn-primary btn-next" onclick="nextTab('other-tab')">다음</button>
+                        <button type="button" class="btn btn-primary btn-next"
+                            onclick="nextTab('other-tab')">다음</button>
                     </div>
                 </div>
 
@@ -434,19 +506,27 @@
                         <div class="form-group">
                             <label for="timezone">시간대</label>
                             <select class="form-control" id="timezone" name="TIMEZONE">
-                                <option value="Asia/Seoul" {% if form_data.get('TIMEZONE') == 'Asia/Seoul' or not form_data.get('TIMEZONE') %}selected{% endif %}>아시아/서울</option>
-                                <option value="UTC" {% if form_data.get('TIMEZONE') == 'UTC' %}selected{% endif %}>UTC</option>
-                                <option value="America/New_York" {% if form_data.get('TIMEZONE') == 'America/New_York' %}selected{% endif %}>미국/뉴욕</option>
-                                <option value="Europe/London" {% if form_data.get('TIMEZONE') == 'Europe/London' %}selected{% endif %}>유럽/런던</option>
+                                <option value="Asia/Seoul" {% if form_data.get('TIMEZONE')=='Asia/Seoul' or not
+                                    form_data.get('TIMEZONE') %}selected{% endif %}>아시아/서울</option>
+                                <option value="UTC" {% if form_data.get('TIMEZONE')=='UTC' %}selected{% endif %}>UTC
+                                </option>
+                                <option value="America/New_York" {% if form_data.get('TIMEZONE')=='America/New_York'
+                                    %}selected{% endif %}>미국/뉴욕</option>
+                                <option value="Europe/London" {% if form_data.get('TIMEZONE')=='Europe/London'
+                                    %}selected{% endif %}>유럽/런던</option>
                             </select>
                         </div>
                         <div class="form-group">
                             <label for="log_level">로그 레벨</label>
                             <select class="form-control" id="log_level" name="LOG_LEVEL">
-                                <option value="DEBUG" {% if form_data.get('LOG_LEVEL') == 'DEBUG' %}selected{% endif %}>DEBUG</option>
-                                <option value="INFO" {% if form_data.get('LOG_LEVEL') == 'INFO' or not form_data.get('LOG_LEVEL') %}selected{% endif %}>INFO</option>
-                                <option value="WARNING" {% if form_data.get('LOG_LEVEL') == 'WARNING' %}selected{% endif %}>WARNING</option>
-                                <option value="ERROR" {% if form_data.get('LOG_LEVEL') == 'ERROR' %}selected{% endif %}>ERROR</option>
+                                <option value="DEBUG" {% if form_data.get('LOG_LEVEL')=='DEBUG' %}selected{% endif %}>
+                                    DEBUG</option>
+                                <option value="INFO" {% if form_data.get('LOG_LEVEL')=='INFO' or not
+                                    form_data.get('LOG_LEVEL') %}selected{% endif %}>INFO</option>
+                                <option value="WARNING" {% if form_data.get('LOG_LEVEL')=='WARNING' %}selected{% endif
+                                    %}>WARNING</option>
+                                <option value="ERROR" {% if form_data.get('LOG_LEVEL')=='ERROR' %}selected{% endif %}>
+                                    ERROR</option>
                             </select>
                         </div>
                         <button type="button" class="btn btn-secondary" onclick="prevTab('transcoding-tab')">이전</button>
@@ -464,47 +544,47 @@
         // 테스트 상태 추적 변수
         let proxmoxApiTestPassed = false;
         let nfsTestPassed = false;
-        
+
         function nextTab(tabId) {
             // Proxmox API 테스트가 통과되지 않았으면 NFS 탭으로 진행 불가
             if (tabId === 'nfs-tab' && !proxmoxApiTestPassed) {
                 alert('Proxmox API 연결 테스트를 먼저 통과해야 합니다.');
                 return;
             }
-            
+
             // NFS 테스트가 통과되지 않았으면 VM 탭으로 진행 불가
             if (tabId === 'vm-tab' && !nfsTestPassed) {
                 alert('NFS 테스트를 먼저 통과해야 합니다.');
                 return;
             }
-            
+
             $('#setupTabs a[href="#' + tabId.split('-')[0] + '"]').tab('show');
             updateProgressBar(tabId);
         }
-        
+
         function prevTab(tabId) {
             $('#setupTabs a[href="#' + tabId.split('-')[0] + '"]').tab('show');
             updateProgressBar(tabId);
         }
-        
+
         function updateProgressBar(tabId) {
             const tabs = ['proxmox-tab', 'nfs-tab', 'vm-tab', 'monitoring-tab', 'smb-tab', 'mqtt-tab', 'transcoding-tab', 'other-tab'];
             const currentIndex = tabs.indexOf(tabId);
             const progressPercentage = ((currentIndex + 1) / tabs.length) * 100;
-            
+
             $('.progress-bar').css('width', progressPercentage + '%');
             $('.progress-bar').attr('aria-valuenow', progressPercentage);
             $('.progress-bar').text((currentIndex + 1) + '/' + tabs.length);
         }
-        
+
         // 폼 제출 전 유효성 검사
-        document.getElementById('setup-form').addEventListener('submit', async function(e) {
+        document.getElementById('setup-form').addEventListener('submit', async function (e) {
             e.preventDefault(); // 항상 먼저 제출을 방지
             saveTranscodingConfig();
-            
+
             const requiredFields = document.querySelectorAll('input[required]');
             let allValid = true;
-            
+
             requiredFields.forEach(field => {
                 if (!field.value) {
                     allValid = false;
@@ -513,12 +593,12 @@
                     field.classList.remove('is-invalid');
                 }
             });
-            
+
             if (!allValid) {
                 alert('모든 필수 항목을 입력해주세요.');
                 return;
             }
-            
+
             // Proxmox API 테스트가 필요한 경우 자동 실행
             if (!proxmoxApiTestPassed) {
                 const testResult = await runProxmoxTest();
@@ -527,7 +607,7 @@
                     return;
                 }
             }
-            
+
             // NFS 테스트가 필요한 경우 자동 실행
             if (!nfsTestPassed) {
                 const testResult = await runNfsTest();
@@ -536,48 +616,48 @@
                     return;
                 }
             }
-            
+
             // 모든 테스트가 통과되었으므로 폼 제출
             this.submit();
         });
-        
+
         // 설정 파일 업로드 처리
-        document.getElementById('import-config-form').addEventListener('submit', async function(e) {
+        document.getElementById('import-config-form').addEventListener('submit', async function (e) {
             e.preventDefault();
-            
+
             const fileInput = document.getElementById('config-file');
             const spinner = document.getElementById('upload-spinner');
             const resultDiv = document.getElementById('import-result');
-            
+
             if (!fileInput.files || fileInput.files.length === 0) {
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'mt-2 alert alert-warning';
                 resultDiv.textContent = '업로드할 파일을 선택해주세요.';
                 return;
             }
-            
+
             const formData = new FormData(this);
-            
+
             // UI 업데이트
             spinner.classList.remove('d-none');
             resultDiv.style.display = 'none';
-            
+
             try {
                 const response = await fetch('/import-config', {
                     method: 'POST',
                     body: formData
                 });
-                
+
                 const result = await response.json();
-                
+
                 // 결과 표시
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'mt-2 alert';
-                
+
                 switch (result.status) {
                     case 'success':
                         resultDiv.classList.add('alert-success');
-                        
+
                         // 폼 필드 업데이트
                         if (result.data) {
                             for (const [key, value] of Object.entries(result.data)) {
@@ -591,14 +671,14 @@
                                 }
                             }
                         }
-                        
+
                         // 테스트 버튼도 활성화
                         setTimeout(() => {
                             // 자동으로 API 및 NFS 테스트 진행
                             testProxmoxAPI();
                             testNFS();
                         }, 1000);
-                        
+
                         break;
                     case 'warning':
                         resultDiv.classList.add('alert-warning');
@@ -607,13 +687,13 @@
                         resultDiv.classList.add('alert-danger');
                         break;
                 }
-                
+
                 resultDiv.textContent = result.message;
-                
+
                 // 파일 입력 초기화
                 fileInput.value = '';
                 document.querySelector('.custom-file-label').textContent = '파일 선택...';
-                
+
             } catch (error) {
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'mt-2 alert alert-danger';
@@ -622,14 +702,14 @@
                 spinner.classList.add('d-none');
             }
         });
-        
+
         // 파일 선택 시 파일명 표시
-        document.getElementById('config-file').addEventListener('change', function(e) {
+        document.getElementById('config-file').addEventListener('change', function (e) {
             const fileName = e.target.files[0] ? e.target.files[0].name : '파일 선택...';
             const label = document.querySelector('.custom-file-label');
             label.textContent = fileName;
         });
-        
+
         // Proxmox API 테스트 자동 실행 함수
         async function runProxmoxTest() {
             // 필요한 폼 데이터 가져오기
@@ -639,18 +719,18 @@
             const tokenId = document.getElementById('token_id').value;
             const secret = document.getElementById('secret').value;
             const proxmoxTimeout = document.getElementById('proxmox_timeout').value;
-            
+
             // 값 검증
             if (!proxmoxHost || !nodeName || !vmId || !tokenId || !secret) {
                 return false;
             }
-            
+
             // UI 업데이트
             const spinner = document.getElementById('test-proxmox-spinner');
             const resultDiv = document.getElementById('proxmox-test-result');
             spinner.classList.remove('d-none');
             resultDiv.style.display = 'none';
-            
+
             try {
                 const formData = new FormData();
                 formData.append('proxmox_host', proxmoxHost);
@@ -659,24 +739,24 @@
                 formData.append('token_id', tokenId);
                 formData.append('secret', secret);
                 formData.append('proxmox_timeout', proxmoxTimeout);
-                
+
                 const response = await fetch('/test_proxmox_api', {
                     method: 'POST',
                     body: formData
                 });
-                
+
                 const result = await response.json();
-                
+
                 // 결과 표시
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'mt-2 alert';
-                
+
                 // 테스트 상태 업데이트
                 proxmoxApiTestPassed = (result.status === 'success');
-                
+
                 // 다음 버튼 상태 업데이트
                 updateNextButtonState('proxmox');
-                
+
                 switch (result.status) {
                     case 'success':
                         resultDiv.classList.add('alert-success');
@@ -688,7 +768,7 @@
                         resultDiv.classList.add('alert-danger');
                         break;
                 }
-                
+
                 resultDiv.textContent = result.message;
                 return proxmoxApiTestPassed;
             } catch (error) {
@@ -702,41 +782,41 @@
                 spinner.classList.add('d-none');
             }
         }
-        
+
         // NFS 테스트 자동 실행 함수
         async function runNfsTest() {
             const nfsPath = document.getElementById('NFS_PATH').value;
             if (!nfsPath) {
                 return false;
             }
-            
+
             // UI 업데이트
             const spinner = document.getElementById('test-nfs-spinner');
             const resultDiv = document.getElementById('nfs-test-result');
             spinner.classList.remove('d-none');
             resultDiv.style.display = 'none';
-            
+
             try {
                 const formData = new FormData();
                 formData.append('nfs_path', nfsPath);
-                
+
                 const response = await fetch('/test_nfs', {
                     method: 'POST',
                     body: formData
                 });
-                
+
                 const result = await response.json();
-                
+
                 // 결과 표시
                 resultDiv.style.display = 'block';
                 resultDiv.className = 'mt-2 alert';
-                
+
                 // 테스트 상태 업데이트
                 nfsTestPassed = (result.status === 'success');
-                
+
                 // 다음 버튼 상태 업데이트
                 updateNextButtonState('nfs');
-                
+
                 switch (result.status) {
                     case 'success':
                         resultDiv.classList.add('alert-success');
@@ -748,7 +828,7 @@
                         resultDiv.classList.add('alert-danger');
                         break;
                 }
-                
+
                 resultDiv.textContent = result.message;
                 return nfsTestPassed;
             } catch (error) {
@@ -762,12 +842,12 @@
                 spinner.classList.add('d-none');
             }
         }
-        
+
         // 기존 테스트 함수 수정
         async function testProxmoxAPI() {
             return await runProxmoxTest();
         }
-        
+
         async function testNFS() {
             return await runNfsTest();
         }
@@ -820,7 +900,7 @@
                 spinner.classList.add('d-none');
             }
         }
-        
+
         // 탭별 다음 버튼 상태 업데이트
         function updateNextButtonState(tabName) {
             if (tabName === 'proxmox') {
@@ -862,23 +942,23 @@
                 eventAuthTokenInput.removeAttribute('required');
             }
         }
-        
+
         // 페이지 로드 시 초기 버튼 상태 설정
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             updateNextButtonState('proxmox');
             updateNextButtonState('nfs');
             toggleMonitorModeFields();
-            
+
             // 설정 파일 접기/펼치기 버튼 아이콘 변경
             $('#configImportExport').on('show.bs.collapse', function () {
                 $('.fa-chevron-down').removeClass('fa-chevron-down').addClass('fa-chevron-up');
             });
-            
+
             $('#configImportExport').on('hide.bs.collapse', function () {
                 $('.fa-chevron-up').removeClass('fa-chevron-up').addClass('fa-chevron-down');
             });
         });
-    
+
         let transcodingRules = [];
 
         function escapeHtml(text) {
@@ -959,7 +1039,7 @@
             }).catch(err => { console.error('스캔 시작 오류:', err); resetScanUI(); });
         }
 
-        function cancelTranscodingScan() { fetch('/cancel_transcoding_scan', { method: 'POST' }).catch(() => {}); }
+        function cancelTranscodingScan() { fetch('/cancel_transcoding_scan', { method: 'POST' }).catch(() => { }); }
 
         function updateProgressUI(data) {
             const byId = (id) => document.getElementById(id);
@@ -992,7 +1072,8 @@
                 if (progressDiv) progressDiv.classList.remove('d-none');
                 updateProgressUI(data);
             }
-        }).catch(() => {});
-</script>
+        }).catch(() => { });
+    </script>
 </body>
-</html> 
+
+</html>

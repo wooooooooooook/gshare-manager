@@ -38,8 +38,6 @@ class GshareConfig:
     # 폴더용량 감시
     ## 감시폴더 마운트 경로
     MOUNT_PATH: str
-    ## 폴더 용량 확인 시간 초과(초)
-    GET_FOLDER_SIZE_TIMEOUT: int
     ## macrodroid 종료 웹훅 URL
     SHUTDOWN_WEBHOOK_URL: str
     
@@ -168,8 +166,6 @@ class GshareConfig:
             'CPU_THRESHOLD': yaml_config['proxmox']['cpu'].get('threshold') or 10.0,
             'CHECK_INTERVAL': yaml_config['proxmox']['cpu'].get('check_interval') or 60,
             'THRESHOLD_COUNT': yaml_config['proxmox']['cpu'].get('threshold_count') or 3,
-            'MOUNT_PATH': yaml_config['mount'].get('path', '/mnt/gshare'),
-            'GET_FOLDER_SIZE_TIMEOUT': yaml_config['mount'].get('folder_size_timeout') or 30,
             'SHUTDOWN_WEBHOOK_URL': yaml_config['credentials'].get('shutdown_webhook_url', ''),
             'SMB_SHARE_NAME': yaml_config['smb'].get('share_name', 'gshare'),
             'SMB_USERNAME': yaml_config['credentials'].get('smb_username', ''),
@@ -264,8 +260,6 @@ class GshareConfig:
             yaml_config['proxmox']['cpu']['threshold_count'] = int(config_dict['THRESHOLD_COUNT'])
         if 'MOUNT_PATH' in config_dict:
             yaml_config['mount']['path'] = config_dict['MOUNT_PATH']
-        if 'GET_FOLDER_SIZE_TIMEOUT' in config_dict and str(config_dict['GET_FOLDER_SIZE_TIMEOUT']).strip():
-            yaml_config['mount']['folder_size_timeout'] = int(config_dict['GET_FOLDER_SIZE_TIMEOUT'])
         if 'SMB_SHARE_NAME' in config_dict:
             yaml_config['smb']['share_name'] = config_dict['SMB_SHARE_NAME']
         if 'SMB_COMMENT' in config_dict:
@@ -369,7 +363,7 @@ class GshareConfig:
         # 템플릿 파일이 없으면 기본 설정 반환
         return {
             'proxmox': {'node_name': '', 'vm_id': '', 'timeout': 5, 'cpu': {'threshold': 10.0, 'check_interval': 60, 'threshold_count': 3}},
-            'mount': {'path': '/mnt/gshare', 'folder_size_timeout': 30},
+            'mount': {'path': '/mnt/gshare'},
             'smb': {'share_name': 'gshare', 'comment': 'GShare SMB 공유', 'guest_ok': False, 'read_only': True, 'links_dir': '/mnt/gshare_links', 'port': 445},
             'nfs': {'path': ''},
             'mqtt': {'broker': '', 'port': 1883, 'topic_prefix': 'gshare', 'ha_discovery_prefix': 'homeassistant'},
