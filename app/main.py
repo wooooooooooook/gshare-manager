@@ -488,6 +488,14 @@ class FolderMonitor:
             return self._folder_list_cache
 
         try:
+            paths = self._list_subfolders_with_ls_tree()
+            self._folder_list_cache = paths
+            self._folder_list_checked_at = now
+            return self._folder_list_cache
+        except Exception as e:
+            logging.debug(f"ls 트리 기반 폴더 목록 조회 실패, scandir로 대체합니다: {e}")
+
+        try:
             paths = []
             root = self.config.MOUNT_PATH
             stack = [('', root)]
@@ -511,6 +519,52 @@ class FolderMonitor:
         except Exception as e:
             logging.warning(f"폴더 목록 조회 중 오류: {e}")
             return self._folder_list_cache
+
+    def _list_subfolders_with_ls_tree(self) -> list[str]:
+        """ls -R 트리 출력으로 하위 폴더 목록만 빠르게 수집한다."""
+        result = subprocess.run(
+            ['ls', '-1RF'],
+            cwd=self.config.MOUNT_PATH,
+            capture_output=True,
+            text=True,
+            check=True,
+            errors='surrogateescape'
+        )
+
+        if not result.stdout:
+            return []
+
+        current_rel = ''
+        folders = set()
+
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            # ls -R 헤더 형식: .: / ./subdir:
+            if line.endswith(':'):
+                header = line[:-1]
+                if header in ('.', './'):
+                    current_rel = ''
+                elif header.startswith('./'):
+                    current_rel = header[2:]
+                else:
+                    current_rel = header
+                continue
+
+            # -F 옵션으로 디렉토리 이름은 '/'로 끝난다.
+            if not line.endswith('/'):
+                continue
+
+            dirname = line[:-1]
+            if not dirname or dirname.startswith('.') or dirname.startswith('@'):
+                continue
+
+            rel_path = os.path.join(current_rel, dirname) if current_rel else dirname
+            folders.add(rel_path)
+
+        return sorted(folders)
 
     def _create_links_for_recently_modified(self) -> None:
         """마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성"""
