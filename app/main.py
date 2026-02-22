@@ -11,6 +11,7 @@ import pytz  # type: ignore
 import os
 import threading
 import queue
+import math
 import sys
 import atexit
 from config import (GshareConfig, CONFIG_PATH, INIT_FLAG_PATH,
@@ -126,6 +127,8 @@ class FolderMonitor:
         self._folder_list_cache: list[str] = []
         self._folder_list_checked_at = 0.0
         self._folder_list_ttl = 10.0
+        self._scan_cycle = 0
+        self._full_scan_cycle_interval = 12
 
         # 서브폴더 정보 업데이트 및 초기 링크 생성은 initialize()에서 수행
         logging.debug("FolderMonitor 객체 생성됨 (초기 스캔은 지연됨)")
@@ -198,7 +201,20 @@ class FolderMonitor:
 
         return results
 
-    def _scan_folders_hybrid(self) -> dict[str, float]:
+    def _prune_name_args(self) -> list[str]:
+        """find 명령에서 제외(prune)할 디렉토리 조건을 반환"""
+        return [
+            '(', '-name', '.*', '-o', '-name', '@*', '-o', '-name', '#recycle', ')'
+        ]
+
+    def _polling_recent_window_mmin(self) -> int:
+        """polling 스캔 시 최근 변경 탐지에 사용할 mmin 창(분)"""
+        # 요청사항: check_interval * 5 를 mmin으로 환산
+        check_interval = int(getattr(self.config, 'CHECK_INTERVAL', 60))
+        recent_window_seconds = max(1, check_interval * 5)
+        return max(1, math.ceil(recent_window_seconds / 60))
+
+    def _scan_folders_hybrid(self, full_scan: bool = False) -> dict[str, float]:
         """Use 'find' command to scan folders (optimized for NFS)."""
         results = {}
         try:
@@ -211,12 +227,17 @@ class FolderMonitor:
             cmd = [
                 'find', '.',
                 '-mindepth', '1',
-                '(', '-name', '.*', '-o', '-name', '@*', ')',
+                '-type', 'd',
+                *self._prune_name_args(),
                 '-prune',
                 '-o',
                 '-type', 'd',
-                '-printf', r'%T@\t%P\0'
             ]
+
+            if not full_scan:
+                cmd.extend(['-mmin', f'-{self._polling_recent_window_mmin()}'])
+
+            cmd.extend(['-printf', r'%T@\t%P\0'])
 
             # Run find command in the mount path
             # capture_output=True captures stdout/stderr
@@ -258,18 +279,19 @@ class FolderMonitor:
 
         except subprocess.CalledProcessError as e:
             logging.warning(f"GNU find scan failed, trying portable scan mode: {e}")
-            return self._scan_folders_find_portable()
+            return self._scan_folders_find_portable(full_scan=full_scan)
         except Exception as e:
             logging.warning(f"Hybrid scan error, trying portable scan mode: {e}")
-            return self._scan_folders_find_portable()
+            return self._scan_folders_find_portable(full_scan=full_scan)
 
-    def _scan_folders_find_portable(self) -> dict[str, float]:
+    def _scan_folders_find_portable(self, full_scan: bool = False) -> dict[str, float]:
         """Portable scan mode without find -printf (busybox 호환)."""
         results = {}
 
         cmd = [
             'find', '.',
-            '(', '-name', '.*', '-o', '-name', '@*', ')',
+            '-type', 'd',
+            *self._prune_name_args(),
             '-prune',
             '-o',
             '-type', 'f',
@@ -301,13 +323,19 @@ class FolderMonitor:
         for folder in folders:
             try:
                 abs_folder = os.path.join(self.config.MOUNT_PATH, folder)
-                results[folder] = os.stat(abs_folder).st_mtime
+                folder_mtime = os.stat(abs_folder).st_mtime
+                if full_scan:
+                    results[folder] = folder_mtime
+                else:
+                    window_seconds = self._polling_recent_window_mmin() * 60
+                    if (time.time() - folder_mtime) <= window_seconds:
+                        results[folder] = folder_mtime
             except OSError:
                 continue
 
         return results
 
-    def _scan_folders(self) -> dict[str, float]:
+    def _scan_folders(self, full_scan: bool = False) -> dict[str, float]:
         """마운트 경로의 파일이 있는 서브폴더와 수정 시간을 반환 (최적화됨)"""
         if not os.path.exists(self.config.MOUNT_PATH):
             logging.error(f"마운트 경로가 존재하지 않음: {self.config.MOUNT_PATH}")
@@ -315,7 +343,7 @@ class FolderMonitor:
 
         # Try hybrid scan first
         try:
-            return self._scan_folders_hybrid()
+            return self._scan_folders_hybrid(full_scan=full_scan)
         except Exception:
             # Fallback to iterative scan but suppress error if hybrid failed silently
             pass
@@ -330,8 +358,10 @@ class FolderMonitor:
         """Background worker for folder scanning."""
         try:
             logging.debug("백그라운드 스캔 스레드 시작")
-            result = self._scan_folders()
-            self._scan_queue.put(result)
+            self._scan_cycle += 1
+            full_scan = (self._scan_cycle % self._full_scan_cycle_interval == 0)
+            result = self._scan_folders(full_scan=full_scan)
+            self._scan_queue.put((result, full_scan))
             logging.debug("백그라운드 스캔 완료 및 결과 큐에 추가")
         except Exception as e:
             logging.error(f"백그라운드 스캔 중 오류 발생: {e}")
@@ -389,7 +419,7 @@ class FolderMonitor:
         start_time = time.time()
 
         # Use optimized scan
-        current_scan = self._scan_folders()
+        current_scan = self._scan_folders(full_scan=True)
 
         # Identify new folders for logging
         new_folders = set(current_scan.keys()) - set(self.previous_mtimes.keys())
@@ -420,15 +450,16 @@ class FolderMonitor:
 
         # Check for async scan results
         try:
-            current_scan = self._scan_queue.get_nowait()
+            current_scan, full_scan = self._scan_queue.get_nowait()
 
-            # 1. Handle Deleted Folders
-            deleted_folders = set(self.previous_mtimes.keys()) - set(current_scan.keys())
-            for folder in deleted_folders:
-                logging.info(f"폴더 삭제 감지: {folder}")
-                self.smb_manager.remove_symlink(folder)
-                if folder in self.previous_mtimes:
-                    del self.previous_mtimes[folder]
+            # 1. Handle Deleted Folders (정기 Full Scan에서만 수행)
+            if full_scan:
+                deleted_folders = set(self.previous_mtimes.keys()) - set(current_scan.keys())
+                for folder in deleted_folders:
+                    logging.info(f"폴더 삭제 감지: {folder}")
+                    self.smb_manager.remove_symlink(folder)
+                    if folder in self.previous_mtimes:
+                        del self.previous_mtimes[folder]
 
             # 2. Handle Updates (New and Modified)
             for path, current_mtime in current_scan.items():
