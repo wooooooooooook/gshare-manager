@@ -80,7 +80,7 @@ async function setLogLevel() {
     }
 }
 
-let checkInterval = 120; // 기본값
+let checkInterval = 60; // 기본값
 // 로그 자동 업데이트 상태 변수 추가
 let autoUpdateLog = true;
 let logHovered = false;
@@ -217,8 +217,13 @@ function updateUI(data) {
     logStateToConsole(data);
 
     // check_interval 업데이트
-    if (data.check_interval) {
-        checkInterval = data.check_interval;
+    if (Number.isFinite(Number(data.check_interval))) {
+        checkInterval = Number(data.check_interval);
+    }
+
+    const checkIntervalText = document.getElementById('checkIntervalText');
+    if (checkIntervalText) {
+        checkIntervalText.innerText = checkInterval;
     }
 
     if (data.monitor_mode) {
@@ -1021,23 +1026,7 @@ function updateFolderState() {
     fetch('/update_state')
         .then(response => response.json())
         .then(data => {
-            // VM 상태 업데이트 - 선택자 수정
-            const vmStatusSpan = document.querySelector('.vm-status span:first-child');
-            if (vmStatusSpan) {
-                updateVMStatus(data.vm_status);
-            }
-
-            // SMB 상태 업데이트 - 선택자 수정
-            const smbStatusSpan = document.querySelector('.smb-status span:first-child');
-            if (smbStatusSpan) {
-                updateSMBStatus(data.smb_status);
-            }
-
-            // NFS 상태 업데이트 - 선택자 수정
-            const nfsStatusSpan = document.querySelector('.nfs-status span:first-child');
-            if (nfsStatusSpan) {
-                updateNFSStatus(data.nfs_status);
-            }
+            updateUI(data);
 
             // 백그라운드로 폴더 목록 처리
             if (data.monitored_folders && Object.keys(data.monitored_folders).length > 0) {
