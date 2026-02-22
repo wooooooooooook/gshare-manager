@@ -581,10 +581,9 @@ class SMBManager:
                     for filename in os.listdir(self.links_dir)
                 )
             
-            # 남은 심볼릭 링크가 없으면 5초 후 SMB 공유 비활성화
             if not remaining_symlinks:
-                logging.info("남은 심볼릭 링크가 없습니다. 5초 후 SMB 공유를 비활성화합니다.")
-                time.sleep(5)
+                # 모니터링 루프 블로킹을 피하기 위해 지연 대기 없이 즉시 비활성화
+                logging.info("남은 심볼릭 링크가 없어 SMB 공유를 비활성화합니다.")
                 self.deactivate_smb_share()
 
             return True
@@ -654,12 +653,6 @@ class SMBManager:
 
             self._active_links.clear()
             logging.info(f"모든 심볼릭 링크 제거 완료: {self.links_dir}")
-
-            # Deactivate SMB share if no links remain (which is true here)
-            # self.deactivate_smb_share() # Wait, deactivate_smb_share calls cleanup_all_symlinks! Infinite recursion risk if we call it here.
-            # But the original code called remove_symlink which called deactivate_smb_share if list is empty.
-            # However, cleanup_all_symlinks is usually called BY deactivate_smb_share.
-            # So we should NOT call deactivate_smb_share here.
 
         except Exception as e:
             logging.error(f"심볼릭 링크 정리 중 오류 발생: {e}")
