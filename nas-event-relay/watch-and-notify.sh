@@ -4,8 +4,9 @@ set -euo pipefail
 WATCH_PATH="${WATCH_PATH:-/watch}"
 GSHARE_EVENT_URL="${GSHARE_EVENT_URL:-}"
 EVENT_AUTH_TOKEN="${EVENT_AUTH_TOKEN:-}"
-# 쉼표(,)로 구분된 디렉토리 이름 목록. 기본값은 Synology 메타데이터 폴더.
-EXCLUDED_DIR_NAMES="${EXCLUDED_DIR_NAMES:-@eaDir}"
+# 쉼표(,)로 구분된 디렉토리 이름/패턴 목록.
+# 기본값은 Synology 메타데이터 폴더(@eaDir) + '@'/'dot' 접두 폴더 전체 제외.
+EXCLUDED_DIR_NAMES="${EXCLUDED_DIR_NAMES:-@eaDir,@*,.*}"
 
 if [[ -z "$GSHARE_EVENT_URL" ]]; then
   echo "GSHARE_EVENT_URL is required" >&2
@@ -28,17 +29,30 @@ esac
 
 is_excluded_path() {
   local target="$1"
-  local names_csv="$2"
+  local patterns_csv="$2"
   local IFS=','
+  local rel segment pattern
+  local -a patterns
 
-  read -ra names <<< "$names_csv"
-  for name in "${names[@]}"; do
-    name="${name//[[:space:]]/}"
-    [[ -z "$name" ]] && continue
+  rel="${target#${WATCH_PATH}/}"
+  if [[ "$rel" == "$target" ]]; then
+    rel="${target#/}"
+  fi
 
-    if [[ "$target" == *"/$name" || "$target" == *"/$name/"* ]]; then
-      return 0
-    fi
+  read -ra patterns <<< "$patterns_csv"
+  IFS='/' read -ra segments <<< "$rel"
+
+  for segment in "${segments[@]}"; do
+    [[ -z "$segment" || "$segment" == "." ]] && continue
+
+    for pattern in "${patterns[@]}"; do
+      pattern="${pattern//[[:space:]]/}"
+      [[ -z "$pattern" ]] && continue
+
+      if [[ "$segment" == $pattern ]]; then
+        return 0
+      fi
+    done
   done
 
   return 1
