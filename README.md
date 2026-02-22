@@ -68,8 +68,8 @@ MIT License
    - `EXCLUDED_DIR_NAMES`(선택): 이벤트 제외 디렉토리명(쉼표 구분), 기본값 `@eaDir`
    - 볼륨: 원본 파일이 생성되는 NAS 경로를 `/watch`로 마운트
 2. NAS에서 `docker compose up -d --build` 실행
-3. GShare 설정 페이지의 모니터링 탭에서
-   - 감시 방식: `이벤트 수신 (event)`
+3. GShare 설정 페이지의 NFS 설정 탭에서
+   - NFS 폴더 감시 방식: `이벤트 수신 (event)`
    - 이벤트 인증 토큰: relay와 동일 값
 
 이후 새 파일 생성/이동 이벤트가 발생하면 해당 폴더명이 GShare로 전달되고 SMB 공유 및 VM 시작이 순차 수행됩니다.

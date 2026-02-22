@@ -243,6 +243,20 @@
                             <div class="form-group">
                                 <label for="folder_size_timeout">폴더 용량 확인 시간 초과(초)</label>
                                 <input type="number" class="form-control" id="folder_size_timeout" name="GET_FOLDER_SIZE_TIMEOUT" required value="{{ form_data.get('GET_FOLDER_SIZE_TIMEOUT', 30) }}">
+                                <small class="form-text text-muted">폴더 용량 계산 1회가 이 시간을 넘기면 해당 계산을 중단합니다. (주기 간격 옵션이 아닙니다)</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="monitor_mode">NFS 폴더 감시 방식</label>
+                                <select class="form-control" id="monitor_mode" name="MONITOR_MODE" onchange="toggleMonitorModeFields()">
+                                    <option value="event" {% if form_data.get('MONITOR_MODE', 'event') == 'event' %}selected{% endif %}>이벤트 수신 (event)</option>
+                                    <option value="polling" {% if form_data.get('MONITOR_MODE') == 'polling' %}selected{% endif %}>주기 스캔 (polling)</option>
+                                </select>
+                                <small class="form-text text-muted">NAS 이벤트 전달이 가능하면 event를 권장합니다. 불가능한 경우 polling 모드로 NFS 폴더를 주기 스캔합니다.</small>
+                            </div>
+                            <div class="form-group" id="event-auth-token-group">
+                                <label for="event_auth_token">이벤트 인증 토큰</label>
+                                <input type="text" class="form-control" id="event_auth_token" name="EVENT_AUTH_TOKEN" value="{{ form_data.get('EVENT_AUTH_TOKEN', '') }}" autocomplete="off">
+                                <small class="form-text text-muted">event 모드에서 `/api/folder-event` 요청의 `X-GShare-Token` 값과 동일해야 합니다.</small>
                             </div>
                             <button type="button" class="btn btn-secondary" onclick="prevTab('proxmox-tab')">이전</button>
                             <button type="button" class="btn btn-primary btn-next" onclick="nextTab('vm-tab')">다음</button>
@@ -267,28 +281,16 @@
                 <!-- 모니터링 설정 -->
                 <div class="tab-pane fade" id="monitoring" role="tabpanel" aria-labelledby="monitoring-tab">
                     <div class="form-section">
-                        <h3>모니터링 설정</h3>
-                        <div class="form-group">
-                            <label for="monitor_mode">감시 방식</label>
-                            <select class="form-control" id="monitor_mode" name="MONITOR_MODE" onchange="toggleMonitorModeFields()">
-                                <option value="event" {% if form_data.get('MONITOR_MODE', 'event') == 'event' %}selected{% endif %}>이벤트 수신 (event)</option>
-                                <option value="polling" {% if form_data.get('MONITOR_MODE') == 'polling' %}selected{% endif %}>주기 스캔 (polling)</option>
-                            </select>
-                            <small class="form-text text-muted">일반적으로 event 모드를 권장합니다. NAS에서 이벤트 전달이 어려운 환경에서는 polling 모드를 사용하세요.</small>
-                        </div>
-                        <div class="form-group" id="event-auth-token-group">
-                            <label for="event_auth_token">이벤트 인증 토큰</label>
-                            <input type="text" class="form-control" id="event_auth_token" name="EVENT_AUTH_TOKEN" value="{{ form_data.get('EVENT_AUTH_TOKEN', '') }}" autocomplete="off">
-                            <small class="form-text text-muted">event 모드에서 `/api/folder-event` 요청의 `X-GShare-Token` 값과 동일해야 합니다.</small>
-                        </div>
+                        <h3>VM 모니터링 설정</h3>
                         <div class="form-group">
                             <label for="cpu_threshold">CPU 사용량 임계치(%)</label>
                             <input type="number" class="form-control" id="cpu_threshold" name="CPU_THRESHOLD" required value="{{ form_data.get('CPU_THRESHOLD', 10) }}" min="1" max="100">
                             <small class="form-text text-muted">이 값 이하로 CPU 사용량이 떨어지면 VM을 종료합니다.</small>
                         </div>
                         <div class="form-group">
-                            <label for="check_interval">CPU 사용량 체크 간격(초)</label>
+                            <label for="check_interval">VM 상태/CPU 체크 간격(초)</label>
                             <input type="number" class="form-control" id="check_interval" name="CHECK_INTERVAL" required value="{{ form_data.get('CHECK_INTERVAL', 60) }}" min="10">
+                            <small class="form-text text-muted">이 간격으로 VM 상태와 CPU를 확인합니다. polling 모드에서는 NFS 폴더 스캔도 같은 간격으로 수행됩니다.</small>
                         </div>
                         <div class="form-group">
                             <label for="threshold_count">임계치 체크 횟수</label>
