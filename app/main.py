@@ -86,12 +86,14 @@ class State:
     check_interval: int
     nfs_mounted: bool = False
     monitor_mode: str = 'event'
+    initial_scan_in_progress: bool = False
 
     def to_dict(self):
         data = asdict(self)
         data['vm_status'] = 'ON' if self.vm_running else 'OFF'
         data['smb_status'] = 'ON' if self.smb_running else 'OFF'
         data['nfs_status'] = 'ON' if self.nfs_mounted else 'OFF'
+        data['initial_scan_in_progress'] = self.initial_scan_in_progress
         return data
 
 
@@ -727,7 +729,8 @@ class GShareManager:
             logging.debug("트랜스코딩 비활성화")
 
         # 상태 업데이트는 initialize() 호출 시 수행
-        self.current_state = None
+        self.initial_scan_in_progress = self.config.MONITOR_MODE == 'polling'
+        self.current_state = self.update_state(update_monitored_folders=False)
         logging.debug("GShareManager 객체 생성됨")
 
     def initialize(self) -> None:
@@ -739,6 +742,8 @@ class GShareManager:
             self.folder_monitor.initialize()
         else:
             logging.info('이벤트 수신 모드 활성화: 폴링 초기 스캔을 생략합니다.')
+
+        self.initial_scan_in_progress = False
         
         # 초기 상태 업데이트
         self.current_state = self.update_state()
@@ -973,7 +978,8 @@ class GShareManager:
                 smb_running=smb_running,
                 check_interval=self.config.CHECK_INTERVAL,
                 nfs_mounted=nfs_mounted,
-                monitor_mode=self.config.MONITOR_MODE
+                monitor_mode=self.config.MONITOR_MODE,
+                initial_scan_in_progress=getattr(self, 'initial_scan_in_progress', False)
             )
             return current_state
         except Exception as e:
@@ -993,7 +999,8 @@ class GShareManager:
                 monitored_folders={},
                 smb_running=False,
                 check_interval=60,  # 기본값 60초
-                monitor_mode='event'
+                monitor_mode='event',
+                initial_scan_in_progress=False
             )
 
     def monitor(self) -> None:
