@@ -134,15 +134,32 @@ class FolderMonitor:
         """초기 파일시스템 스캔 및 링크 생성 수행"""
         logging.info("초기 파일시스템 스캔 시작...")
         start_time = time.time()
-        
-        # 서브폴더 정보 업데이트
+
+        # 1단계: ls 기반 폴더명 선수집 (빠른 초기 표시 목적)
+        self._prime_folders_with_ls_scan()
+
+        # 2단계: mtime 정밀 스캔
         self._update_subfolder_mtimes()
 
         # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성
         self._create_links_for_recently_modified()
-        
+
         elapsed_time = time.time() - start_time
         logging.info(f"초기 파일시스템 스캔 완료 - 걸린 시간: {elapsed_time:.3f}초")
+    def _prime_folders_with_ls_scan(self) -> None:
+        """ls 기반으로 폴더 목록을 먼저 수집해 초기 상태를 빠르게 준비"""
+        try:
+            folders = self._list_subfolders_without_mtime()
+            added = 0
+            for folder in folders:
+                if folder not in self.previous_mtimes:
+                    # mtime 스캔 전 단계에서는 플레이스홀더 값 사용
+                    self.previous_mtimes[folder] = 0.0
+                    added += 1
+            logging.info(f"초기 ls 스캔 완료 - 폴더 {len(folders)}개 확인, 신규 {added}개 반영")
+        except Exception as e:
+            logging.warning(f"초기 ls 스캔 실패, mtime 스캔으로 계속 진행: {e}")
+
     def _scan_folders_iterative(self, path: str) -> dict[str, float]:
         """Iteratively scan folders to avoid recursion limits and overhead."""
         results = {}
@@ -710,12 +727,12 @@ class GShareManager:
         self._mount_nfs()
 
         # FolderMonitor 초기화 (NFS 마운트 이후에 수행)
-        logging.debug("FolderMonitor 초기화 중...")
+        logging.info("FolderMonitor 초기화 시작")
         self.folder_monitor = FolderMonitor(
             config, proxmox_api, self.last_shutdown_time)
         self.last_shutdown_time_str = datetime.fromtimestamp(
             self.last_shutdown_time, self.local_tz).isoformat()
-        logging.debug("FolderMonitor 초기화 완료")
+        logging.info("FolderMonitor 초기화 완료")
 
         # SMBManager 초기화 (FolderMonitor의 SMBManager를 사용)
         self.smb_manager = self.folder_monitor.smb_manager
@@ -730,25 +747,47 @@ class GShareManager:
 
         # 상태 업데이트는 initialize() 호출 시 수행
         self.initial_scan_in_progress = self.config.MONITOR_MODE == 'polling'
+        logging.info(
+            f"초기 상태 계산 시작 (monitor_mode={self.config.MONITOR_MODE}, initial_scan_in_progress={self.initial_scan_in_progress})")
         self.current_state = self.update_state(update_monitored_folders=False)
+        logging.info("초기 상태 계산 완료")
         logging.debug("GShareManager 객체 생성됨")
 
     def initialize(self) -> None:
         """GShareManager 초기화 수행 (무거운 작업 포함)"""
         logging.debug("GShareManager 초기화 작업 시작...")
-        
-        # FolderMonitor 초기화 (이벤트 모드에서는 대규모 스캔 생략)
+
+        # FolderMonitor 초기화 (polling 모드는 비동기 초기 스캔으로 실행)
         if self.config.MONITOR_MODE == 'polling':
-            self.folder_monitor.initialize()
+            logging.info('폴링 모드 초기 스캔을 백그라운드에서 시작합니다.')
+            self.initial_scan_in_progress = True
+            self._initial_scan_thread = threading.Thread(target=self._run_initial_scan_async, daemon=True)
+            self._initial_scan_thread.start()
         else:
             logging.info('이벤트 수신 모드 활성화: 폴링 초기 스캔을 생략합니다.')
+            self.initial_scan_in_progress = False
 
-        self.initial_scan_in_progress = False
-        
         # 초기 상태 업데이트
         self.current_state = self.update_state()
-        
+
         logging.debug("GShareManager 초기화 작업 완료")
+
+    def _run_initial_scan_async(self) -> None:
+        """초기 폴더 스캔을 백그라운드에서 수행"""
+        logging.info('초기 폴더 스캔(비동기) 시작')
+        try:
+            self.folder_monitor.initialize()
+            logging.info('초기 폴더 스캔(비동기) 완료')
+        except Exception as e:
+            logging.error(f'초기 폴더 스캔(비동기) 실패: {e}')
+        finally:
+            self.initial_scan_in_progress = False
+            try:
+                self.current_state = self.update_state(update_monitored_folders=True)
+                if gshare_web_server:
+                    gshare_web_server.emit_state_update()
+            except Exception as e:
+                logging.error(f'비동기 초기 스캔 후 상태 업데이트 실패: {e}')
 
     def _load_last_shutdown_time(self) -> float:
         """VM 마지막 종료 시간을 로드 (UTC 기준)"""
@@ -923,9 +962,10 @@ class GShareManager:
     def update_state(self, update_monitored_folders=True) -> State:
         try:
             logging.debug(f"상태 업데이트, update_monitored_folders: {update_monitored_folders}")
+            previous_state = getattr(self, 'current_state', None)
             current_time_str = (datetime.now(self.local_tz).isoformat() 
-                                if update_monitored_folders or self.current_state is None 
-                                else getattr(self.current_state, 'last_check_time', '-'))
+                                if update_monitored_folders or previous_state is None
+                                else getattr(previous_state, 'last_check_time', '-'))
 
             vm_running = self.proxmox_api.is_vm_running()
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
@@ -940,9 +980,10 @@ class GShareManager:
             nfs_mounted = False
 
             # monitored_folders 업데이트 여부 확인
-            if not update_monitored_folders and hasattr(self, 'current_state') and self.current_state is not None:
-                # 이전 monitored_folders 재사용
-                monitored_folders = getattr(self.current_state, 'monitored_folders', {})
+            if not update_monitored_folders:
+                # 초기 상태 계산 포함: 강제 스캔 없이 이전 값만 재사용(없으면 빈 값 유지)
+                if previous_state is not None:
+                    monitored_folders = getattr(previous_state, 'monitored_folders', {})
             elif hasattr(self, 'folder_monitor'):
                 try:
                     monitored_folders = self.folder_monitor.get_monitored_folders()
@@ -961,8 +1002,8 @@ class GShareManager:
                 except Exception as e:
                     logging.error(f"SMB 상태 확인 실패: {e}")
                     # 오류 발생 시 상태 유지 (이전 상태가 있으면 사용)
-                    if hasattr(self, 'current_state') and self.current_state is not None:
-                        smb_running = getattr(self.current_state, 'smb_running', False)
+                    if previous_state is not None:
+                        smb_running = getattr(previous_state, 'smb_running', False)
 
             current_state = State(
                 last_check_time=current_time_str,
