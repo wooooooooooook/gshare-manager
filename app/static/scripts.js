@@ -89,6 +89,7 @@ let socket = null; // Socket.IO 객체
 let userScrolled = false; // userScrolled 변수를 전역 변수로 이동
 let monitorMode = 'event';
 let initialScanInProgress = false;
+let hasReceivedStateUpdate = false;
 
 // state를 콘솔에 로깅하는 함수
 function logStateToConsole(state) {
@@ -230,6 +231,7 @@ function updateUI(data) {
         monitorMode = data.monitor_mode;
     }
 
+    hasReceivedStateUpdate = true;
     initialScanInProgress = Boolean(data.initial_scan_in_progress);
 
     // 필수 요소들 존재 여부 확인 및 업데이트
@@ -1072,6 +1074,11 @@ function updateFolderState() {
 
 // 폴더 목록만 업데이트하는 함수로 분리
 function updateFolderList(sortedFolders) {
+    // 초기 상태 수신 전이거나 초기 스캔 중에는 빈 상태 메시지를 노출하지 않음
+    if (!hasReceivedStateUpdate || initialScanInProgress) {
+        return;
+    }
+
     // 폴더 목록이 비어있는 경우
     if (!sortedFolders || sortedFolders.length === 0) {
         document.getElementById('monitoredFoldersContainer').innerHTML = `
