@@ -503,7 +503,7 @@ class GshareWebServer:
                 with open(init_flag_path, 'w') as f:
                     f.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
-            logging.debug(f"설정 저장 완료 - 설정 완료 페이지로 이동합니다.")
+            logging.debug("설정 저장 완료 - 설정 완료 페이지로 이동합니다.")
             return render_template('setup_complete.html')
 
         except Exception as e:
@@ -836,7 +836,7 @@ class GshareWebServer:
                     # NFS 마운트 해제 시도
                     logging.debug(f"기존 NFS 마운트 해제 시도: {mount_path}")
                     subprocess.run(["umount", "-f", mount_path], stderr=subprocess.PIPE, check=False)
-                    logging.debug(f"NFS 마운트 해제 명령 실행 완료")
+                    logging.debug("NFS 마운트 해제 명령 실행 완료")
                 else:
                     logging.debug(f"NFS가 마운트되어 있지 않음: {mount_path}")
             except Exception as e:
@@ -1147,7 +1147,7 @@ class GshareWebServer:
                     logging.debug(f"기존 마운트 지점에서 테스트: {existing_mount_point}")
                     try:
                         # 기존 마운트 지점에서 읽기 테스트
-                        ls_result = subprocess.run(
+                        subprocess.run(
                             f"ls {existing_mount_point}", shell=True, check=True, capture_output=True, text=True)
                         return jsonify({
                             "status": "success",
@@ -1169,7 +1169,7 @@ class GshareWebServer:
 
                     if result.returncode == 0:
                         try:
-                            ls_result = subprocess.run(
+                            subprocess.run(
                                 f"ls {temp_mount}", shell=True, check=True, capture_output=True, text=True)
                             message = "NFS 연결 테스트 성공: 읽기 권한이 정상입니다."
                             status = "success"
@@ -1190,7 +1190,7 @@ class GshareWebServer:
                     try:
                         subprocess.run(
                             f"umount {temp_mount}", shell=True, check=False)
-                    except:
+                    except Exception:
                         pass
 
             return jsonify({

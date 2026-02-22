@@ -15,8 +15,8 @@ sys.path.append(os.getcwd())
 # We need to mock config imports inside transcoder if they fail, but they seem to use config.py which is local.
 # config.py imports yaml, so we mocked it.
 
-from app.transcoder import Transcoder
-from app.config import GshareConfig
+from app.transcoder import Transcoder  # noqa: E402
+from app.config import GshareConfig  # noqa: E402
 
 class TestTranscoderOptimization(unittest.TestCase):
     def setUp(self):

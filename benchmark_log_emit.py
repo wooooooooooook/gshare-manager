@@ -1,6 +1,5 @@
 import os
 import time
-import logging
 
 # Mock SocketIO
 class MockSocketIO:
@@ -36,7 +35,6 @@ class OptimizedWebServer:
         try:
             if os.path.exists(self.log_file):
                 file_size = os.path.getsize(self.log_file)
-                mode = 'r'
                 if file_size > self.max_log_size:
                     # Read only the last part
                     with open(self.log_file, 'rb') as file:

@@ -4,7 +4,6 @@ import subprocess
 import shlex
 import queue
 import threading
-import time
 from functools import lru_cache
 from typing import Optional, Dict, Any, List, Callable
 from config import GshareConfig  # type: ignore
@@ -556,7 +555,7 @@ class Transcoder:
             return {'completed': 0, 'failed': 0, 'total': 0}
 
         # 진단 로그
-        logging.info(f"=== 수동 스캔 시작 ===")
+        logging.info("=== 수동 스캔 시작 ===")
         logging.info(f"마운트 경로: {mount_path}")
         logging.info(f"경로 존재 여부: {os.path.exists(mount_path)}")
         logging.info(f"규칙 수: {len(self.rules)}")

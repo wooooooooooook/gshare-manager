@@ -9,7 +9,7 @@ sys.modules['yaml'] = MagicMock()
 # Add app directory to path
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app'))
 
-from smb_manager import SMBManager
+from smb_manager import SMBManager  # noqa: E402
 
 class DummyConfig:
     SMB_LINKS_DIR = '/tmp/links'
@@ -211,7 +211,7 @@ class TestSMBManagerCleanup(unittest.TestCase):
         self.config = DummyConfig()
 
         # We need to mock cleanup during __init__ though, otherwise it runs real code
-        with patch('smb_manager.SMBManager.cleanup_all_symlinks') as mock_cleanup:
+        with patch('smb_manager.SMBManager.cleanup_all_symlinks'):
             self.smb_manager = SMBManager(self.config, 1000, 1000)
 
     def tearDown(self):

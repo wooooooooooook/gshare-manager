@@ -23,7 +23,6 @@ from transcoder import Transcoder
 import yaml  # type: ignore
 import traceback
 import urllib3  # type: ignore
-import json  # state를 JSON으로 직렬화하기 위해 추가
 
 # SSL 경고 메시지 비활성화
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -1263,8 +1262,6 @@ def check_config_complete():
         try:
             # config.yaml 파일의 수정 시간
             config_mtime = os.path.getmtime(config_path)
-            config_mtime_str = datetime.fromtimestamp(
-                config_mtime).strftime('%Y-%m-%d %H:%M:%S')
 
             # init_flag 파일의 내용에서 시간 읽기
             with open(init_flag_path, 'r') as f:

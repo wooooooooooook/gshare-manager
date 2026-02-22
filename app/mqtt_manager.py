@@ -4,8 +4,6 @@ import time
 from typing import Any, Dict, Optional, List
 import paho.mqtt.client as mqtt  # type: ignore
 from config import GshareConfig  # type: ignore
-from datetime import datetime
-import pytz  # type: ignore
 
 class MQTTManager:
     def __init__(self, config: GshareConfig):
@@ -206,7 +204,7 @@ class MQTTManager:
                 if self.connected:
                     availability_topic = f"{self.config.MQTT_TOPIC_PREFIX}/status"
                     self.client.publish(availability_topic, "offline", retain=True)
-            except:
+            except Exception:
                 pass
 
             self.client.loop_stop()
