@@ -104,8 +104,8 @@ class ProxmoxAPI:
     def start_vm(self) -> bool:
         try:
             self._request("POST", "status/start")
-            logging.debug(f"VM 시작 응답 받음")
-
+            logging.debug("VM 시작 응답 받음")
             return True
         except Exception as e:
+            logging.error(f"VM 시작 API 호출 실패: {e}")
             return False
