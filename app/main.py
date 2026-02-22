@@ -185,6 +185,8 @@ class FolderMonitor:
         """Use 'find' command to scan folders (optimized for NFS)."""
         results = {}
         try:
+            scan_interval = int(getattr(self.config, "CHECK_INTERVAL", 60) or 60)
+            scan_timeout_seconds = max(30, scan_interval * 5)
             # Use find to get directories and their mtimes
             # -mindepth 1: exclude root .
             # -name ".*" -o -name "@*": match hidden/system files/dirs
@@ -212,7 +214,8 @@ class FolderMonitor:
                 capture_output=True,
                 text=True,
                 check=True,
-                errors='surrogateescape'
+                errors='surrogateescape',
+                timeout=scan_timeout_seconds,
             )
 
             # Parse output
@@ -239,6 +242,10 @@ class FolderMonitor:
 
             return results
 
+        except subprocess.TimeoutExpired:
+            logging.warning(
+                f"GNU find 스캔이 {scan_timeout_seconds}초를 초과했습니다. portable 스캔 모드로 전환합니다.")
+            return self._scan_folders_find_portable()
         except subprocess.CalledProcessError as e:
             logging.warning(f"GNU find scan failed, trying portable scan mode: {e}")
             return self._scan_folders_find_portable()
@@ -265,7 +272,8 @@ class FolderMonitor:
             capture_output=True,
             text=True,
             check=True,
-            errors='surrogateescape'
+            errors='surrogateescape',
+            timeout=max(30, int(getattr(self.config, "CHECK_INTERVAL", 60) or 60) * 5),
         )
 
         if not result.stdout:
@@ -710,12 +718,12 @@ class GShareManager:
         self._mount_nfs()
 
         # FolderMonitor 초기화 (NFS 마운트 이후에 수행)
-        logging.debug("FolderMonitor 초기화 중...")
+        logging.info("FolderMonitor 초기화 시작")
         self.folder_monitor = FolderMonitor(
             config, proxmox_api, self.last_shutdown_time)
         self.last_shutdown_time_str = datetime.fromtimestamp(
             self.last_shutdown_time, self.local_tz).isoformat()
-        logging.debug("FolderMonitor 초기화 완료")
+        logging.info("FolderMonitor 초기화 완료")
 
         # SMBManager 초기화 (FolderMonitor의 SMBManager를 사용)
         self.smb_manager = self.folder_monitor.smb_manager
@@ -730,7 +738,10 @@ class GShareManager:
 
         # 상태 업데이트는 initialize() 호출 시 수행
         self.initial_scan_in_progress = self.config.MONITOR_MODE == 'polling'
+        logging.info(
+            f"초기 상태 계산 시작 (monitor_mode={self.config.MONITOR_MODE}, initial_scan_in_progress={self.initial_scan_in_progress})")
         self.current_state = self.update_state(update_monitored_folders=False)
+        logging.info("초기 상태 계산 완료")
         logging.debug("GShareManager 객체 생성됨")
 
     def initialize(self) -> None:
