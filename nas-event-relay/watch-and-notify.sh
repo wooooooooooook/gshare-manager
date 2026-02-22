@@ -4,8 +4,9 @@ set -euo pipefail
 WATCH_PATH="${WATCH_PATH:-/watch}"
 GSHARE_EVENT_URL="${GSHARE_EVENT_URL:-}"
 EVENT_AUTH_TOKEN="${EVENT_AUTH_TOKEN:-}"
-# 쉼표(,)로 구분된 디렉토리 이름 목록. 기본값은 Synology 메타데이터 폴더.
-EXCLUDED_DIR_NAMES="${EXCLUDED_DIR_NAMES:-@eaDir}"
+# 쉼표(,)로 구분된 디렉토리 이름/패턴 목록.
+# 기본값은 Synology 메타데이터 폴더(@eaDir) + '@'/'dot' 접두 폴더 전체 제외.
+EXCLUDED_DIR_NAMES="${EXCLUDED_DIR_NAMES:-@eaDir,@*,.*}"
 
 if [[ -z "$GSHARE_EVENT_URL" ]]; then
   echo "GSHARE_EVENT_URL is required" >&2
@@ -28,20 +29,50 @@ esac
 
 is_excluded_path() {
   local target="$1"
-  local names_csv="$2"
+  local patterns_csv="$2"
   local IFS=','
+  local rel segment pattern
+  local -a patterns
 
-  read -ra names <<< "$names_csv"
-  for name in "${names[@]}"; do
-    name="${name//[[:space:]]/}"
-    [[ -z "$name" ]] && continue
+  rel="${target#${WATCH_PATH}/}"
+  if [[ "$rel" == "$target" ]]; then
+    rel="${target#/}"
+  fi
 
-    if [[ "$target" == *"/$name" || "$target" == *"/$name/"* ]]; then
-      return 0
-    fi
+  read -ra patterns <<< "$patterns_csv"
+  IFS='/' read -ra segments <<< "$rel"
+
+  for segment in "${segments[@]}"; do
+    [[ -z "$segment" || "$segment" == "." ]] && continue
+
+    for pattern in "${patterns[@]}"; do
+      pattern="${pattern//[[:space:]]/}"
+      [[ -z "$pattern" ]] && continue
+
+      if [[ "$segment" == $pattern ]]; then
+        return 0
+      fi
+    done
   done
 
   return 1
+}
+
+
+count_watch_targets() {
+  local total=0 included=0
+  local dir
+
+  while IFS= read -r dir; do
+    [[ -z "$dir" ]] && continue
+    total=$((total + 1))
+
+    if ! is_excluded_path "$dir" "$EXCLUDED_DIR_NAMES"; then
+      included=$((included + 1))
+    fi
+  done < <(find "$WATCH_PATH" -type d 2>/dev/null)
+
+  echo "$total|$included"
 }
 
 post_event() {
@@ -79,7 +110,11 @@ post_event() {
   return 1
 }
 
-echo "Watching recursively: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE)"
+watch_counts="$(count_watch_targets)"
+watch_total="${watch_counts%%|*}"
+watch_included="${watch_counts##*|}"
+
+echo "Watching recursively: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE, watch_dirs_total: $watch_total, watch_dirs_effective: $watch_included)"
 
 inotifywait -m -r \
   -e close_write -e moved_to -e create \
