@@ -58,6 +58,23 @@ is_excluded_path() {
   return 1
 }
 
+
+count_watch_targets() {
+  local total=0 included=0
+  local dir
+
+  while IFS= read -r dir; do
+    [[ -z "$dir" ]] && continue
+    total=$((total + 1))
+
+    if ! is_excluded_path "$dir" "$EXCLUDED_DIR_NAMES"; then
+      included=$((included + 1))
+    fi
+  done < <(find "$WATCH_PATH" -type d 2>/dev/null)
+
+  echo "$total|$included"
+}
+
 post_event() {
   local folder="$1"
   local payload http_code curl_exit attempt max_attempts
@@ -93,7 +110,11 @@ post_event() {
   return 1
 }
 
-echo "Watching recursively: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE)"
+watch_counts="$(count_watch_targets)"
+watch_total="${watch_counts%%|*}"
+watch_included="${watch_counts##*|}"
+
+echo "Watching recursively: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE, watch_dirs_total: $watch_total, watch_dirs_effective: $watch_included)"
 
 inotifywait -m -r \
   -e close_write -e moved_to -e create \
