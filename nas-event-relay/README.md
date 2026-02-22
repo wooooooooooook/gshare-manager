@@ -6,6 +6,8 @@
 
 - 기존에는 `CLOSE_WRITE`일 때만 로그가 찍혀서, `CREATE`/`MOVED_TO` 위주 워크로드에서는 "아무 로그가 없는 것처럼" 보일 수 있었습니다.
 - 현재는 감지된 이벤트마다 `event=<...> path=<...>` 로그를 출력하고, 웹훅 전송 성공/실패도 별도 로그로 남깁니다.
+
+- 시작 시 `Watching recursively: ...` 로그를 즉시 출력하고, 이어서 `Watch target summary: watch_dirs_total=... watch_dirs_effective=...` 로그로 디렉토리 집계를 출력합니다.
 - 전송은 최대 3회(짧은 간격) 재시도하며, 실패 시 `curl_exit`/`http_code`를 함께 로그로 남깁니다.
   - 예: `curl_exit=7`은 대상 서버 연결 실패(서버 미기동/네트워크 경로 문제)
   - 예: `http_code=500`은 GShare 앱 내부 처리 실패
@@ -36,3 +38,9 @@ docker exec -it <relay-container> sh -lc 'mkdir -p /watch/_probe && echo test > 
 
 - 파일 생성 주체를 가능하면 **동일 호스트(동일 커널 컨텍스트)**로 맞춥니다.
 - 이벤트 신뢰성이 중요하면 inotify 단독 대신 **주기 스캔(polling) 보조 방식**을 추가하는 것이 안전합니다.
+
+## 제외 디렉토리 기본값
+
+- `EXCLUDED_DIR_NAMES` 기본값은 `@eaDir,@*,.*` 입니다.
+- 즉 Synology 메타데이터 폴더(`@eaDir`)뿐 아니라, 이름이 `@`로 시작하는 디렉토리(`@*`)와 숨김 디렉토리(`.*`) 하위 이벤트도 기본적으로 무시합니다.
+- 필요하면 환경변수로 쉼표 구분 목록(와일드카드 허용)을 지정해 동작을 바꿀 수 있습니다.
