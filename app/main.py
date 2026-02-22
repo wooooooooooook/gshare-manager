@@ -163,50 +163,6 @@ class FolderMonitor:
         except Exception as e:
             logging.warning(f"초기 ls 스캔 실패, mtime 스캔으로 계속 진행: {e}")
 
-    def _scan_folders_iterative(self, path: str) -> dict[str, float]:
-        """Iteratively scan folders to avoid recursion limits and overhead."""
-        results = {}
-        stack = [path]
-
-        while stack:
-            current_path = stack.pop()
-            try:
-                has_files = False
-                subdirs = []
-
-                with os.scandir(current_path) as it:
-                    for entry in it:
-                        if entry.name.startswith(".") or entry.name.startswith("@"):
-                            continue
-
-                        if entry.is_file():
-                            has_files = True
-                        elif entry.is_dir(follow_symlinks=True):
-                            subdirs.append(entry.path)
-
-                if has_files:
-                    try:
-                        current_mtime = os.stat(current_path).st_mtime
-                        rel_path = os.path.relpath(current_path, self.config.MOUNT_PATH)
-                        if rel_path != "." and not rel_path.startswith("."):
-                            results[rel_path] = current_mtime
-                    except OSError:
-                        pass
-
-                # Extend stack with subdirs
-                stack.extend(subdirs)
-
-            except OSError:
-                pass
-
-        return results
-
-    def _prune_name_args(self) -> list[str]:
-        """find 명령에서 제외(prune)할 디렉토리 조건을 반환"""
-        return [
-            '(', '-name', '.*', '-o', '-name', '@*', '-o', '-name', '#recycle', ')'
-        ]
-
     def _polling_recent_window_mmin(self) -> int:
         """polling 스캔 시 최근 변경 탐지에 사용할 mmin 창(분)"""
         # 요청사항: check_interval * 5 를 mmin으로 환산
@@ -214,146 +170,37 @@ class FolderMonitor:
         recent_window_seconds = max(1, check_interval * 5)
         return max(1, math.ceil(recent_window_seconds / 60))
 
-    def _scan_folders_hybrid(self, full_scan: bool = False) -> dict[str, float]:
-        """Use 'find' command to scan folders (optimized for NFS)."""
-        results = {}
-        try:
-            # Use find to get directories and their mtimes
-            # -mindepth 1: exclude root .
-            # -name ".*" -o -name "@*": match hidden/system files/dirs
-            # -prune: skip matching directories and their contents
-            # -o -type d: if not pruned, check if directory
-            # -printf ...: print if directory
-            cmd = [
-                'find', '.',
-                '-mindepth', '1',
-                '-type', 'd',
-                *self._prune_name_args(),
-                '-prune',
-                '-o',
-                '-type', 'd',
-            ]
-
-            if not full_scan:
-                cmd.extend(['-mmin', f'-{self._polling_recent_window_mmin()}'])
-
-            cmd.extend(['-printf', r'%T@\t%P\0'])
-
-            # Run find command in the mount path
-            # capture_output=True captures stdout/stderr
-            # text=True decodes output as string (universal_newlines)
-            # errors='surrogateescape' handles invalid utf-8 filenames gracefully
-            # check=True raises CalledProcessError on non-zero exit
-            result = subprocess.run(
-                cmd,
-                cwd=self.config.MOUNT_PATH,
-                capture_output=True,
-                text=True,
-                check=True,
-                errors='surrogateescape'
-            )
-
-            # Parse output
-            if result.stdout:
-                records = result.stdout.split('\0')
-                for record in records:
-                    if not record:
-                        continue
-
-                    try:
-                        # Split by first tab only
-                        parts = record.split('\t', 1)
-                        if len(parts) != 2:
-                            continue
-
-                        mtime_str, rel_path = parts
-
-                        # Parse mtime
-                        mtime = float(mtime_str)
-                        results[rel_path] = mtime
-
-                    except ValueError:
-                        continue
-
-            return results
-
-        except subprocess.CalledProcessError as e:
-            logging.warning(f"GNU find scan failed, trying portable scan mode: {e}")
-            return self._scan_folders_find_portable(full_scan=full_scan)
-        except Exception as e:
-            logging.warning(f"Hybrid scan error, trying portable scan mode: {e}")
-            return self._scan_folders_find_portable(full_scan=full_scan)
-
-    def _scan_folders_find_portable(self, full_scan: bool = False) -> dict[str, float]:
-        """Portable scan mode without find -printf (busybox 호환)."""
-        results = {}
-
-        cmd = [
-            'find', '.',
-            '-type', 'd',
-            *self._prune_name_args(),
-            '-prune',
-            '-o',
-            '-type', 'f',
-            '-print0'
-        ]
-
-        result = subprocess.run(
-            cmd,
-            cwd=self.config.MOUNT_PATH,
-            capture_output=True,
-            text=True,
-            check=True,
-            errors='surrogateescape'
-        )
-
-        if not result.stdout:
-            return results
-
-        folders = set()
-        for file_path in result.stdout.split('\0'):
-            if not file_path:
-                continue
-            folder = os.path.dirname(file_path)
-            if folder.startswith('./'):
-                folder = folder[2:]
-            if folder and folder != '.':
-                folders.add(folder)
-
-        for folder in folders:
-            try:
-                abs_folder = os.path.join(self.config.MOUNT_PATH, folder)
-                folder_mtime = os.stat(abs_folder).st_mtime
-                if full_scan:
-                    results[folder] = folder_mtime
-                else:
-                    window_seconds = self._polling_recent_window_mmin() * 60
-                    if (time.time() - folder_mtime) <= window_seconds:
-                        results[folder] = folder_mtime
-            except OSError:
-                continue
-
-        return results
-
     def _scan_folders(self, full_scan: bool = False) -> dict[str, float]:
-        """마운트 경로의 파일이 있는 서브폴더와 수정 시간을 반환 (최적화됨)"""
+        """마운트 경로의 서브폴더 목록을 find로 빠르게 수집 후 수정 시간(mtime)을 추가하여 반환"""
+        results = {}
         if not os.path.exists(self.config.MOUNT_PATH):
             logging.error(f"마운트 경로가 존재하지 않음: {self.config.MOUNT_PATH}")
-            return {}
-
-        # Try hybrid scan first
-        try:
-            return self._scan_folders_hybrid(full_scan=full_scan)
-        except Exception:
-            # Fallback to iterative scan but suppress error if hybrid failed silently
-            pass
+            return results
 
         try:
-            # Start recursive scan
-            return self._scan_folders_iterative(self.config.MOUNT_PATH)
+            # 1. find 명령어로 하위 폴더 목록을 빠르게 가져옴
+            folders = self._list_subfolders_with_find()
+
+            window_seconds = self._polling_recent_window_mmin() * 60
+            current_time = time.time()
+
+            # 2. 각 폴더의 mtime 확인
+            for folder in folders:
+                abs_folder = os.path.join(self.config.MOUNT_PATH, folder)
+                try:
+                    folder_mtime = os.stat(abs_folder).st_mtime
+                    if full_scan:
+                        results[folder] = folder_mtime
+                    else:
+                        if (current_time - folder_mtime) <= window_seconds:
+                            results[folder] = folder_mtime
+                except OSError:
+                    continue
+
+            return results
         except Exception as e:
-            logging.error(f"폴더 스캔 중 오류: {e}")
-            return {}
+            logging.error(f"Folder scan error: {e}")
+            return results
     def _run_scan_worker(self) -> None:
         """Background worker for folder scanning."""
         try:
@@ -537,42 +384,33 @@ class FolderMonitor:
             return self._folder_list_cache
 
         try:
-            paths = self._list_subfolders_with_ls_tree()
+            paths = self._list_subfolders_with_find()
             self._folder_list_cache = paths
             self._folder_list_checked_at = now
             return self._folder_list_cache
         except Exception as e:
-            logging.debug(f"ls 트리 기반 폴더 목록 조회 실패, scandir로 대체합니다: {e}")
-
-        try:
-            paths = []
-            root = self.config.MOUNT_PATH
-            stack = [('', root)]
-
-            while stack:
-                rel_path, current_path = stack.pop()
-                with os.scandir(current_path) as it:
-                    for entry in it:
-                        if not entry.is_dir(follow_symlinks=False):
-                            continue
-                        if entry.name.startswith('.') or entry.name.startswith('@'):
-                            continue
-
-                        child_rel_path = os.path.join(rel_path, entry.name) if rel_path else entry.name
-                        paths.append(child_rel_path)
-                        stack.append((child_rel_path, entry.path))
-
-            self._folder_list_cache = sorted(set(paths))
-            self._folder_list_checked_at = now
-            return self._folder_list_cache
-        except Exception as e:
-            logging.warning(f"폴더 목록 조회 중 오류: {e}")
+            logging.error(f"폴더 목록 조회 실패: {e}")
             return self._folder_list_cache
 
-    def _list_subfolders_with_ls_tree(self) -> list[str]:
-        """ls -R 트리 출력으로 하위 폴더 목록만 빠르게 수집한다."""
+    def _list_subfolders_with_find(self) -> list[str]:
+        """find 명령어와 prune 옵션을 사용하여 빠르고 효율적으로 하위 폴더 목록만 수집한다."""
+        cmd = [
+            'find', '.',
+            '-mindepth', '1',
+            '-type', 'd',
+            '(',
+            '-name', '@*', '-o',
+            '-name', '.*', '-o',
+            '-name', '#recycle',
+            ')',
+            '-prune',
+            '-o',
+            '-type', 'd',
+            '-print'
+        ]
+
         result = subprocess.run(
-            ['ls', '-1RF'],
+            cmd,
             cwd=self.config.MOUNT_PATH,
             capture_output=True,
             text=True,
@@ -583,35 +421,18 @@ class FolderMonitor:
         if not result.stdout:
             return []
 
-        current_rel = ''
         folders = set()
-
         for raw_line in result.stdout.splitlines():
             line = raw_line.strip()
-            if not line:
+            if not line or line == '.':
                 continue
 
-            # ls -R 헤더 형식: .: / ./subdir:
-            if line.endswith(':'):
-                header = line[:-1]
-                if header in ('.', './'):
-                    current_rel = ''
-                elif header.startswith('./'):
-                    current_rel = header[2:]
-                else:
-                    current_rel = header
-                continue
+            # find 출력 형식 './폴더명', './폴더명/하위' 에서 './' 제거
+            if line.startswith('./'):
+                line = line[2:]
 
-            # -F 옵션으로 디렉토리 이름은 '/'로 끝난다.
-            if not line.endswith('/'):
-                continue
-
-            dirname = line[:-1]
-            if not dirname or dirname.startswith('.') or dirname.startswith('@'):
-                continue
-
-            rel_path = os.path.join(current_rel, dirname) if current_rel else dirname
-            folders.add(rel_path)
+            if line:
+                folders.add(line)
 
         return sorted(folders)
 
