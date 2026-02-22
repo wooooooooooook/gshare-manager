@@ -71,6 +71,17 @@
 			<!-- NFS 마운트 상태 패널 -->
 			<div class="border border-gray-200 rounded-md p-2 bg-white flex flex-col max-h-[40vh]">
 				<h3 class="font-medium mb-2">From NAS</h3>
+				<div id="nfsScanNotice"
+					class="bg-blue-50 text-blue-700 p-2 rounded-lg mb-2 border border-blue-200 {% if not state.get('initial_scan_in_progress', False) %}hidden{% endif %}">
+					<div class="flex items-center gap-1">
+						<svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+							stroke-width="1.5" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round"
+								d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+						</svg>
+						<span class="text-sm font-medium">초기 폴더 탐색 중입니다...</span>
+					</div>
+				</div>
 				<div onclick="remountNFS()" style="cursor: pointer" title="클릭하여 NFS 마운트 재시도"
 					class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 mb-2 nfs-status-container">
 					<div class="flex items-center gap-1">

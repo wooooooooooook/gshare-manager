@@ -88,6 +88,7 @@ let autoScrollLog = true; // 자동 스크롤 상태 변수 추가
 let socket = null; // Socket.IO 객체
 let userScrolled = false; // userScrolled 변수를 전역 변수로 이동
 let monitorMode = 'event';
+let initialScanInProgress = false;
 
 // state를 콘솔에 로깅하는 함수
 function logStateToConsole(state) {
@@ -224,6 +225,8 @@ function updateUI(data) {
         monitorMode = data.monitor_mode;
     }
 
+    initialScanInProgress = Boolean(data.initial_scan_in_progress);
+
     // 필수 요소들 존재 여부 확인 및 업데이트
     const elements = {
         lastCheckTimeReadable: document.querySelector('.last-check-time .readable-time'),
@@ -258,6 +261,7 @@ function updateUI(data) {
     if (elements.nfsStatus) {
         updateNFSStatus(data.nfs_status);
     }
+    updateInitialScanNotice(initialScanInProgress);
 
     if (elements.cpuUsage) elements.cpuUsage.innerText = data.cpu_usage + '%';
     if (elements.lowCpuCount) elements.lowCpuCount.innerText = data.low_cpu_count + '/' + data.threshold_count;
@@ -287,6 +291,20 @@ function updateUI(data) {
             updateFolderList([]);
         });
     }
+}
+
+function updateInitialScanNotice(inProgress) {
+    const notice = document.getElementById('nfsScanNotice');
+    const nfsWarning = document.getElementById('nfsWarning');
+    if (!notice) return;
+
+    if (inProgress) {
+        notice.classList.remove('hidden');
+        if (nfsWarning) nfsWarning.classList.add('hidden');
+        return;
+    }
+
+    notice.classList.add('hidden');
 }
 
 // 로그 콘텐츠 업데이트 함수

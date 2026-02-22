@@ -175,7 +175,8 @@ class GshareWebServer:
             monitored_folders={},
             smb_running=False,
             check_interval=60,
-            monitor_mode='event'
+            monitor_mode='event',
+            initial_scan_in_progress=False
         )
 
     def _get_container_ip(self):
