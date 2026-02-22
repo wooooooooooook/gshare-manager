@@ -923,9 +923,10 @@ class GShareManager:
     def update_state(self, update_monitored_folders=True) -> State:
         try:
             logging.debug(f"상태 업데이트, update_monitored_folders: {update_monitored_folders}")
+            previous_state = getattr(self, 'current_state', None)
             current_time_str = (datetime.now(self.local_tz).isoformat() 
-                                if update_monitored_folders or self.current_state is None 
-                                else getattr(self.current_state, 'last_check_time', '-'))
+                                if update_monitored_folders or previous_state is None
+                                else getattr(previous_state, 'last_check_time', '-'))
 
             vm_running = self.proxmox_api.is_vm_running()
             cpu_usage = self.proxmox_api.get_cpu_usage() or 0.0
@@ -940,9 +941,9 @@ class GShareManager:
             nfs_mounted = False
 
             # monitored_folders 업데이트 여부 확인
-            if not update_monitored_folders and hasattr(self, 'current_state') and self.current_state is not None:
+            if not update_monitored_folders and previous_state is not None:
                 # 이전 monitored_folders 재사용
-                monitored_folders = getattr(self.current_state, 'monitored_folders', {})
+                monitored_folders = getattr(previous_state, 'monitored_folders', {})
             elif hasattr(self, 'folder_monitor'):
                 try:
                     monitored_folders = self.folder_monitor.get_monitored_folders()
@@ -961,8 +962,8 @@ class GShareManager:
                 except Exception as e:
                     logging.error(f"SMB 상태 확인 실패: {e}")
                     # 오류 발생 시 상태 유지 (이전 상태가 있으면 사용)
-                    if hasattr(self, 'current_state') and self.current_state is not None:
-                        smb_running = getattr(self.current_state, 'smb_running', False)
+                    if previous_state is not None:
+                        smb_running = getattr(previous_state, 'smb_running', False)
 
             current_state = State(
                 last_check_time=current_time_str,
