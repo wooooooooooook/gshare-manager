@@ -33,7 +33,6 @@ is_excluded_path() {
 
   read -ra names <<< "$names_csv"
   for name in "${names[@]}"; do
-    # 공백 제거
     name="${name//[[:space:]]/}"
     [[ -z "$name" ]] && continue
 
@@ -47,19 +46,37 @@ is_excluded_path() {
 
 post_event() {
   local folder="$1"
-  local payload
+  local payload http_code curl_exit attempt max_attempts
   payload="{\"folder\":\"${folder//\"/\\\"}\"}"
+  max_attempts=3
 
-  if [[ -n "$EVENT_AUTH_TOKEN" ]]; then
-    curl -fsS -X POST "$GSHARE_EVENT_URL" \
-      -H 'Content-Type: application/json' \
-      -H "X-GShare-Token: $EVENT_AUTH_TOKEN" \
-      -d "$payload" >/dev/null
-  else
-    curl -fsS -X POST "$GSHARE_EVENT_URL" \
-      -H 'Content-Type: application/json' \
-      -d "$payload" >/dev/null
-  fi
+  for attempt in $(seq 1 "$max_attempts"); do
+    if [[ -n "$EVENT_AUTH_TOKEN" ]]; then
+      http_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$GSHARE_EVENT_URL" \
+        --connect-timeout 2 --max-time 5 \
+        -H 'Content-Type: application/json' \
+        -H "X-GShare-Token: $EVENT_AUTH_TOKEN" \
+        -d "$payload")
+      curl_exit=$?
+    else
+      http_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$GSHARE_EVENT_URL" \
+        --connect-timeout 2 --max-time 5 \
+        -H 'Content-Type: application/json' \
+        -d "$payload")
+      curl_exit=$?
+    fi
+
+    if [[ $curl_exit -eq 0 && "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+      return 0
+    fi
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep 1
+    fi
+  done
+
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [warn] notify request failed folder=$folder curl_exit=$curl_exit http_code=${http_code:-000}" >&2
+  return 1
 }
 
 echo "Watching recursively: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE)"

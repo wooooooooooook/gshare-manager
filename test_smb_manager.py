@@ -156,6 +156,16 @@ class TestSMBManagerCache(unittest.TestCase):
         self.patcher_perms.stop()
         self.patcher_cleanup.stop()
 
+
+    def test_check_smb_status_requires_config_and_process(self):
+        with patch.object(self.smb_manager, '_check_smb_status_from_file', return_value=True), \
+             patch.object(self.smb_manager, '_check_samba_process_status', return_value=True):
+            self.assertTrue(self.smb_manager.check_smb_status())
+
+        with patch.object(self.smb_manager, '_check_smb_status_from_file', return_value=True), \
+             patch.object(self.smb_manager, '_check_samba_process_status', return_value=False):
+            self.assertFalse(self.smb_manager.check_smb_status())
+
     def test_cache_logic(self):
         # 1. Initial state
         self.assertEqual(len(self.smb_manager._active_links), 0)
