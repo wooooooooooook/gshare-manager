@@ -88,6 +88,8 @@ class State:
     nfs_mounted: bool = False
     monitor_mode: str = 'event'
     initial_scan_in_progress: bool = False
+    relay_status: str = 'UNKNOWN'
+    relay_last_seen: str = '-'
 
     def to_dict(self):
         data = asdict(self)
@@ -510,6 +512,8 @@ class GShareManager:
         self.low_cpu_count = 0
         self.last_action = "프로그램 시작"
         self.restart_required = False
+        self.event_relay_last_seen_epoch: Optional[float] = None
+        self.event_relay_timeout_seconds = 90
 
         # VM 마지막 종료 시간 로드
         self.last_shutdown_time = self._load_last_shutdown_time()
@@ -750,6 +754,24 @@ class GShareManager:
             logging.error(f'이벤트 처리 실패: {e}')
             return False, str(e)
 
+    def touch_event_relay(self) -> None:
+        """이벤트 릴레이의 마지막 신호 수신 시각을 업데이트한다."""
+        self.event_relay_last_seen_epoch = time.time()
+
+    def _get_event_relay_status(self) -> tuple[str, str]:
+        """event 모드에서 릴레이 상태(ON/OFF/UNKNOWN)와 마지막 수신 시각을 반환한다."""
+        if self.config.MONITOR_MODE != 'event':
+            return 'N/A', '-'
+
+        if self.event_relay_last_seen_epoch is None:
+            return 'UNKNOWN', '-'
+
+        elapsed = time.time() - self.event_relay_last_seen_epoch
+        relay_status = 'ON' if elapsed <= self.event_relay_timeout_seconds else 'OFF'
+        relay_last_seen = datetime.fromtimestamp(
+            self.event_relay_last_seen_epoch, self.local_tz).isoformat()
+        return relay_status, relay_last_seen
+
     def update_state(self, update_monitored_folders=True) -> State:
         try:
             logging.debug(f"상태 업데이트, update_monitored_folders: {update_monitored_folders}")
@@ -796,6 +818,8 @@ class GShareManager:
                     if previous_state is not None:
                         smb_running = getattr(previous_state, 'smb_running', False)
 
+            relay_status, relay_last_seen = self._get_event_relay_status()
+
             current_state = State(
                 last_check_time=current_time_str,
                 vm_running=vm_running,
@@ -811,7 +835,9 @@ class GShareManager:
                 check_interval=self.config.CHECK_INTERVAL,
                 nfs_mounted=nfs_mounted,
                 monitor_mode=self.config.MONITOR_MODE,
-                initial_scan_in_progress=getattr(self, 'initial_scan_in_progress', False)
+                initial_scan_in_progress=getattr(self, 'initial_scan_in_progress', False),
+                relay_status=relay_status,
+                relay_last_seen=relay_last_seen
             )
             return current_state
         except Exception as e:
@@ -832,7 +858,9 @@ class GShareManager:
                 smb_running=False,
                 check_interval=60,  # 기본값 60초
                 monitor_mode='event',
-                initial_scan_in_progress=False
+                initial_scan_in_progress=False,
+                relay_status='UNKNOWN',
+                relay_last_seen='-'
             )
 
     def monitor(self) -> None:

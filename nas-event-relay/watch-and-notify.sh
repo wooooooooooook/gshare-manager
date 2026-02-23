@@ -8,6 +8,7 @@ EVENT_AUTH_TOKEN="${EVENT_AUTH_TOKEN:-}"
 # 기본값은 Synology 메타데이터 폴더(@eaDir) + '@'/'dot' 접두 폴더 전체 제외.
 EXCLUDED_DIR_NAMES="${EXCLUDED_DIR_NAMES:-@eaDir,@*,.*}"
 WATCHLIST_REFRESH_INTERVAL_SECONDS="${WATCHLIST_REFRESH_INTERVAL_SECONDS:-86400}"
+HEARTBEAT_INTERVAL_SECONDS="${HEARTBEAT_INTERVAL_SECONDS:-30}"
 
 if [[ -z "$GSHARE_EVENT_URL" ]]; then
   echo "GSHARE_EVENT_URL is required" >&2
@@ -176,11 +177,41 @@ post_event() {
   return 1
 }
 
+
+post_health() {
+  local payload http_code curl_exit
+  payload='{"type":"health","heartbeat":true}'
+
+  if [[ -n "$EVENT_AUTH_TOKEN" ]]; then
+    http_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$GSHARE_EVENT_URL" \
+      --connect-timeout 2 --max-time 5 \
+      -H 'Content-Type: application/json' \
+      -H "X-GShare-Token: $EVENT_AUTH_TOKEN" \
+      -d "$payload")
+    curl_exit=$?
+  else
+    http_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$GSHARE_EVENT_URL" \
+      --connect-timeout 2 --max-time 5 \
+      -H 'Content-Type: application/json' \
+      -d "$payload")
+    curl_exit=$?
+  fi
+
+  if [[ $curl_exit -eq 0 && "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] heartbeat sent"
+    return 0
+  fi
+
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [warn] heartbeat failed curl_exit=$curl_exit http_code=${http_code:-000}" >&2
+  return 1
+}
+
 max_user_watches="$(read_inotify_limit max_user_watches)"
 max_user_instances="$(read_inotify_limit max_user_instances)"
 echo "Inotify limits: max_user_watches=$max_user_watches max_user_instances=$max_user_instances"
 
 refresh_watch_targets "startup"
+LAST_HEARTBEAT_EPOCH=0
 
 while true; do
   coproc INOTIFY_PROC {
@@ -198,6 +229,12 @@ while true; do
       echo "[info] refreshing watch target list due to daily refresh interval."
       refresh_now=1
       break
+    fi
+
+    now_epoch="$(date +%s)"
+    if (( HEARTBEAT_INTERVAL_SECONDS > 0 )) && (( now_epoch - LAST_HEARTBEAT_EPOCH >= HEARTBEAT_INTERVAL_SECONDS )); then
+      post_health || true
+      LAST_HEARTBEAT_EPOCH="$now_epoch"
     fi
 
     if IFS='|' read -r -t 1 event changed <&"${INOTIFY_PROC[0]}"; then
