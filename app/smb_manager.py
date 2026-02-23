@@ -400,7 +400,7 @@ class SMBManager:
                             f"GID {self.nfs_gid}를 가진 그룹 '{existing_group}'이(가) 이미 존재합니다. 이 그룹을 사용합니다.")
                     else:
                         # 그룹이 존재하지 않으면 새로 생성
-                        group_result = subprocess.run(['groupadd', '-r', '-g', str(
+                        group_result = subprocess.run(['groupadd', '-r', '-o', '-g', str(
                             self.nfs_gid), smb_username], capture_output=True, text=True, check=False)
                         if group_result.returncode != 0:
                             logging.warning(
@@ -413,10 +413,12 @@ class SMBManager:
                     # 사용자 생성 (지정된 UID와 찾은 또는 생성된 그룹 사용)
                     group_to_use = existing_group if existing_group else str(
                         self.nfs_gid)
-                    user_result = subprocess.run(['useradd', '-r', '-u', str(
-                        self.nfs_uid), '-g', group_to_use, smb_username], capture_output=True, text=True, check=False)
-                    logging.debug(
-                        f"사용자 생성 결과: {user_result.returncode}, 오류: {user_result.stderr.strip() if user_result.stderr else '없음'}")
+                    user_cmd = ['useradd', '-r', '-o', '-u', str(self.nfs_uid), '-g', group_to_use, smb_username]
+                    user_result = subprocess.run(user_cmd, capture_output=True, text=True, check=False)
+                    if user_result.returncode != 0:
+                        logging.error(f"사용자 생성 실패: {user_result.stderr.strip()}")
+                    else:
+                        logging.debug(f"사용자 생성 성공: {smb_username} (UID={self.nfs_uid}, GID={self.nfs_gid})")
 
                     # SMB 패스워드 설정
                     if smb_password:
@@ -452,7 +454,7 @@ class SMBManager:
 
                     # 사용자 UID 수정
                     usermod_result = subprocess.run(
-                        ['usermod', '-u', str(self.nfs_uid), smb_username], capture_output=True, text=True, check=False)
+                        ['usermod', '-o', '-u', str(self.nfs_uid), smb_username], capture_output=True, text=True, check=False)
                     logging.debug(
                         f"사용자 UID 수정 결과: {usermod_result.returncode}, 오류: {usermod_result.stderr.strip() if usermod_result.stderr else '없음'}")
 
