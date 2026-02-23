@@ -96,15 +96,19 @@ class Transcoder:
 
     def _match_rule_for_filename(self, filename: str, active_rules: List[tuple]) -> Optional[Dict[str, Any]]:
         """폴더별 활성 규칙 목록에서 파일명/확장자에 맞는 규칙을 반환"""
-        _, ext = os.path.splitext(filename)
-        ext = ext.lower()
+        ext = None  # Lazy loading: 확장자는 필요할 때만 계산
 
         for optimized, check_filename_only in active_rules:
             if check_filename_only and optimized['folder_pattern'] not in filename:
                 continue
 
-            if optimized['extensions'] and ext not in optimized['extensions']:
-                continue
+            if optimized['extensions']:
+                if ext is None:
+                    _, ext = os.path.splitext(filename)
+                    ext = ext.lower()
+
+                if ext not in optimized['extensions']:
+                    continue
 
             return optimized['original']
 
