@@ -541,7 +541,8 @@ class GShareManager:
             logging.debug("트랜스코딩 비활성화")
 
         # 상태 업데이트는 initialize() 호출 시 수행
-        self.initial_scan_in_progress = self.config.MONITOR_MODE == 'polling'
+        # 모니터링 방식과 무관하게 초기 스캔은 항상 수행하므로 기본값은 False로 둔다.
+        self.initial_scan_in_progress = False
         logging.info(
             f"초기 상태 계산 시작 (monitor_mode={self.config.MONITOR_MODE}, initial_scan_in_progress={self.initial_scan_in_progress})")
         self.current_state = self.update_state(update_monitored_folders=False)
@@ -552,15 +553,11 @@ class GShareManager:
         """GShareManager 초기화 수행 (무거운 작업 포함)"""
         logging.debug("GShareManager 초기화 작업 시작...")
 
-        # FolderMonitor 초기화 (polling 모드는 비동기 초기 스캔으로 실행)
-        if self.config.MONITOR_MODE == 'polling':
-            logging.info('폴링 모드 초기 스캔을 백그라운드에서 시작합니다.')
-            self.initial_scan_in_progress = True
-            self._initial_scan_thread = threading.Thread(target=self._run_initial_scan_async, daemon=True)
-            self._initial_scan_thread.start()
-        else:
-            logging.info('이벤트 수신 모드 활성화: 폴링 초기 스캔을 생략합니다.')
-            self.initial_scan_in_progress = False
+        # FolderMonitor 초기화 (모든 모드에서 비동기 초기 스캔 실행)
+        logging.info(f'{self.config.MONITOR_MODE} 모드 초기 스캔을 백그라운드에서 시작합니다.')
+        self.initial_scan_in_progress = True
+        self._initial_scan_thread = threading.Thread(target=self._run_initial_scan_async, daemon=True)
+        self._initial_scan_thread.start()
 
         # 초기 상태 업데이트
         self.current_state = self.update_state()
