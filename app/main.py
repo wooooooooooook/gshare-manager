@@ -290,6 +290,131 @@ class FolderMonitor:
             logging.error(f"폴더 목록 조회 실패: {e}")
             return self._folder_list_cache
 
+    def _run_scan_worker(self) -> None:
+        """Background worker for folder scanning."""
+        try:
+            logging.debug("백그라운드 스캔 스레드 시작")
+            self._scan_cycle += 1
+            full_scan = (self._scan_cycle % self._full_scan_cycle_interval == 0)
+            result = self._scan_folders(full_scan=full_scan)
+            self._scan_queue.put((result, full_scan))
+            logging.debug("백그라운드 스캔 완료 및 결과 큐에 추가")
+        except Exception as e:
+            logging.error(f"백그라운드 스캔 중 오류 발생: {e}")
+
+    def _update_subfolder_mtimes(self) -> None:
+        """모든 서브폴더의 수정 시간을 업데이트하고 삭제된 폴더 제거"""
+        start_time = time.time()
+
+        # Use optimized scan
+        current_scan = self._scan_folders(full_scan=True)
+
+        # Identify new folders for logging
+        new_folders = set(current_scan.keys()) - set(self.previous_mtimes.keys())
+        for folder in new_folders:
+            logging.debug(f"새 폴더 감지: {folder}")
+
+        # Update cache with current scan results (adds new, updates existing)
+        self.previous_mtimes.update(current_scan)
+
+        # Identify and remove deleted folders
+        deleted_folders = set(self.previous_mtimes.keys()) - set(current_scan.keys())
+        for folder in deleted_folders:
+            logging.info(f"폴더 삭제 감지: {folder}")
+            # 심볼릭 링크 제거
+            self.smb_manager.remove_symlink(folder)
+            if folder in self.previous_mtimes:
+                del self.previous_mtimes[folder]
+
+        elapsed_time = time.time() - start_time
+        logging.debug(
+            f"폴더 구조 업데이트 완료 - 걸린 시간: {elapsed_time:.3f}초, 총 폴더: {len(self.previous_mtimes)}개, 새 폴더: {len(new_folders)}개, 삭제된 폴더: {len(deleted_folders)}개")
+
+    def check_modifications(self) -> tuple[list[str], bool, list[str]]:
+        """수정 시간이 변경된 서브폴더 목록, VM 시작 필요 여부, 마운트/트랜스코딩 대상 폴더를 반환 (Async)"""
+        start_time = time.time()
+        changed_folders = []
+        should_start_vm = False
+
+        # Check for async scan results
+        try:
+            current_scan, full_scan = self._scan_queue.get_nowait()
+
+            # 1. Handle Deleted Folders (정기 Full Scan에서만 수행)
+            if full_scan:
+                deleted_folders = set(self.previous_mtimes.keys()) - set(current_scan.keys())
+                for folder in deleted_folders:
+                    logging.info(f"폴더 삭제 감지: {folder}")
+                    self.smb_manager.remove_symlink(folder)
+                    if folder in self.previous_mtimes:
+                        del self.previous_mtimes[folder]
+
+            # 2. Handle Updates (New and Modified)
+            for path, current_mtime in current_scan.items():
+                prev_mtime = self.previous_mtimes.get(path)
+
+                if prev_mtime is None:
+                    logging.debug(f"새 폴더 감지: {path}")
+                    self.previous_mtimes[path] = current_mtime
+
+                elif current_mtime != prev_mtime:
+                    last_modified = datetime.fromtimestamp(current_mtime, self.local_tz).strftime("%Y-%m-%d %H:%M:%S")
+                    logging.info(f"폴더 수정 시간 변화 감지 ({path}): {last_modified}")
+                    changed_folders.append(path)
+                    self.previous_mtimes[path] = current_mtime
+
+                    if current_mtime > self.last_shutdown_time:
+                        should_start_vm = True
+                        logging.info(f"VM 시작 조건 충족 - 수정 시간: {last_modified}")
+
+            mount_targets = self._filter_mount_targets(changed_folders)
+            for path in mount_targets:
+                self.smb_manager.create_symlink(path)
+
+            elapsed_time = time.time() - start_time
+            logging.debug(
+                f"폴더 수정 시간 확인 완료 (Async) - 걸린 시간: {elapsed_time:.3f}초, 변경된 폴더: {len(changed_folders)}개")
+
+            return changed_folders, should_start_vm, mount_targets
+
+        except queue.Empty:
+            pass
+
+        # Trigger new scan if needed
+        if self._scan_thread is None or not self._scan_thread.is_alive():
+            self._scan_thread = threading.Thread(target=self._run_scan_worker)
+            self._scan_thread.daemon = True
+            self._scan_thread.start()
+
+        return [], False, []
+
+    def get_monitored_folders(self) -> dict:
+        """감시 중인 모든 폴더와 수정 시간, 링크 상태를 반환"""
+        folders_with_mtime: dict[str, Optional[float]] = dict(self.previous_mtimes)
+
+        # 이벤트 모드/초기 폴링 단계에서는 mtime 수집 전에도 폴더 목록을 먼저 보여준다.
+        for path in self._list_subfolders_without_mtime():
+            if path not in folders_with_mtime:
+                folders_with_mtime[path] = None
+
+        def sort_key(item: tuple[str, Optional[float]]) -> tuple[int, float, str]:
+            path, mtime = item
+            # mtime가 있는 항목 우선, 이후 최신순, 마지막으로 경로명 순 정렬
+            return (0 if mtime is not None else 1, -(mtime or 0.0), path)
+
+        monitored_folders = {}
+        for path, mtime in sorted(folders_with_mtime.items(), key=sort_key):
+            # 실제 심볼릭 링크가 존재하는지 확인 (메모리 캐시 사용)
+            is_mounted = self.smb_manager.is_link_active(path)
+            mtime_str = datetime.fromtimestamp(mtime, self.local_tz).strftime('%Y-%m-%d %H:%M:%S') if mtime is not None else '-'
+
+            monitored_folders[path] = {
+                'mtime': mtime_str,
+                'is_mounted': is_mounted
+            }
+
+        return monitored_folders
+
     def _create_links_for_recently_modified(self) -> None:
         """마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성"""
         try:
