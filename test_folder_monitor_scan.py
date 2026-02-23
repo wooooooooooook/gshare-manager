@@ -11,7 +11,7 @@ sys.modules['web_server'] = MagicMock()
 sys.modules['transcoder'] = MagicMock()
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app'))
-from main import FolderMonitor, _is_nfs_mount_present  # noqa: E402
+from main import FolderMonitor, GShareManager, _is_nfs_mount_present  # noqa: E402
 
 
 class DummyConfig:
@@ -75,6 +75,45 @@ class TestFolderMonitorListSubfolders(unittest.TestCase):
             args, kwargs = mock_run.call_args
             self.assertEqual(args[0], ['ls', '-1RF'])
             self.assertEqual(kwargs.get('cwd'), root)
+
+
+class DummyManagerConfig:
+    def __init__(self, monitor_mode: str = 'event'):
+        self.MONITOR_MODE = monitor_mode
+        self.TIMEZONE = 'UTC'
+        self.CPU_THRESHOLD = 10
+        self.THRESHOLD_COUNT = 3
+        self.CHECK_INTERVAL = 60
+        self.NFS_PATH = ''
+        self.MOUNT_PATH = '/tmp'
+
+
+class TestGShareManagerInitialize(unittest.TestCase):
+    @patch('main.Transcoder')
+    @patch('main.GShareManager.update_state', return_value=MagicMock())
+    @patch('main.GShareManager._mount_nfs', return_value=None)
+    @patch('main.GShareManager._load_last_shutdown_time', return_value=0.0)
+    @patch('main.FolderMonitor')
+    @patch('main.threading.Thread')
+    def test_initialize_starts_initial_scan_thread_even_in_event_mode(
+        self,
+        mock_thread,
+        mock_folder_monitor,
+        _mock_shutdown,
+        _mock_mount,
+        _mock_update_state,
+        _mock_transcoder
+    ):
+        thread_instance = MagicMock()
+        mock_thread.return_value = thread_instance
+
+        manager = GShareManager(DummyManagerConfig('event'), MagicMock())
+        manager.initialize()
+
+        self.assertTrue(manager.initial_scan_in_progress)
+        mock_thread.assert_called_once_with(target=manager._run_initial_scan_async, daemon=True)
+        thread_instance.start.assert_called_once()
+
 
 
 class TestNfsMountPresence(unittest.TestCase):
