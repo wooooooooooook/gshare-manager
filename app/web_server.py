@@ -176,7 +176,9 @@ class GshareWebServer:
             smb_running=False,
             check_interval=60,
             monitor_mode='event',
-            initial_scan_in_progress=False
+            initial_scan_in_progress=False,
+            relay_status='UNKNOWN',
+            relay_last_seen='-'
         )
 
     def _get_container_ip(self):
@@ -526,6 +528,15 @@ class GshareWebServer:
             expected_token = (getattr(self.config, 'EVENT_AUTH_TOKEN', '') or '').strip() if self.config else ''
             if expected_token and token != expected_token:
                 return jsonify({"status": "error", "message": "인증 실패"}), 401
+
+            is_health_signal = bool(payload.get('health') or payload.get('heartbeat') or payload.get('type') == 'health')
+            if hasattr(self.manager, 'touch_event_relay'):
+                self.manager.touch_event_relay()
+
+            if is_health_signal and not folder:
+                self.manager.current_state = self.manager.update_state(update_monitored_folders=False)
+                self.emit_state_update()
+                return jsonify({"status": "success", "message": "헬스 신호 수신 완료"})
 
             if not folder:
                 return jsonify({"status": "error", "message": "folder 필드가 필요합니다."}), 400

@@ -8,6 +8,7 @@
 - relay는 `watch_dirs_effective` 목록만 감시합니다(재귀 `-r` 미사용).
 - 새 디렉토리 생성이 감지되면 목록 갱신 필요 상태로 표시하고, **하루 1회(기본 86400초)** 목록을 재계산해 감시 대상을 갱신합니다. (`WATCHLIST_REFRESH_INTERVAL_SECONDS`로 조정 가능)
 - 전송은 최대 3회(짧은 간격) 재시도하며, 실패 시 `curl_exit`/`http_code`를 함께 로그로 남깁니다.
+- 기본 30초 간격(`HEARTBEAT_INTERVAL_SECONDS`)으로 헬스 신호를 전송해 GShare UI에서 relay 생존 상태를 표시할 수 있습니다.
   - 예: `curl_exit=7`은 대상 서버 연결 실패(서버 미기동/네트워크 경로 문제)
   - 예: `http_code=500`은 GShare 앱 내부 처리 실패
 

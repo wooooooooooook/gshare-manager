@@ -8,5 +8,6 @@ services:
       - GSHARE_EVENT_URL=http://<gshare-host>:5000/api/folder-event
       - EVENT_AUTH_TOKEN=<same-token-as-gshare>
       - EXCLUDED_DIR_NAMES=@eaDir,@*,.*
+      - HEARTBEAT_INTERVAL_SECONDS=30
     volumes:
       - <nas-source-path>:/watch:ro
