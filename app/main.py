@@ -124,9 +124,6 @@ class FolderMonitor:
         self._nfs_status_cache: Optional[bool] = None
         self._nfs_status_checked_at = 0.0
         self._nfs_status_ttl = 5.0
-        self._folder_list_cache: list[str] = []
-        self._folder_list_checked_at = 0.0
-        self._folder_list_ttl = 10.0
         self._scan_cycle = 0
         self._full_scan_cycle_interval = 12
 
@@ -138,10 +135,7 @@ class FolderMonitor:
         logging.info("초기 파일시스템 스캔 시작...")
         start_time = time.time()
 
-        # 1단계: ls 기반 폴더명 선수집 (빠른 초기 표시 목적)
-        self._prime_folders_with_ls_scan()
-
-        # 2단계: mtime 정밀 스캔
+        # 초기 스캔 (mtime 포함 정밀 스캔)
         self._update_subfolder_mtimes()
 
         # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성
@@ -175,19 +169,7 @@ class FolderMonitor:
             logging.warning(f"NFS 소유자 UID/GID 조회 실패, 기본값(1000/1000) 사용: {e}")
             return default_uid, default_gid
 
-    def _prime_folders_with_ls_scan(self) -> None:
-        """ls 기반으로 폴더 목록을 먼저 수집해 초기 상태를 빠르게 준비"""
-        try:
-            folders = self._list_subfolders_without_mtime()
-            added = 0
-            for folder in folders:
-                if folder not in self.previous_mtimes:
-                    # mtime 스캔 전 단계에서는 플레이스홀더 값 사용
-                    self.previous_mtimes[folder] = 0.0
-                    added += 1
-            logging.info(f"초기 ls 스캔 완료 - 폴더 {len(folders)}개 확인, 신규 {added}개 반영")
-        except Exception as e:
-            logging.warning(f"초기 ls 스캔 실패, mtime 스캔으로 계속 진행: {e}")
+
 
     def _polling_recent_window_mmin(self) -> int:
         """polling 스캔 시 최근 변경 탐지에 사용할 mmin 창(분)"""
@@ -271,24 +253,7 @@ class FolderMonitor:
             logging.error(f"Folder scan error: {e}")
             return results
 
-    def _list_subfolders_without_mtime(self) -> list[str]:
-        """mtime 수집 없이 마운트된 하위 폴더 목록만 반환 (짧은 TTL 캐시 사용)."""
-        if not os.path.exists(self.config.MOUNT_PATH):
-            return []
 
-        now = time.monotonic()
-        if (now - self._folder_list_checked_at) < self._folder_list_ttl:
-            return self._folder_list_cache
-
-        try:
-            # _scan_folders 를 full_scan=True 로 호출하여 경로(key)만 추출
-            paths = list(self._scan_folders(full_scan=True).keys())
-            self._folder_list_cache = sorted(paths)
-            self._folder_list_checked_at = now
-            return self._folder_list_cache
-        except Exception as e:
-            logging.error(f"폴더 목록 조회 실패: {e}")
-            return self._folder_list_cache
 
     def _run_scan_worker(self) -> None:
         """Background worker for folder scanning."""
@@ -391,11 +356,6 @@ class FolderMonitor:
     def get_monitored_folders(self) -> dict:
         """감시 중인 모든 폴더와 수정 시간, 링크 상태를 반환"""
         folders_with_mtime: dict[str, Optional[float]] = dict(self.previous_mtimes)
-
-        # 이벤트 모드/초기 폴링 단계에서는 mtime 수집 전에도 폴더 목록을 먼저 보여준다.
-        for path in self._list_subfolders_without_mtime():
-            if path not in folders_with_mtime:
-                folders_with_mtime[path] = None
 
         def sort_key(item: tuple[str, Optional[float]]) -> tuple[int, float, str]:
             path, mtime = item
