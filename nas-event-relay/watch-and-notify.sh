@@ -20,6 +20,17 @@ fi
 
 FS_TYPE="$(stat -f -c %T "$WATCH_PATH" 2>/dev/null || echo unknown)"
 
+read_inotify_limit() {
+  local key="$1"
+  local path="/proc/sys/fs/inotify/$key"
+  if [[ -r "$path" ]]; then
+    cat "$path"
+    return 0
+  fi
+
+  echo "unknown"
+}
+
 case "$FS_TYPE" in
   nfs|cifs|smb2|fuseblk|fuse)
     echo "[warn] WATCH_PATH filesystem type is '$FS_TYPE'."
@@ -114,7 +125,12 @@ watch_counts="$(count_watch_targets)"
 watch_total="${watch_counts%%|*}"
 watch_included="${watch_counts##*|}"
 
+max_user_watches="$(read_inotify_limit max_user_watches)"
+max_user_instances="$(read_inotify_limit max_user_instances)"
+
 echo "Watching recursively: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE, watch_dirs_total: $watch_total, watch_dirs_effective: $watch_included)"
+echo "Inotify limits: max_user_watches=$max_user_watches max_user_instances=$max_user_instances"
+echo "[info] watch_dirs_effective is for event filtering only; inotifywait -r still tries to watch watch_dirs_total directories."
 
 watch_counts="$(count_watch_targets)"
 watch_total="${watch_counts%%|*}"

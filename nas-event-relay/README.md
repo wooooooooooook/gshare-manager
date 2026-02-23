@@ -5,6 +5,8 @@
 ## 로그 해석
 
 - 시작 시 `Watching recursively: ...` 로그를 즉시 출력하고, 이어서 `Watch target summary: watch_dirs_total=... watch_dirs_effective=...` 로그로 디렉토리 집계를 출력합니다.
+- 추가로 `Inotify limits: max_user_watches=... max_user_instances=...`를 출력해 커널 한도를 바로 확인할 수 있습니다.
+- `watch_dirs_effective`는 **이벤트 전송 필터 기준 개수**이며, `inotifywait -r` 자체는 `watch_dirs_total`에 가까운 실제 디렉토리 watch를 시도합니다.
 - 전송은 최대 3회(짧은 간격) 재시도하며, 실패 시 `curl_exit`/`http_code`를 함께 로그로 남깁니다.
   - 예: `curl_exit=7`은 대상 서버 연결 실패(서버 미기동/네트워크 경로 문제)
   - 예: `http_code=500`은 GShare 앱 내부 처리 실패
