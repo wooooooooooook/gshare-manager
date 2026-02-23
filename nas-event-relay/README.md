@@ -1,10 +1,12 @@
 # NAS Event Relay
 
-`watch-and-notify.sh`는 `inotifywait`로 `WATCH_PATH`를 재귀 감시하고, 파일 변경 이벤트를 GShare 서버로 전달합니다.
+`watch-and-notify.sh`는 시작 시 감시 대상 디렉토리 목록을 계산한 뒤, 해당 목록만 `inotifywait`로 감시하고 파일 변경 이벤트를 GShare 서버로 전달합니다.
 
 ## 로그 해석
 
-- 시작 시 `Watching recursively: ...` 로그를 즉시 출력하고, 이어서 `Watch target summary: watch_dirs_total=... watch_dirs_effective=...` 로그로 디렉토리 집계를 출력합니다.
+- 시작 시 `Inotify limits: ...` 로그와 `Watching directory list: ...`, `Watch target summary: ...` 로그를 출력합니다.
+- relay는 `watch_dirs_effective` 목록만 감시합니다(재귀 `-r` 미사용).
+- 새 디렉토리 생성이 감지되면 목록 갱신 필요 상태로 표시하고, **하루 1회(기본 86400초)** 목록을 재계산해 감시 대상을 갱신합니다. (`WATCHLIST_REFRESH_INTERVAL_SECONDS`로 조정 가능)
 - 전송은 최대 3회(짧은 간격) 재시도하며, 실패 시 `curl_exit`/`http_code`를 함께 로그로 남깁니다.
   - 예: `curl_exit=7`은 대상 서버 연결 실패(서버 미기동/네트워크 경로 문제)
   - 예: `http_code=500`은 GShare 앱 내부 처리 실패
@@ -21,8 +23,12 @@
 컨테이너 안에서 직접 테스트하면 inotify 경로 문제를 빠르게 구분할 수 있습니다.
 
 ```bash
+# 참고: /tmp/watchlist.txt 는 감시할 디렉토리 목록(한 줄에 한 경로)입니다.
+# 예시 생성
+docker exec -it <relay-container> sh -lc "find /watch -type d > /tmp/watchlist.txt"
+
 # 1) 감시 테스트
-docker exec -it <relay-container> sh -lc 'inotifywait -m -r -e create -e close_write /watch'
+docker exec -it <relay-container> sh -lc 'inotifywait -m -e create -e close_write --fromfile /tmp/watchlist.txt'
 
 # 2) 다른 터미널에서 컨테이너 내부 파일 생성
 docker exec -it <relay-container> sh -lc 'mkdir -p /watch/_probe && echo test > /watch/_probe/a.txt'

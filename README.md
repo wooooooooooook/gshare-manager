@@ -75,5 +75,6 @@ MIT License
 이후 새 파일 생성/이동 이벤트가 발생하면 해당 폴더명이 GShare로 전달되고 SMB 공유 및 VM 시작이 순차 수행됩니다.
 파일 쓰기 완료(`close_write`)로 수정시간(mtime) 변화가 감지되면 relay 컨테이너 로그에 감지 경로를 남깁니다.
 
-> relay는 재귀 감시(`inotifywait -r`)를 사용하며, Synology DSM 메타데이터 디렉토리(기본: `@eaDir`)는 이벤트 전송에서 제외합니다.
+> relay는 시작 시 계산한 디렉토리 목록(`watch_dirs_effective`)만 감시하며, 재귀 `-r` 옵션은 사용하지 않습니다.
+> 새 디렉토리 생성이 감지되면 목록 갱신 필요 상태로 표시하고 하루 1회 목록을 재계산합니다(기본 86400초, `WATCHLIST_REFRESH_INTERVAL_SECONDS`로 조정 가능).
 > 추가 제외 디렉토리가 필요하면 `EXCLUDED_DIR_NAMES` 환경변수에 쉼표로 구분해 지정하세요. 예: `@eaDir,#recycle`
