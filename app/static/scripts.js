@@ -254,6 +254,9 @@ function updateUI(data) {
         vmStatus: document.querySelector('.vm-status'),
         smbStatus: document.querySelector('.smb-status'),
         nfsStatus: document.querySelector('.nfs-status'),
+        eventRelayStatus: document.querySelector('.event-relay-status'),
+        eventRelayLastSeen: document.querySelector('.event-relay-last-seen'),
+        eventRelayStatusContainer: document.getElementById('eventRelayStatusContainer'),
         cpuUsage: document.querySelector('.cpu-usage'),
         lowCpuCount: document.querySelector('.low-cpu-count'),
         uptime: document.querySelector('.uptime'),
@@ -279,6 +282,9 @@ function updateUI(data) {
     // NFS 상태 업데이트
     if (elements.nfsStatus) {
         updateNFSStatus(data.nfs_status);
+    }
+    if (elements.eventRelayStatus || elements.eventRelayStatusContainer) {
+        updateEventRelayStatus(data.event_relay_status, data.event_relay_last_seen);
     }
     updateInitialScanNotice(initialScanInProgress);
 
@@ -563,6 +569,49 @@ window.onload = function () {
         startPolling();
     }
 };
+
+
+function updateEventRelayStatus(status, lastSeen) {
+    const relayContainer = document.getElementById('eventRelayStatusContainer');
+    const relayStatusWrap = document.querySelector('.event-relay-status');
+    const relayLastSeen = document.querySelector('.event-relay-last-seen');
+
+    if (relayContainer) {
+        if (monitorMode === 'event') {
+            relayContainer.classList.remove('hidden');
+        } else {
+            relayContainer.classList.add('hidden');
+            return;
+        }
+    }
+
+    if (relayLastSeen) {
+        relayLastSeen.innerText = lastSeen || '-';
+    }
+
+    if (!relayStatusWrap) return;
+
+    const statusBadge = relayStatusWrap.querySelector('span:first-child');
+    const statusIcon = relayStatusWrap.querySelector('span:last-child');
+    if (!statusBadge || !statusIcon) return;
+
+    const resolvedStatus = status || 'UNKNOWN';
+    statusBadge.innerText = resolvedStatus;
+
+    statusBadge.classList.remove('bg-emerald-50', 'text-emerald-700', 'bg-amber-50', 'text-amber-700', 'bg-slate-50', 'text-slate-700');
+    statusIcon.classList.remove('bg-green-500', 'bg-yellow-500', 'bg-gray-400');
+
+    if (resolvedStatus === 'ON') {
+        statusBadge.classList.add('bg-emerald-50', 'text-emerald-700');
+        statusIcon.classList.add('bg-green-500');
+    } else if (resolvedStatus === 'OFF') {
+        statusBadge.classList.add('bg-amber-50', 'text-amber-700');
+        statusIcon.classList.add('bg-yellow-500');
+    } else {
+        statusBadge.classList.add('bg-slate-50', 'text-slate-700');
+        statusIcon.classList.add('bg-gray-400');
+    }
+}
 
 function updateVMStatus(status) {
     const vmStatusContainer = document.querySelector('.vm-status-container');

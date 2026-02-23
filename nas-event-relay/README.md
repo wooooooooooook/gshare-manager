@@ -2,6 +2,8 @@
 
 `watch-and-notify.sh`는 `inotifywait`로 `WATCH_PATH`를 재귀 감시하고, 파일 변경 이벤트를 GShare 서버로 전달합니다.
 
+- relay는 주기적으로 keep-alive(health) 신호를 전송하며, GShare 웹의 **From NAS > Event relay** 상태가 ON/OFF로 표시됩니다.
+
 ## 로그 해석
 
 - 시작 시 `Watching recursively: ...` 로그를 즉시 출력하고, 이어서 `Watch target summary: watch_dirs_total=... watch_dirs_effective=...` 로그로 디렉토리 집계를 출력합니다.
@@ -41,3 +43,10 @@ docker exec -it <relay-container> sh -lc 'mkdir -p /watch/_probe && echo test > 
 - `EXCLUDED_DIR_NAMES` 기본값은 `@eaDir,@*,.*` 입니다.
 - 즉 Synology 메타데이터 폴더(`@eaDir`)뿐 아니라, 이름이 `@`로 시작하는 디렉토리(`@*`)와 숨김 디렉토리(`.*`) 하위 이벤트도 기본적으로 무시합니다.
 - 필요하면 환경변수로 쉼표 구분 목록(와일드카드 허용)을 지정해 동작을 바꿀 수 있습니다.
+
+
+## Health(keep-alive)
+
+- `GSHARE_HEALTH_URL`(선택): 기본값은 `GSHARE_EVENT_URL`에서 자동 유도한 `/api/event-relay/health` 입니다.
+- `HEALTH_INTERVAL_SECONDS`(선택): keep-alive 전송 간격(기본 30초).
+- health 전송이 끊기면 GShare UI의 Event relay 상태가 일정 시간 후 `OFF`로 바뀝니다.

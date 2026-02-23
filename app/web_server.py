@@ -219,6 +219,8 @@ class GshareWebServer:
                               self.update_config, methods=['POST'])
         self.app.add_url_rule('/api/folder-event', 'folder_event',
                               self.folder_event, methods=['POST'])
+        self.app.add_url_rule('/api/event-relay/health', 'event_relay_health',
+                              self.event_relay_health, methods=['POST'])
         self.app.add_url_rule(
             '/test_proxmox_api', 'test_proxmox_api', self.test_proxmox_api, methods=['POST'])
         self.app.add_url_rule('/test_nfs', 'test_nfs',
@@ -510,6 +512,33 @@ class GshareWebServer:
         except Exception as e:
             logging.error(f"설정 저장 중 오류 발생: {e}")
             return render_template('landing.html', error=str(e), form_data=request.form)
+
+
+    def event_relay_health(self):
+        """이벤트 릴레이 keep-alive/health 신호를 처리"""
+        try:
+            if self.manager is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 503
+
+            payload = request.get_json(silent=True) or {}
+            token = request.headers.get('X-GShare-Token', '')
+            if not token:
+                token = (payload.get('token') or '').strip()
+
+            expected_token = (getattr(self.config, 'EVENT_AUTH_TOKEN', '') or '').strip() if self.config else ''
+            if expected_token and token != expected_token:
+                return jsonify({"status": "error", "message": "인증 실패"}), 401
+
+            self.manager.mark_event_relay_alive()
+            self.manager.current_state = self.manager.update_state(update_monitored_folders=False)
+            self.emit_state_update()
+            if self.manager.mqtt_manager:
+                self.manager.mqtt_manager.publish_state(self.manager.current_state)
+
+            return jsonify({"status": "success", "message": "event relay alive"})
+        except Exception as e:
+            logging.error(f"이벤트 릴레이 health API 오류: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
 
     def folder_event(self):
         """NAS에서 전달한 폴더 이벤트를 처리"""

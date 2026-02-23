@@ -85,6 +85,28 @@
 						<span class="text-sm font-medium">초기 폴더 탐색 중입니다...</span>
 					</div>
 				</div>
+				<div id="eventRelayStatusContainer"
+					class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 mb-2 {% if state.get('monitor_mode', 'event') != 'event' %}hidden{% endif %}">
+					<div class="flex items-center gap-1">
+						<svg class="w-4 h-4 text-gray-700" xmlns="http://www.w3.org/2000/svg" fill="none"
+							viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round"
+								d="M9 17.25v-10.5m3 10.5v-7.5m3 7.5v-4.5M3.75 3h16.5A2.25 2.25 0 0122.5 5.25v13.5A2.25 2.25 0 0120.25 21H3.75A2.25 2.25 0 011.5 18.75V5.25A2.25 2.25 0 013.75 3z" />
+						</svg>
+						<span class="text-xs text-gray-500">Event relay</span>
+					</div>
+					<div class="flex items-center gap-2">
+						<div class="text-xs text-gray-500 event-relay-last-seen">{{ state.get('event_relay_last_seen', '-') }}</div>
+						<div class="flex items-center font-medium text-sm event-relay-status">
+							<span
+								class="text-right px-2 py-0.5 rounded-full {% if state.get('event_relay_status', 'UNKNOWN') == 'ON' %}bg-emerald-50 text-emerald-700{% elif state.get('event_relay_status', 'UNKNOWN') == 'OFF' %}bg-amber-50 text-amber-700{% else %}bg-slate-50 text-slate-700{% endif %}">
+								{{state.get('event_relay_status', 'UNKNOWN')}}
+							</span>
+							<span
+								class="ml-2 w-3 h-3 rounded-full {% if state.get('event_relay_status', 'UNKNOWN') == 'ON' %}bg-green-500{% elif state.get('event_relay_status', 'UNKNOWN') == 'OFF' %}bg-yellow-500{% else %}bg-gray-400{% endif %}"></span>
+						</div>
+					</div>
+				</div>
 				<div onclick="remountNFS()" style="cursor: pointer" title="클릭하여 NFS 마운트 재시도"
 					class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 mb-2 nfs-status-container">
 					<div class="flex items-center gap-1">

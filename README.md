@@ -65,7 +65,9 @@ MIT License
 1. NAS에서 `nas-event-relay/docker-compose.yml`의 값을 환경에 맞게 수정
    - `GSHARE_EVENT_URL`: gshare_manager의 `/api/folder-event` 주소
    - `EVENT_AUTH_TOKEN`: GShare 설정의 이벤트 인증 토큰과 동일하게 설정
-   - `EXCLUDED_DIR_NAMES`(선택): 이벤트 제외 디렉토리명(쉼표 구분), 기본값 `@eaDir`
+   - `EXCLUDED_DIR_NAMES`(선택): 이벤트 제외 디렉토리명(쉼표 구분), 기본값 `@eaDir,@*,.*`
+   - `GSHARE_HEALTH_URL`(선택): 이벤트 릴레이 health 신호 전송 주소(기본값 자동 유도)
+   - `HEALTH_INTERVAL_SECONDS`(선택): health 신호 전송 간격(기본 30초)
    - 볼륨: 원본 파일이 생성되는 NAS 경로를 `/watch`로 마운트
 2. NAS에서 `docker compose up -d --build` 실행
 3. GShare 설정 페이지의 NFS 설정 탭에서
@@ -73,6 +75,7 @@ MIT License
    - 이벤트 인증 토큰: relay와 동일 값
 
 이후 새 파일 생성/이동 이벤트가 발생하면 해당 폴더명이 GShare로 전달되고 SMB 공유 및 VM 시작이 순차 수행됩니다.
+또한 relay keep-alive를 기준으로 웹 From NAS 섹션에서 Event relay 상태(ON/OFF)를 확인할 수 있습니다.
 파일 쓰기 완료(`close_write`)로 수정시간(mtime) 변화가 감지되면 relay 컨테이너 로그에 감지 경로를 남깁니다.
 
 > relay는 재귀 감시(`inotifywait -r`)를 사용하며, Synology DSM 메타데이터 디렉토리(기본: `@eaDir`)는 이벤트 전송에서 제외합니다.

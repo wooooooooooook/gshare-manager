@@ -4,6 +4,8 @@ set -euo pipefail
 WATCH_PATH="${WATCH_PATH:-/watch}"
 GSHARE_EVENT_URL="${GSHARE_EVENT_URL:-}"
 EVENT_AUTH_TOKEN="${EVENT_AUTH_TOKEN:-}"
+GSHARE_HEALTH_URL="${GSHARE_HEALTH_URL:-}"
+HEALTH_INTERVAL_SECONDS="${HEALTH_INTERVAL_SECONDS:-30}"
 # 쉼표(,)로 구분된 디렉토리 이름/패턴 목록.
 # 기본값은 Synology 메타데이터 폴더(@eaDir) + '@'/'dot' 접두 폴더 전체 제외.
 EXCLUDED_DIR_NAMES="${EXCLUDED_DIR_NAMES:-@eaDir,@*,.*}"
@@ -11,6 +13,10 @@ EXCLUDED_DIR_NAMES="${EXCLUDED_DIR_NAMES:-@eaDir,@*,.*}"
 if [[ -z "$GSHARE_EVENT_URL" ]]; then
   echo "GSHARE_EVENT_URL is required" >&2
   exit 1
+fi
+
+if [[ -z "$GSHARE_HEALTH_URL" ]]; then
+  GSHARE_HEALTH_URL="${GSHARE_EVENT_URL%/api/folder-event}/api/event-relay/health"
 fi
 
 if [[ ! -d "$WATCH_PATH" ]]; then
@@ -57,6 +63,47 @@ is_excluded_path() {
 
   return 1
 }
+
+
+post_health() {
+  local payload http_code
+  payload='{"status":"alive"}'
+
+  if [[ -n "$EVENT_AUTH_TOKEN" ]]; then
+    http_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$GSHARE_HEALTH_URL" \
+      --connect-timeout 2 --max-time 5 \
+      -H 'Content-Type: application/json' \
+      -H "X-GShare-Token: $EVENT_AUTH_TOKEN" \
+      -d "$payload") || return 1
+  else
+    http_code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$GSHARE_HEALTH_URL" \
+      --connect-timeout 2 --max-time 5 \
+      -H 'Content-Type: application/json' \
+      -d "$payload") || return 1
+  fi
+
+  [[ "$http_code" =~ ^2[0-9][0-9]$ ]]
+}
+
+start_health_loop() {
+  (
+    while true; do
+      if ! post_health; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [warn] health notify failed url=$GSHARE_HEALTH_URL" >&2
+      fi
+      sleep "$HEALTH_INTERVAL_SECONDS"
+    done
+  ) &
+  HEALTH_LOOP_PID=$!
+}
+
+cleanup() {
+  if [[ -n "${HEALTH_LOOP_PID:-}" ]]; then
+    kill "$HEALTH_LOOP_PID" >/dev/null 2>&1 || true
+  fi
+}
+
+trap cleanup EXIT INT TERM
 
 
 count_watch_targets() {
@@ -120,6 +167,8 @@ watch_counts="$(count_watch_targets)"
 watch_total="${watch_counts%%|*}"
 watch_included="${watch_counts##*|}"
 echo "Watch target summary: watch_dirs_total=$watch_total watch_dirs_effective=$watch_included"
+start_health_loop
+echo "Health check loop started: every ${HEALTH_INTERVAL_SECONDS}s -> $GSHARE_HEALTH_URL"
 
 inotifywait -m -r \
   -e close_write -e moved_to -e create \

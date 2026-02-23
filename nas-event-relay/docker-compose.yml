@@ -7,6 +7,8 @@ services:
       - WATCH_PATH=/watch
       - GSHARE_EVENT_URL=http://<gshare-host>:5000/api/folder-event
       - EVENT_AUTH_TOKEN=<same-token-as-gshare>
+      - GSHARE_HEALTH_URL=http://<gshare-host>:5000/api/event-relay/health
+      - HEALTH_INTERVAL_SECONDS=30
       - EXCLUDED_DIR_NAMES=@eaDir,@*,.*
     volumes:
       - <nas-source-path>:/watch:ro
