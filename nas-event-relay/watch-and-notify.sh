@@ -7,6 +7,7 @@ EVENT_AUTH_TOKEN="${EVENT_AUTH_TOKEN:-}"
 # 쉼표(,)로 구분된 디렉토리 이름/패턴 목록.
 # 기본값은 Synology 메타데이터 폴더(@eaDir) + '@'/'dot' 접두 폴더 전체 제외.
 EXCLUDED_DIR_NAMES="${EXCLUDED_DIR_NAMES:-@eaDir,@*,.*}"
+WATCHLIST_REFRESH_INTERVAL_SECONDS="${WATCHLIST_REFRESH_INTERVAL_SECONDS:-86400}"
 
 if [[ -z "$GSHARE_EVENT_URL" ]]; then
   echo "GSHARE_EVENT_URL is required" >&2
@@ -19,6 +20,14 @@ if [[ ! -d "$WATCH_PATH" ]]; then
 fi
 
 FS_TYPE="$(stat -f -c %T "$WATCH_PATH" 2>/dev/null || echo unknown)"
+WATCHLIST_FILE="$(mktemp)"
+LAST_WATCHLIST_REFRESH_EPOCH=0
+PENDING_REFRESH=0
+
+cleanup() {
+  rm -f "$WATCHLIST_FILE"
+}
+trap cleanup EXIT
 
 read_inotify_limit() {
   local key="$1"
@@ -69,7 +78,6 @@ is_excluded_path() {
   return 1
 }
 
-
 count_watch_targets() {
   local total=0 included=0
   local dir
@@ -84,6 +92,53 @@ count_watch_targets() {
   done < <(find "$WATCH_PATH" -type d 2>/dev/null)
 
   echo "$total|$included"
+}
+
+build_watchlist_file() {
+  : > "$WATCHLIST_FILE"
+  while IFS= read -r dir; do
+    [[ -z "$dir" ]] && continue
+    if ! is_excluded_path "$dir" "$EXCLUDED_DIR_NAMES"; then
+      printf '%s\n' "$dir" >> "$WATCHLIST_FILE"
+    fi
+  done < <(find "$WATCH_PATH" -type d 2>/dev/null)
+}
+
+refresh_watch_targets() {
+  local reason="$1"
+  local watch_counts watch_total watch_included
+
+  watch_counts="$(count_watch_targets)"
+  watch_total="${watch_counts%%|*}"
+  watch_included="${watch_counts##*|}"
+
+  build_watchlist_file
+  LAST_WATCHLIST_REFRESH_EPOCH="$(date +%s)"
+  PENDING_REFRESH=0
+
+  echo "Watching directory list: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE, watch_dirs_total: $watch_total, watch_dirs_effective: $watch_included, refresh_reason: $reason)"
+  echo "Watch target summary: watch_dirs_total=$watch_total watch_dirs_effective=$watch_included"
+}
+
+should_refresh_now() {
+  local now
+  now="$(date +%s)"
+  (( now - LAST_WATCHLIST_REFRESH_EPOCH >= WATCHLIST_REFRESH_INTERVAL_SECONDS ))
+}
+
+mark_refresh_if_needed() {
+  local changed="$1"
+
+  if should_refresh_now; then
+    echo "[info] new directory detected. refreshing watch target list now."
+    return 0
+  fi
+
+  if [[ $PENDING_REFRESH -eq 0 ]]; then
+    echo "[info] new directory detected. watch target list refresh is deferred until daily refresh interval."
+  fi
+  PENDING_REFRESH=1
+  return 1
 }
 
 post_event() {
@@ -121,49 +176,79 @@ post_event() {
   return 1
 }
 
-watch_counts="$(count_watch_targets)"
-watch_total="${watch_counts%%|*}"
-watch_included="${watch_counts##*|}"
-
 max_user_watches="$(read_inotify_limit max_user_watches)"
 max_user_instances="$(read_inotify_limit max_user_instances)"
-
-echo "Watching recursively: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE, watch_dirs_total: $watch_total, watch_dirs_effective: $watch_included)"
 echo "Inotify limits: max_user_watches=$max_user_watches max_user_instances=$max_user_instances"
-echo "[info] watch_dirs_effective is for event filtering only; inotifywait -r still tries to watch watch_dirs_total directories."
 
-watch_counts="$(count_watch_targets)"
-watch_total="${watch_counts%%|*}"
-watch_included="${watch_counts##*|}"
-echo "Watch target summary: watch_dirs_total=$watch_total watch_dirs_effective=$watch_included"
+refresh_watch_targets "startup"
 
-inotifywait -m -r \
-  -e close_write -e moved_to -e create \
-  --format '%e|%w%f' "$WATCH_PATH" | while IFS='|' read -r event changed; do
-  if is_excluded_path "$changed" "$EXCLUDED_DIR_NAMES"; then
-    continue
+while true; do
+  coproc INOTIFY_PROC {
+    inotifywait -m \
+      -e close_write -e moved_to -e create \
+      --format '%e|%w%f' \
+      --fromfile "$WATCHLIST_FILE"
+  }
+
+  inotify_pid="$INOTIFY_PROC_PID"
+  refresh_now=0
+
+  while true; do
+    if should_refresh_now; then
+      echo "[info] refreshing watch target list due to daily refresh interval."
+      refresh_now=1
+      break
+    fi
+
+    if IFS='|' read -r -t 1 event changed <&"${INOTIFY_PROC[0]}"; then
+      if is_excluded_path "$changed" "$EXCLUDED_DIR_NAMES"; then
+        continue
+      fi
+
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] event=$event path=$changed"
+
+      if [[ "$event" == *"ISDIR"* ]]; then
+        if mark_refresh_if_needed "$changed"; then
+          refresh_now=1
+          break
+        fi
+      fi
+
+      if [[ -d "$changed" ]]; then
+        folder="$changed"
+      else
+        folder="$(dirname "$changed")"
+      fi
+
+      if is_excluded_path "$folder" "$EXCLUDED_DIR_NAMES"; then
+        continue
+      fi
+
+      rel="${folder#${WATCH_PATH}/}"
+      if [[ "$rel" == "$folder" ]]; then
+        rel="."
+      fi
+
+      if post_event "$rel"; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] notified folder=$rel"
+      else
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [warn] notify failed folder=$rel"
+      fi
+      continue
+    fi
+
+    if ! kill -0 "$inotify_pid" 2>/dev/null; then
+      echo "[warn] inotifywait exited unexpectedly. restarting watcher."
+      refresh_now=1
+      break
+    fi
+  done
+
+  kill "$inotify_pid" 2>/dev/null || true
+  wait "$inotify_pid" 2>/dev/null || true
+
+  if [[ $refresh_now -eq 1 ]]; then
+    refresh_watch_targets "periodic"
   fi
 
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] event=$event path=$changed"
-
-  if [[ -d "$changed" ]]; then
-    folder="$changed"
-  else
-    folder="$(dirname "$changed")"
-  fi
-
-  if is_excluded_path "$folder" "$EXCLUDED_DIR_NAMES"; then
-    continue
-  fi
-
-  rel="${folder#${WATCH_PATH}/}"
-  if [[ "$rel" == "$folder" ]]; then
-    rel="."
-  fi
-
-  if post_event "$rel"; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] notified folder=$rel"
-  else
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [warn] notify failed folder=$rel"
-  fi
 done
