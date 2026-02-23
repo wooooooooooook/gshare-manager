@@ -1,10 +1,12 @@
 # NAS Event Relay
 
 `watch-and-notify.sh`는 시작 시 감시 대상 디렉토리 목록을 계산한 뒤, 해당 목록만 `inotifywait`로 감시하고 파일 변경 이벤트를 GShare 서버로 전달합니다.
+내부 이벤트 수집은 `coproc` 대신 named pipe(FIFO) 기반으로 동작합니다.
 
 ## 로그 해석
 
 - 시작 시 `Inotify limits: ...` 로그와 `Watching directory list: ...`, `Watch target summary: ...` 로그를 출력합니다.
+- watch 등록 과정은 `[watch-register]` 접두 로그로 상세 출력됩니다. (watchlist 생성/샘플, inotify 시작 PID, inotify 원시 메시지 등)
 - relay는 `watch_dirs_effective` 목록만 감시합니다(재귀 `-r` 미사용).
 - 새 디렉토리 생성이 감지되면 목록 갱신 필요 상태로 표시하고, **하루 1회(기본 86400초)** 목록을 재계산해 감시 대상을 갱신합니다. (`WATCHLIST_REFRESH_INTERVAL_SECONDS`로 조정 가능)
 - 전송은 최대 3회(짧은 간격) 재시도하며, 실패 시 `curl_exit`/`http_code`를 함께 로그로 남깁니다.

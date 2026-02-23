@@ -22,11 +22,15 @@ fi
 
 FS_TYPE="$(stat -f -c %T "$WATCH_PATH" 2>/dev/null || echo unknown)"
 WATCHLIST_FILE="$(mktemp)"
+EVENT_PIPE="$(mktemp -u /tmp/nas-event-relay.pipe.XXXXXX)"
 LAST_WATCHLIST_REFRESH_EPOCH=0
 PENDING_REFRESH=0
 
 cleanup() {
+  exec 3>&- || true
+  exec 4>&- || true
   rm -f "$WATCHLIST_FILE"
+  rm -f "$EVENT_PIPE"
 }
 trap cleanup EXIT
 
@@ -108,6 +112,7 @@ build_watchlist_file() {
 refresh_watch_targets() {
   local reason="$1"
   local watch_counts watch_total watch_included
+  local watch_sample
 
   watch_counts="$(count_watch_targets)"
   watch_total="${watch_counts%%|*}"
@@ -116,9 +121,14 @@ refresh_watch_targets() {
   build_watchlist_file
   LAST_WATCHLIST_REFRESH_EPOCH="$(date +%s)"
   PENDING_REFRESH=0
+  watch_sample="$(head -n 5 "$WATCHLIST_FILE" | tr '\n' ';')"
 
   echo "Watching directory list: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE, watch_dirs_total: $watch_total, watch_dirs_effective: $watch_included, refresh_reason: $reason)"
   echo "Watch target summary: watch_dirs_total=$watch_total watch_dirs_effective=$watch_included"
+  echo "[watch-register] reason=$reason step=watchlist-built watchlist_file=$WATCHLIST_FILE entries=$watch_included"
+  if [[ -n "$watch_sample" ]]; then
+    echo "[watch-register] reason=$reason step=watchlist-sample sample=${watch_sample%;}"
+  fi
 }
 
 should_refresh_now() {
@@ -213,15 +223,21 @@ echo "Inotify limits: max_user_watches=$max_user_watches max_user_instances=$max
 refresh_watch_targets "startup"
 LAST_HEARTBEAT_EPOCH=0
 
-while true; do
-  coproc INOTIFY_PROC {
-    inotifywait -m \
-      -e close_write -e moved_to -e create \
-      --format '%e|%w%f' \
-      --fromfile "$WATCHLIST_FILE"
-  }
+if [[ -p "$EVENT_PIPE" ]]; then
+  rm -f "$EVENT_PIPE"
+fi
+mkfifo "$EVENT_PIPE"
+exec 3<>"$EVENT_PIPE"
 
-  inotify_pid="$INOTIFY_PROC_PID"
+while true; do
+  watch_count="$(wc -l < "$WATCHLIST_FILE" | tr -d '[:space:]')"
+  echo "[watch-register] step=inotify-start path=$WATCH_PATH watch_entries=$watch_count events=close_write,moved_to,create"
+  inotifywait -m \
+    -e close_write -e moved_to -e create \
+    --format '%e|%w%f' \
+    --fromfile "$WATCHLIST_FILE" > "$EVENT_PIPE" 2>&1 &
+  inotify_pid="$!"
+  echo "[watch-register] step=inotify-started pid=$inotify_pid pipe=$EVENT_PIPE"
   refresh_now=0
 
   while true; do
@@ -237,7 +253,17 @@ while true; do
       LAST_HEARTBEAT_EPOCH="$now_epoch"
     fi
 
-    if IFS='|' read -r -t 1 event changed <&"${INOTIFY_PROC[0]}"; then
+    if IFS='|' read -r -t 1 event changed <&3; then
+      if [[ "$event" == Setting* || "$event" == Watches* ]]; then
+        echo "[watch-register] step=inotify-runtime message=${event}${changed:+|$changed}"
+        continue
+      fi
+
+      if [[ -z "${changed:-}" ]]; then
+        echo "[watch-register] step=inotify-raw message=$event"
+        continue
+      fi
+
       if is_excluded_path "$changed" "$EXCLUDED_DIR_NAMES"; then
         continue
       fi
