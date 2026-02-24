@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+import json
 from unittest.mock import MagicMock, patch
 
 # Mock external modules before importing main
@@ -21,60 +22,90 @@ class DummyConfig:
         self.TIMEZONE = 'UTC'
 
 
-class TestFolderMonitorFindFallback(unittest.TestCase):
+class TestFolderMonitorScan(unittest.TestCase):
     @patch('main.SMBManager')
     @patch('main.FolderMonitor._get_nfs_ownership', return_value=(1000, 1000))
-    def test_scan_folders_hybrid_falls_back_to_portable_find(self, _mock_ownership, _mock_smb):
+    def test_scan_folders_parses_find_output(self, _mock_ownership, _mock_smb):
         with tempfile.TemporaryDirectory() as root:
-            os.makedirs(os.path.join(root, 'A'))
-            os.makedirs(os.path.join(root, 'B', 'C'))
-            with open(os.path.join(root, 'A', 'a.txt'), 'w', encoding='utf-8') as f:
-                f.write('x')
-            with open(os.path.join(root, 'B', 'C', 'c.txt'), 'w', encoding='utf-8') as f:
-                f.write('x')
+            cfg = DummyConfig(root)
+            monitor = FolderMonitor(cfg, MagicMock(), 0.0)
 
-            monitor = FolderMonitor(DummyConfig(root), MagicMock(), 0.0)
+            find_output = '100.0\tA\n200.0\tB/C\n'
+            with patch('main.subprocess.run', return_value=MagicMock(stdout=find_output)):
+                result = monitor._scan_folders(full_scan=True)
 
-            first_error = __import__('subprocess').CalledProcessError(1, ['find'])
-            second_ok = MagicMock(stdout='./A/a.txt\0./B/C/c.txt\0')
-
-            with patch('main.subprocess.run', side_effect=[first_error, second_ok]) as mock_run:
-                result = monitor._scan_folders_hybrid()
-
-            self.assertIn('A', result)
-            self.assertIn('B/C', result)
-            self.assertEqual(mock_run.call_count, 2)
-
-
-class TestFolderMonitorListSubfolders(unittest.TestCase):
-    @patch('main.SMBManager')
-    @patch('main.FolderMonitor._get_nfs_ownership', return_value=(1000, 1000))
-    def test_list_subfolders_uses_scandir_and_filters_hidden_dirs(self, _mock_ownership, _mock_smb):
-        with tempfile.TemporaryDirectory() as root:
-            os.makedirs(os.path.join(root, 'alpha'))
-            os.makedirs(os.path.join(root, 'alpha', 'beta'))
-            os.makedirs(os.path.join(root, '.hidden'))
-            os.makedirs(os.path.join(root, '@eaDir'))
-
-            monitor = FolderMonitor(DummyConfig(root), MagicMock(), 0.0)
-            result = monitor._list_subfolders_without_mtime()
-
-            self.assertEqual(result, ['alpha', 'alpha/beta'])
+            self.assertEqual(result, {'A': 100.0, 'B/C': 200.0})
 
     @patch('main.SMBManager')
     @patch('main.FolderMonitor._get_nfs_ownership', return_value=(1000, 1000))
-    def test_list_subfolders_prefers_ls_tree_when_available(self, _mock_ownership, _mock_smb):
+    def test_scan_folders_filters_old_entries_on_partial_scan(self, _mock_ownership, _mock_smb):
         with tempfile.TemporaryDirectory() as root:
-            monitor = FolderMonitor(DummyConfig(root), MagicMock(), 0.0)
-            ls_output = '.:\nalpha/\nbeta/\n\n./alpha:\nchild/\n\n./beta:\n\n./alpha/child:\n'
+            cfg = DummyConfig(root)
+            monitor = FolderMonitor(cfg, MagicMock(), 0.0)
 
-            with patch('main.subprocess.run', return_value=MagicMock(stdout=ls_output)) as mock_run:
-                result = monitor._list_subfolders_without_mtime()
+            now = 1_000.0
+            monitor._polling_recent_window_mmin = MagicMock(return_value=5)
+            find_output = '990.0\tnew-folder\n600.0\told-folder\n'
 
-            self.assertEqual(result, ['alpha', 'alpha/child', 'beta'])
-            args, kwargs = mock_run.call_args
-            self.assertEqual(args[0], ['ls', '-1RF'])
-            self.assertEqual(kwargs.get('cwd'), root)
+            with patch('main.time.time', return_value=now), \
+                 patch('main.subprocess.run', return_value=MagicMock(stdout=find_output)):
+                result = monitor._scan_folders(full_scan=False)
+
+            self.assertEqual(result, {'new-folder': 990.0})
+
+
+class TestFolderScanCacheReuse(unittest.TestCase):
+    @patch('main.SMBManager')
+    @patch('main.FolderMonitor._get_nfs_ownership', return_value=(1000, 1000))
+    def test_load_scan_cache_when_identity_matches(self, _mock_ownership, _mock_smb):
+        with tempfile.TemporaryDirectory() as root:
+            cache_path = os.path.join(root, '.folder_scan_cache.json')
+            payload = {
+                'identity': {
+                    'mount_path': root.rstrip('/'),
+                    'nfs_path': 'nas:/export',
+                    'monitor_mode': 'event',
+                },
+                'previous_mtimes': {'folder1': 123.4}
+            }
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f)
+
+            cfg = DummyConfig(root)
+            cfg.NFS_PATH = 'nas:/export'
+            cfg.MONITOR_MODE = 'event'
+
+            with patch('main.FOLDER_SCAN_CACHE_PATH', cache_path):
+                monitor = FolderMonitor(cfg, MagicMock(), 0.0)
+
+            self.assertTrue(monitor.loaded_from_cache)
+            self.assertIn('folder1', monitor.previous_mtimes)
+
+    @patch('main.SMBManager')
+    @patch('main.FolderMonitor._get_nfs_ownership', return_value=(1000, 1000))
+    def test_skip_scan_cache_when_identity_differs(self, _mock_ownership, _mock_smb):
+        with tempfile.TemporaryDirectory() as root:
+            cache_path = os.path.join(root, '.folder_scan_cache.json')
+            payload = {
+                'identity': {
+                    'mount_path': '/other/mount',
+                    'nfs_path': 'nas:/export',
+                    'monitor_mode': 'event',
+                },
+                'previous_mtimes': {'folder1': 123.4}
+            }
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f)
+
+            cfg = DummyConfig(root)
+            cfg.NFS_PATH = 'nas:/export'
+            cfg.MONITOR_MODE = 'event'
+
+            with patch('main.FOLDER_SCAN_CACHE_PATH', cache_path):
+                monitor = FolderMonitor(cfg, MagicMock(), 0.0)
+
+            self.assertFalse(monitor.loaded_from_cache)
+            self.assertEqual(monitor.previous_mtimes, {})
 
 
 class DummyManagerConfig:
