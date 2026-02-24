@@ -2,6 +2,8 @@ import logging
 import os
 import subprocess
 import time
+import pwd
+import grp
 from config import GshareConfig  # type: ignore
 from typing import Optional, Tuple
 
@@ -26,6 +28,10 @@ class SMBManager:
         self.user_checked = False # 사용자 검증 완료 여부 
         self._active_links = set()  # Active link cache
 
+        # Cache for chown operations
+        self._smb_uid: Optional[int] = None
+        self._smb_gid: Optional[int] = None
+
         # 초기화 작업
         self._init_smb_config()
         # 초기 상태 설정 (파일에서 확인)
@@ -37,6 +43,37 @@ class SMBManager:
 
         # 시작 시 기존 심볼릭 링크 모두 제거
         self.cleanup_all_symlinks()
+
+    def _refresh_ownership_ids(self) -> None:
+        """Cache the UID and GID to be used for chown operations on symlinks."""
+        try:
+            # Resolve UID for SMB_USERNAME
+            pw = pwd.getpwnam(self.config.SMB_USERNAME)
+            self._smb_uid = pw.pw_uid
+        except KeyError:
+            logging.warning(f"User '{self.config.SMB_USERNAME}' not found. Fallback to NFS UID.")
+            self._smb_uid = self.nfs_uid
+        except Exception as e:
+            logging.error(f"Error resolving UID for '{self.config.SMB_USERNAME}': {e}")
+            self._smb_uid = self.nfs_uid
+
+        # Resolve GID
+        try:
+            grp.getgrgid(self.nfs_gid)
+            # nfs_gid resolves to a group, so use it.
+            self._smb_gid = self.nfs_gid
+        except KeyError:
+            # nfs_gid does not resolve. We might be using SMB_USERNAME as group.
+            try:
+                self._smb_gid = grp.getgrnam(self.config.SMB_USERNAME).gr_gid
+            except KeyError:
+                # Neither exists? Fallback to numeric nfs_gid
+                self._smb_gid = self.nfs_gid
+        except Exception as e:
+             logging.error(f"Error resolving GID: {e}")
+             self._smb_gid = self.nfs_gid
+
+        logging.debug(f"Refreshed ownership IDs: UID={self._smb_uid}, GID={self._smb_gid}")
 
     def is_link_active(self, subfolder: str) -> bool:
         """
@@ -319,15 +356,10 @@ class SMBManager:
             Optional[Tuple[int, int]]: (UID, GID) 튜플 (존재하지 않거나 오류 시 None)
         """
         try:
-            user_info = subprocess.run(
-                ['id', username], capture_output=True, text=True)
-            if user_info.returncode == 0:
-                info_parts = user_info.stdout.strip().split()
-                current_uid = int(
-                    info_parts[0].split('=')[1].split('(')[0])
-                current_gid = int(
-                    info_parts[1].split('=')[1].split('(')[0])
-                return current_uid, current_gid
+            pw = pwd.getpwnam(username)
+            return pw.pw_uid, pw.pw_gid
+        except KeyError:
+            return None
         except Exception as e:
             logging.error(f"사용자 확인 중 오류 ({username}): {e}")
         return None
@@ -343,10 +375,10 @@ class SMBManager:
             Optional[str]: 그룹 이름 (존재하지 않거나 오류 시 None)
         """
         try:
-            group_info = subprocess.run(
-                ['getent', 'group', str(gid)], capture_output=True, text=True)
-            if group_info.returncode == 0:  # 해당 GID를 가진 그룹이 존재
-                return group_info.stdout.strip().split(':')[0]
+            gr = grp.getgrgid(gid)
+            return gr.gr_name
+        except KeyError:
+            return None
         except Exception as e:
             logging.error(f"그룹 확인 중 오류 ({gid}): {e}")
         return None
@@ -519,6 +551,9 @@ class SMBManager:
             # 작업 완료 후 사용자 체크 플래그 설정
             self.user_checked = True
 
+            # Cache the IDs for chown operations
+            self._refresh_ownership_ids()
+
         except Exception as e:
             logging.error(f"SMB 사용자의 UID/GID 설정 실패: {e}")
             raise
@@ -637,15 +672,13 @@ class SMBManager:
             
             # SMB 사용자의 소유권으로 변경
             try:
-                # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
-                existing_group = self._get_group_name(self.nfs_gid)
+                if self._smb_uid is None or self._smb_gid is None:
+                    self._refresh_ownership_ids()
 
-                # 적절한 그룹 이름 결정
-                group_name = existing_group if existing_group else self.config.SMB_USERNAME
-                
-                # 심볼릭 링크 소유권 변경
-                subprocess.run(
-                    ['chown', '-h', f"{self.config.SMB_USERNAME}:{group_name}", link_path], check=False)
+                if hasattr(os, 'lchown'):
+                    os.lchown(link_path, self._smb_uid, self._smb_gid)
+                else:
+                    os.chown(link_path, self._smb_uid, self._smb_gid, follow_symlinks=False)
                 logging.debug(f"심볼릭 링크 소유권 변경됨: {link_path}")
             except Exception as e:
                 logging.warning(f"심볼릭 링크 소유권 변경 실패 ({link_path}): {e}")
@@ -684,19 +717,18 @@ class SMBManager:
         """
         try:
             if os.path.exists(self.links_dir):
-                # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
-                existing_group = self._get_group_name(self.nfs_gid)
+                if self._smb_uid is None or self._smb_gid is None:
+                    self._refresh_ownership_ids()
 
-                # 적절한 그룹 이름 결정
-                group_name = existing_group if existing_group else self.config.SMB_USERNAME
-                
                 # 모든 심볼릭 링크 소유권 변경
                 for filename in os.listdir(self.links_dir):
                     file_path = os.path.join(self.links_dir, filename)
                     if os.path.islink(file_path):
                         try:
-                            subprocess.run(
-                                ['chown', '-h', f"{self.config.SMB_USERNAME}:{group_name}", file_path], check=False)
+                            if hasattr(os, 'lchown'):
+                                os.lchown(file_path, self._smb_uid, self._smb_gid)
+                            else:
+                                os.chown(file_path, self._smb_uid, self._smb_gid, follow_symlinks=False)
                             logging.debug(f"심볼릭 링크 소유권 변경됨: {file_path}")
                         except Exception as e:
                             logging.warning(f"심볼릭 링크 소유권 변경 실패 ({file_path}): {e}")
