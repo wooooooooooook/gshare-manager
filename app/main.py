@@ -181,7 +181,6 @@ class FolderMonitor:
         return {
             'mount_path': (self.config.MOUNT_PATH or '').rstrip('/'),
             'nfs_path': ((self.config.NFS_PATH or '') if hasattr(self.config, 'NFS_PATH') else '').rstrip('/'),
-            'monitor_mode': getattr(self.config, 'MONITOR_MODE', ''),
         }
 
     def _load_scan_cache(self) -> bool:
@@ -790,6 +789,7 @@ class GShareManager:
 
             event_mtime = time.time()
             self.folder_monitor.previous_mtimes[normalized] = event_mtime
+            self.folder_monitor._save_scan_cache()
             mount_targets = self.folder_monitor._filter_mount_targets([normalized])
             if not mount_targets:
                 mount_targets = [normalized]
