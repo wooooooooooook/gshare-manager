@@ -172,7 +172,7 @@ class TestSMBManagerCache(unittest.TestCase):
         self.assertFalse(self.smb_manager.is_link_active('Folder/A'))
 
         # 2. Create link
-        with patch('smb_manager.os.symlink'),              patch('smb_manager.os.path.exists', return_value=False),              patch('smb_manager.subprocess.run'),              patch.object(self.smb_manager, '_get_group_name', return_value='group'):
+        with patch('smb_manager.os.symlink'),              patch('smb_manager.os.path.lexists', return_value=False),              patch('smb_manager.subprocess.run'),              patch.object(self.smb_manager, '_get_group_name', return_value='group'):
 
             success = self.smb_manager.create_symlink('Folder/A')
             self.assertTrue(success)
@@ -181,7 +181,7 @@ class TestSMBManagerCache(unittest.TestCase):
             self.assertIn('Folder_A', self.smb_manager._active_links)
 
         # 3. Create another link
-        with patch('smb_manager.os.symlink'),              patch('smb_manager.os.path.exists', return_value=False),              patch('smb_manager.subprocess.run'):
+        with patch('smb_manager.os.symlink'),              patch('smb_manager.os.path.lexists', return_value=False),              patch('smb_manager.subprocess.run'):
 
             self.smb_manager.create_symlink('Folder/B')
             self.assertTrue(self.smb_manager.is_link_active('Folder/B'))
@@ -196,6 +196,30 @@ class TestSMBManagerCache(unittest.TestCase):
                  self.assertFalse(self.smb_manager.is_link_active('Folder/A'))
                  self.assertTrue(self.smb_manager.is_link_active('Folder/B'))
                  self.assertEqual(len(self.smb_manager._active_links), 1)
+
+
+    def test_create_symlink_reuses_existing_same_target(self):
+        with patch('smb_manager.os.path.islink', return_value=True), \
+             patch('smb_manager.os.readlink', return_value='/mnt/gshare/Folder/A'), \
+             patch('smb_manager.os.path.lexists') as mock_lexists, \
+             patch('smb_manager.os.symlink') as mock_symlink:
+            success = self.smb_manager.create_symlink('Folder/A')
+
+        self.assertTrue(success)
+        self.assertIn('Folder_A', self.smb_manager._active_links)
+        mock_symlink.assert_not_called()
+        mock_lexists.assert_not_called()
+
+    def test_create_symlink_file_exists_with_same_target_treated_as_success(self):
+        with patch('smb_manager.os.path.islink', side_effect=[False, True]), \
+             patch('smb_manager.os.path.lexists', return_value=False), \
+             patch('smb_manager.os.symlink', side_effect=FileExistsError), \
+             patch('smb_manager.os.readlink', return_value='/mnt/gshare/Folder/A'), \
+             patch('smb_manager.subprocess.run'):
+            success = self.smb_manager.create_symlink('Folder/A')
+
+        self.assertTrue(success)
+        self.assertIn('Folder_A', self.smb_manager._active_links)
 
 class TestSMBManagerCleanup(unittest.TestCase):
     def setUp(self):
