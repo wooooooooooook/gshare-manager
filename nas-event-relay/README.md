@@ -6,8 +6,9 @@
 ## 로그 해석
 
 - 시작 시 `Inotify limits: ...` 로그와 `Watching directory list: ...`, `Watch target summary: ...` 로그를 출력합니다.
+- `Watch target summary`는 실제 감시 등록에 사용되는 `watch_dirs_effective`만 출력합니다.
 - watch 등록 과정은 `[watch-register]` 접두 로그로 상세 출력됩니다. (watchlist 생성/샘플, inotify 시작 PID, inotify 원시 메시지 등)
-- relay는 `watch_dirs_effective` 목록만 감시합니다(재귀 `-r` 미사용).
+- relay는 `find ... -prune` 방식으로 제외 디렉토리 하위 트리를 스캔 단계에서 건너뛰고, `watch_dirs_effective` 목록만 감시합니다(재귀 `-r` 미사용).
 - 새 디렉토리 생성이 감지되면 목록 갱신 필요 상태로 표시하고, **하루 1회(기본 86400초)** 목록을 재계산해 감시 대상을 갱신합니다. (`WATCHLIST_REFRESH_INTERVAL_SECONDS`로 조정 가능)
 - 전송은 최대 3회(짧은 간격) 재시도하며, 실패 시 `curl_exit`/`http_code`를 함께 로그로 남깁니다.
 - 기본 30초 간격(`HEARTBEAT_INTERVAL_SECONDS`)으로 헬스 신호를 전송해 GShare UI에서 relay 생존 상태를 표시할 수 있습니다.
@@ -19,7 +20,8 @@
 - **로컬 Linux 파일시스템(ext4/xfs/btrfs) bind mount**는 일반적으로 inotify 이벤트가 정상 전달됩니다.
 - **NFS/CIFS/SMB/FUSE 계열 파일시스템**은 이벤트 전달이 불완전할 수 있습니다.
   - 특히 "다른 노드/클라이언트에서 발생한 변경"은 커널 이벤트로 올라오지 않아 누락될 수 있습니다.
-- 컨테이너 시작 시 로그에 `fs: <type>`과 경고가 출력되면 이 케이스를 의심해야 합니다.
+- 컨테이너 시작 시 로그의 `fs: <type>`은 우선 `stat`로 확인하고, Alpine/BusyBox 환경처럼 값이 비어 있거나 `?`가 나오는 경우 `/proc/mounts`를 기준으로 보정합니다.
+- 그럼에도 `fs: unknown`이면 마운트 정보 확인이 실패한 상태이므로, 실제 컨테이너 마운트 설정(`docker inspect`, `/proc/mounts`)을 추가 점검해야 합니다.
 
 ## 빠른 점검 방법
 

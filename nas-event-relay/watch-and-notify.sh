@@ -20,7 +20,47 @@ if [[ ! -d "$WATCH_PATH" ]]; then
   exit 1
 fi
 
-FS_TYPE="$(stat -f -c %T "$WATCH_PATH" 2>/dev/null || echo unknown)"
+detect_fs_type() {
+  local fs_type mount_source
+
+  fs_type="$(stat -f -c %T "$WATCH_PATH" 2>/dev/null || true)"
+  if [[ -n "$fs_type" && "$fs_type" != "?" ]]; then
+    echo "$fs_type"
+    return 0
+  fi
+
+  mount_source="$(awk -v path="$WATCH_PATH" '
+    BEGIN {
+      best_len = -1
+      best_fs = ""
+    }
+    {
+      mount = $2
+      gsub("\\\\040", " ", mount)
+      if (index(path, mount) == 1) {
+        mount_len = length(mount)
+        if (mount_len > best_len) {
+          best_len = mount_len
+          best_fs = $3
+        }
+      }
+    }
+    END {
+      if (best_fs != "") {
+        print best_fs
+      }
+    }
+  ' /proc/mounts 2>/dev/null || true)"
+
+  if [[ -n "$mount_source" ]]; then
+    echo "$mount_source"
+    return 0
+  fi
+
+  echo "unknown"
+}
+
+FS_TYPE="$(detect_fs_type)"
 WATCHLIST_FILE="$(mktemp)"
 EVENT_PIPE="$(mktemp -u /tmp/nas-event-relay.pipe.XXXXXX)"
 LAST_WATCHLIST_REFRESH_EPOCH=0
@@ -83,48 +123,54 @@ is_excluded_path() {
   return 1
 }
 
-count_watch_targets() {
-  local total=0 included=0
-  local dir
-
-  while IFS= read -r dir; do
-    [[ -z "$dir" ]] && continue
-    total=$((total + 1))
-
-    if ! is_excluded_path "$dir" "$EXCLUDED_DIR_NAMES"; then
-      included=$((included + 1))
-    fi
-  done < <(find "$WATCH_PATH" -type d 2>/dev/null)
-
-  echo "$total|$included"
-}
-
 build_watchlist_file() {
+  local IFS=','
+  local pattern
+  local include_count
+  local -a patterns
+  local -a find_cmd
+
   : > "$WATCHLIST_FILE"
-  while IFS= read -r dir; do
-    [[ -z "$dir" ]] && continue
-    if ! is_excluded_path "$dir" "$EXCLUDED_DIR_NAMES"; then
-      printf '%s\n' "$dir" >> "$WATCHLIST_FILE"
+
+  read -ra patterns <<< "$EXCLUDED_DIR_NAMES"
+  find_cmd=(find "$WATCH_PATH")
+
+  local has_pattern=0
+  for pattern in "${patterns[@]}"; do
+    pattern="${pattern//[[:space:]]/}"
+    [[ -z "$pattern" ]] && continue
+
+    if [[ $has_pattern -eq 0 ]]; then
+      find_cmd+=( "(" -name "$pattern" )
+      has_pattern=1
+    else
+      find_cmd+=( -o -name "$pattern" )
     fi
-  done < <(find "$WATCH_PATH" -type d 2>/dev/null)
+  done
+
+  if [[ $has_pattern -eq 1 ]]; then
+    find_cmd+=( ")" -prune -o -type d -print )
+  else
+    find_cmd+=( -type d -print )
+  fi
+
+  "${find_cmd[@]}" > "$WATCHLIST_FILE" 2>/dev/null
+  include_count="$(wc -l < "$WATCHLIST_FILE" | tr -d '[:space:]')"
+  echo "$include_count"
 }
 
 refresh_watch_targets() {
   local reason="$1"
-  local watch_counts watch_total watch_included
+  local watch_included
   local watch_sample
 
-  watch_counts="$(count_watch_targets)"
-  watch_total="${watch_counts%%|*}"
-  watch_included="${watch_counts##*|}"
-
-  build_watchlist_file
+  watch_included="$(build_watchlist_file)"
   LAST_WATCHLIST_REFRESH_EPOCH="$(date +%s)"
   PENDING_REFRESH=0
   watch_sample="$(head -n 5 "$WATCHLIST_FILE" | tr '\n' ';')"
 
-  echo "Watching directory list: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE, watch_dirs_total: $watch_total, watch_dirs_effective: $watch_included, refresh_reason: $reason)"
-  echo "Watch target summary: watch_dirs_total=$watch_total watch_dirs_effective=$watch_included"
+  echo "Watching directory list: $WATCH_PATH (excluding: $EXCLUDED_DIR_NAMES, fs: $FS_TYPE, watch_dirs_effective: $watch_included, refresh_reason: $reason)"
+  echo "Watch target summary: watch_dirs_effective=$watch_included"
   echo "[watch-register] reason=$reason step=watchlist-built watchlist_file=$WATCHLIST_FILE entries=$watch_included"
   if [[ -n "$watch_sample" ]]; then
     echo "[watch-register] reason=$reason step=watchlist-sample sample=${watch_sample%;}"
