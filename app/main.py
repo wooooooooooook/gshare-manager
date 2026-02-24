@@ -15,7 +15,7 @@ import math
 import sys
 import atexit
 from config import (GshareConfig, CONFIG_PATH, INIT_FLAG_PATH,
-                    LAST_SHUTDOWN_PATH, LOG_DIR, LOG_FILE_PATH)  # type: ignore
+                    LAST_SHUTDOWN_PATH, FOLDER_SCAN_CACHE_PATH, LOG_DIR, LOG_FILE_PATH)  # type: ignore
 from proxmox_api import ProxmoxAPI
 from web_server import GshareWebServer
 from smb_manager import SMBManager
@@ -24,6 +24,7 @@ from transcoder import Transcoder
 import yaml  # type: ignore
 import traceback
 import urllib3  # type: ignore
+import json
 
 # SSL 경고 메시지 비활성화
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -130,7 +131,9 @@ class FolderMonitor:
         self._full_scan_cycle_interval = 12
 
         # 서브폴더 정보 업데이트 및 초기 링크 생성은 initialize()에서 수행
-        logging.debug("FolderMonitor 객체 생성됨 (초기 스캔은 지연됨)")
+        self.loaded_from_cache = self._load_scan_cache()
+        logging.debug(
+            f"FolderMonitor 객체 생성됨 (초기 스캔은 지연됨, 캐시 로드: {self.loaded_from_cache}, 폴더 수: {len(self.previous_mtimes)}개)")
 
     def initialize(self) -> None:
         """초기 파일시스템 스캔 및 링크 생성 수행"""
@@ -139,6 +142,7 @@ class FolderMonitor:
 
         # 초기 스캔 (mtime 포함 정밀 스캔)
         self._update_subfolder_mtimes()
+        self._save_scan_cache()
 
         # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성
         self._create_links_for_recently_modified()
@@ -170,6 +174,62 @@ class FolderMonitor:
         except Exception as e:
             logging.warning(f"NFS 소유자 UID/GID 조회 실패, 기본값(1000/1000) 사용: {e}")
             return default_uid, default_gid
+
+
+    def _get_scan_cache_identity(self) -> dict[str, str]:
+        """현재 스캔 캐시 유효성을 판단할 식별자 생성"""
+        return {
+            'mount_path': (self.config.MOUNT_PATH or '').rstrip('/'),
+            'nfs_path': ((self.config.NFS_PATH or '') if hasattr(self.config, 'NFS_PATH') else '').rstrip('/'),
+        }
+
+    def _load_scan_cache(self) -> bool:
+        """NFS 공유 설정이 동일하면 이전 폴더 스캔 결과를 로드한다."""
+        try:
+            if not os.path.exists(FOLDER_SCAN_CACHE_PATH):
+                return False
+
+            with open(FOLDER_SCAN_CACHE_PATH, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+
+            if not isinstance(payload, dict):
+                return False
+
+            identity = payload.get('identity')
+            data = payload.get('previous_mtimes')
+            if identity != self._get_scan_cache_identity() or not isinstance(data, dict):
+                logging.info('폴더 스캔 캐시를 재사용하지 않습니다. (설정 변경 또는 데이터 형식 불일치)')
+                return False
+
+            loaded = {}
+            for path, mtime in data.items():
+                if not isinstance(path, str):
+                    continue
+                try:
+                    loaded[path] = float(mtime)
+                except (TypeError, ValueError):
+                    continue
+
+            self.previous_mtimes = loaded
+            logging.info(f'폴더 스캔 캐시 로드 완료: {len(self.previous_mtimes)}개')
+            return True
+        except Exception as e:
+            logging.warning(f'폴더 스캔 캐시 로드 실패: {e}')
+            return False
+
+    def _save_scan_cache(self) -> None:
+        """현재 폴더 스캔 결과를 캐시에 저장한다."""
+        try:
+            payload = {
+                'saved_at': time.time(),
+                'identity': self._get_scan_cache_identity(),
+                'previous_mtimes': self.previous_mtimes,
+            }
+            os.makedirs(os.path.dirname(FOLDER_SCAN_CACHE_PATH), exist_ok=True)
+            with open(FOLDER_SCAN_CACHE_PATH, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False)
+        except Exception as e:
+            logging.warning(f'폴더 스캔 캐시 저장 실패: {e}')
 
 
 
@@ -337,6 +397,9 @@ class FolderMonitor:
             mount_targets = self._filter_mount_targets(changed_folders)
             for path in mount_targets:
                 self.smb_manager.create_symlink(path)
+
+            if full_scan:
+                self._save_scan_cache()
 
             elapsed_time = time.time() - start_time
             logging.debug(
@@ -726,6 +789,7 @@ class GShareManager:
 
             event_mtime = time.time()
             self.folder_monitor.previous_mtimes[normalized] = event_mtime
+            self.folder_monitor._save_scan_cache()
             mount_targets = self.folder_monitor._filter_mount_targets([normalized])
             if not mount_targets:
                 mount_targets = [normalized]
