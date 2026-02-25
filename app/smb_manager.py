@@ -610,15 +610,34 @@ class SMBManager:
         """
         try:
             source_path = os.path.join(self.config.MOUNT_PATH, subfolder)
-            link_path = os.path.join(
-                self.links_dir, subfolder.replace(os.sep, '_'))
+            link_name = subfolder.replace(os.sep, '_')
+            link_path = os.path.join(self.links_dir, link_name)
 
-            # 이미 존재하는 링크 제거
-            if os.path.exists(link_path):
+            # 이미 동일한 심볼릭 링크가 있으면 재생성하지 않고 성공으로 처리
+            if os.path.islink(link_path):
+                try:
+                    if os.readlink(link_path) == source_path:
+                        self._active_links.add(link_name)
+                        logging.debug(f"이미 활성화된 심볼릭 링크를 재사용합니다: {link_path}")
+                        return True
+                except OSError:
+                    # readlink 실패 시 아래 재생성 로직으로 진행
+                    pass
+
+            # 링크/파일이 이미 존재하면 제거 (깨진 symlink 대응을 위해 lexists 사용)
+            if os.path.lexists(link_path):
                 os.remove(link_path)
 
             # 심볼릭 링크 생성
-            os.symlink(source_path, link_path)
+            try:
+                os.symlink(source_path, link_path)
+            except FileExistsError:
+                # 이벤트가 짧은 간격으로 중복 도착한 경쟁 상태일 수 있음
+                if os.path.islink(link_path) and os.readlink(link_path) == source_path:
+                    self._active_links.add(link_name)
+                    logging.debug(f"동일 링크가 이미 생성되어 재사용합니다: {link_path}")
+                    return True
+                raise
             
             # SMB 사용자의 소유권으로 변경
             try:
@@ -635,7 +654,7 @@ class SMBManager:
             except Exception as e:
                 logging.warning(f"심볼릭 링크 소유권 변경 실패 ({link_path}): {e}")
 
-            self._active_links.add(subfolder.replace(os.sep, "_"))
+            self._active_links.add(link_name)
             logging.info(f"심볼릭 링크 생성됨: {link_path} -> {source_path}")
             return True
         except Exception as e:

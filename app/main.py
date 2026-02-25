@@ -15,7 +15,7 @@ import math
 import sys
 import atexit
 from config import (GshareConfig, CONFIG_PATH, INIT_FLAG_PATH,
-                    LAST_SHUTDOWN_PATH, LOG_DIR, LOG_FILE_PATH)  # type: ignore
+                    LAST_SHUTDOWN_PATH, FOLDER_SCAN_CACHE_PATH, LOG_DIR, LOG_FILE_PATH)  # type: ignore
 from proxmox_api import ProxmoxAPI
 from web_server import GshareWebServer
 from smb_manager import SMBManager
@@ -24,6 +24,7 @@ from transcoder import Transcoder
 import yaml  # type: ignore
 import traceback
 import urllib3  # type: ignore
+import json
 
 # SSL 경고 메시지 비활성화
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -88,6 +89,8 @@ class State:
     nfs_mounted: bool = False
     monitor_mode: str = 'event'
     initial_scan_in_progress: bool = False
+    relay_status: str = 'UNKNOWN'
+    relay_last_seen: str = '-'
 
     def to_dict(self):
         data = asdict(self)
@@ -128,7 +131,9 @@ class FolderMonitor:
         self._full_scan_cycle_interval = 12
 
         # 서브폴더 정보 업데이트 및 초기 링크 생성은 initialize()에서 수행
-        logging.debug("FolderMonitor 객체 생성됨 (초기 스캔은 지연됨)")
+        self.loaded_from_cache = self._load_scan_cache()
+        logging.debug(
+            f"FolderMonitor 객체 생성됨 (초기 스캔은 지연됨, 캐시 로드: {self.loaded_from_cache}, 폴더 수: {len(self.previous_mtimes)}개)")
 
     def initialize(self) -> None:
         """초기 파일시스템 스캔 및 링크 생성 수행"""
@@ -137,6 +142,7 @@ class FolderMonitor:
 
         # 초기 스캔 (mtime 포함 정밀 스캔)
         self._update_subfolder_mtimes()
+        self._save_scan_cache()
 
         # 초기 실행 시 마지막 VM 시작 시간 이후에 수정된 폴더들의 링크 생성
         self._create_links_for_recently_modified()
@@ -168,6 +174,62 @@ class FolderMonitor:
         except Exception as e:
             logging.warning(f"NFS 소유자 UID/GID 조회 실패, 기본값(1000/1000) 사용: {e}")
             return default_uid, default_gid
+
+
+    def _get_scan_cache_identity(self) -> dict[str, str]:
+        """현재 스캔 캐시 유효성을 판단할 식별자 생성"""
+        return {
+            'mount_path': (self.config.MOUNT_PATH or '').rstrip('/'),
+            'nfs_path': ((self.config.NFS_PATH or '') if hasattr(self.config, 'NFS_PATH') else '').rstrip('/'),
+        }
+
+    def _load_scan_cache(self) -> bool:
+        """NFS 공유 설정이 동일하면 이전 폴더 스캔 결과를 로드한다."""
+        try:
+            if not os.path.exists(FOLDER_SCAN_CACHE_PATH):
+                return False
+
+            with open(FOLDER_SCAN_CACHE_PATH, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+
+            if not isinstance(payload, dict):
+                return False
+
+            identity = payload.get('identity')
+            data = payload.get('previous_mtimes')
+            if identity != self._get_scan_cache_identity() or not isinstance(data, dict):
+                logging.info('폴더 스캔 캐시를 재사용하지 않습니다. (설정 변경 또는 데이터 형식 불일치)')
+                return False
+
+            loaded = {}
+            for path, mtime in data.items():
+                if not isinstance(path, str):
+                    continue
+                try:
+                    loaded[path] = float(mtime)
+                except (TypeError, ValueError):
+                    continue
+
+            self.previous_mtimes = loaded
+            logging.info(f'폴더 스캔 캐시 로드 완료: {len(self.previous_mtimes)}개')
+            return True
+        except Exception as e:
+            logging.warning(f'폴더 스캔 캐시 로드 실패: {e}')
+            return False
+
+    def _save_scan_cache(self) -> None:
+        """현재 폴더 스캔 결과를 캐시에 저장한다."""
+        try:
+            payload = {
+                'saved_at': time.time(),
+                'identity': self._get_scan_cache_identity(),
+                'previous_mtimes': self.previous_mtimes,
+            }
+            os.makedirs(os.path.dirname(FOLDER_SCAN_CACHE_PATH), exist_ok=True)
+            with open(FOLDER_SCAN_CACHE_PATH, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False)
+        except Exception as e:
+            logging.warning(f'폴더 스캔 캐시 저장 실패: {e}')
 
 
 
@@ -335,6 +397,9 @@ class FolderMonitor:
             mount_targets = self._filter_mount_targets(changed_folders)
             for path in mount_targets:
                 self.smb_manager.create_symlink(path)
+
+            if full_scan:
+                self._save_scan_cache()
 
             elapsed_time = time.time() - start_time
             logging.debug(
@@ -510,6 +575,8 @@ class GShareManager:
         self.low_cpu_count = 0
         self.last_action = "프로그램 시작"
         self.restart_required = False
+        self.event_relay_last_seen_epoch: Optional[float] = None
+        self.event_relay_timeout_seconds = 90
 
         # VM 마지막 종료 시간 로드
         self.last_shutdown_time = self._load_last_shutdown_time()
@@ -537,7 +604,8 @@ class GShareManager:
             logging.debug("트랜스코딩 비활성화")
 
         # 상태 업데이트는 initialize() 호출 시 수행
-        self.initial_scan_in_progress = self.config.MONITOR_MODE == 'polling'
+        # 모니터링 방식과 무관하게 초기 스캔은 항상 수행하므로 기본값은 False로 둔다.
+        self.initial_scan_in_progress = False
         logging.info(
             f"초기 상태 계산 시작 (monitor_mode={self.config.MONITOR_MODE}, initial_scan_in_progress={self.initial_scan_in_progress})")
         self.current_state = self.update_state(update_monitored_folders=False)
@@ -548,15 +616,11 @@ class GShareManager:
         """GShareManager 초기화 수행 (무거운 작업 포함)"""
         logging.debug("GShareManager 초기화 작업 시작...")
 
-        # FolderMonitor 초기화 (polling 모드는 비동기 초기 스캔으로 실행)
-        if self.config.MONITOR_MODE == 'polling':
-            logging.info('폴링 모드 초기 스캔을 백그라운드에서 시작합니다.')
-            self.initial_scan_in_progress = True
-            self._initial_scan_thread = threading.Thread(target=self._run_initial_scan_async, daemon=True)
-            self._initial_scan_thread.start()
-        else:
-            logging.info('이벤트 수신 모드 활성화: 폴링 초기 스캔을 생략합니다.')
-            self.initial_scan_in_progress = False
+        # FolderMonitor 초기화 (모든 모드에서 비동기 초기 스캔 실행)
+        logging.info(f'{self.config.MONITOR_MODE} 모드 초기 스캔을 백그라운드에서 시작합니다.')
+        self.initial_scan_in_progress = True
+        self._initial_scan_thread = threading.Thread(target=self._run_initial_scan_async, daemon=True)
+        self._initial_scan_thread.start()
 
         # 초기 상태 업데이트
         self.current_state = self.update_state()
@@ -725,6 +789,7 @@ class GShareManager:
 
             event_mtime = time.time()
             self.folder_monitor.previous_mtimes[normalized] = event_mtime
+            self.folder_monitor._save_scan_cache()
             mount_targets = self.folder_monitor._filter_mount_targets([normalized])
             if not mount_targets:
                 mount_targets = [normalized]
@@ -749,6 +814,24 @@ class GShareManager:
         except Exception as e:
             logging.error(f'이벤트 처리 실패: {e}')
             return False, str(e)
+
+    def touch_event_relay(self) -> None:
+        """이벤트 릴레이의 마지막 신호 수신 시각을 업데이트한다."""
+        self.event_relay_last_seen_epoch = time.time()
+
+    def _get_event_relay_status(self) -> tuple[str, str]:
+        """event 모드에서 릴레이 상태(ON/OFF/UNKNOWN)와 마지막 수신 시각을 반환한다."""
+        if self.config.MONITOR_MODE != 'event':
+            return 'N/A', '-'
+
+        if self.event_relay_last_seen_epoch is None:
+            return 'UNKNOWN', '-'
+
+        elapsed = time.time() - self.event_relay_last_seen_epoch
+        relay_status = 'ON' if elapsed <= self.event_relay_timeout_seconds else 'OFF'
+        relay_last_seen = datetime.fromtimestamp(
+            self.event_relay_last_seen_epoch, self.local_tz).isoformat()
+        return relay_status, relay_last_seen
 
     def update_state(self, update_monitored_folders=True) -> State:
         try:
@@ -796,6 +879,8 @@ class GShareManager:
                     if previous_state is not None:
                         smb_running = getattr(previous_state, 'smb_running', False)
 
+            relay_status, relay_last_seen = self._get_event_relay_status()
+
             current_state = State(
                 last_check_time=current_time_str,
                 vm_running=vm_running,
@@ -811,7 +896,9 @@ class GShareManager:
                 check_interval=self.config.CHECK_INTERVAL,
                 nfs_mounted=nfs_mounted,
                 monitor_mode=self.config.MONITOR_MODE,
-                initial_scan_in_progress=getattr(self, 'initial_scan_in_progress', False)
+                initial_scan_in_progress=getattr(self, 'initial_scan_in_progress', False),
+                relay_status=relay_status,
+                relay_last_seen=relay_last_seen
             )
             return current_state
         except Exception as e:
@@ -832,7 +919,9 @@ class GShareManager:
                 smb_running=False,
                 check_interval=60,  # 기본값 60초
                 monitor_mode='event',
-                initial_scan_in_progress=False
+                initial_scan_in_progress=False,
+                relay_status='UNKNOWN',
+                relay_last_seen='-'
             )
 
     def monitor(self) -> None:

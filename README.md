@@ -65,15 +65,18 @@ MIT License
 1. NAS에서 `nas-event-relay/docker-compose.yml`의 값을 환경에 맞게 수정
    - `GSHARE_EVENT_URL`: gshare_manager의 `/api/folder-event` 주소
    - `EVENT_AUTH_TOKEN`: GShare 설정의 이벤트 인증 토큰과 동일하게 설정
-   - `EXCLUDED_DIR_NAMES`(선택): 이벤트 제외 디렉토리명(쉼표 구분), 기본값 `@eaDir`
+   - `EXCLUDED_DIR_NAMES`(선택): 이벤트 제외 디렉토리명(쉼표 구분), 기본값 `@eaDir,@*,.*`
+   - `HEARTBEAT_INTERVAL_SECONDS`(선택): 릴레이 헬스 신호 전송 주기(초), 기본값 `30`
    - 볼륨: 원본 파일이 생성되는 NAS 경로를 `/watch`로 마운트
 2. NAS에서 `docker compose up -d --build` 실행
 3. GShare 설정 페이지의 NFS 설정 탭에서
    - NFS 폴더 감시 방식: `이벤트 수신 (event)`
    - 이벤트 인증 토큰: relay와 동일 값
 
-이후 새 파일 생성/이동 이벤트가 발생하면 해당 폴더명이 GShare로 전달되고 SMB 공유 및 VM 시작이 순차 수행됩니다.
+이후 새 파일 생성/이동 이벤트가 발생하면 해당 폴더명이 GShare로 전달되고 SMB 공유 및 VM 시작이 순차 수행됩니다. 또한 relay는 주기적으로 헬스(heartbeat)를 전송해, 웹 UI의 From NAS 패널에서 이벤트 릴레이 상태(ON/OFF/UNKNOWN)와 마지막 신호 시간을 확인할 수 있습니다.
+초기 구동 시에는 NFS 설정(마운트 경로/공유 경로)이 이전과 동일하면 직전 폴더 스캔 결과 캐시를 먼저 재사용해 UI 목록/수동 마운트를 즉시 제공하며, 동시에 백그라운드에서 초기 전체 스캔을 계속 진행해 최신 상태로 갱신합니다.
 파일 쓰기 완료(`close_write`)로 수정시간(mtime) 변화가 감지되면 relay 컨테이너 로그에 감지 경로를 남깁니다.
 
-> relay는 재귀 감시(`inotifywait -r`)를 사용하며, Synology DSM 메타데이터 디렉토리(기본: `@eaDir`)는 이벤트 전송에서 제외합니다.
+> relay는 시작 시 계산한 디렉토리 목록(`watch_dirs_effective`)만 감시하며, 재귀 `-r` 옵션은 사용하지 않습니다.
+> 새 디렉토리 생성이 감지되면 목록 갱신 필요 상태로 표시하고 하루 1회 목록을 재계산합니다(기본 86400초, `WATCHLIST_REFRESH_INTERVAL_SECONDS`로 조정 가능).
 > 추가 제외 디렉토리가 필요하면 `EXCLUDED_DIR_NAMES` 환경변수에 쉼표로 구분해 지정하세요. 예: `@eaDir,#recycle`

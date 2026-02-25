@@ -258,7 +258,9 @@ function updateUI(data) {
         lowCpuCount: document.querySelector('.low-cpu-count'),
         uptime: document.querySelector('.uptime'),
         lastShutdownTimeReadable: document.querySelector('.last-shutdown-time .readable-time'),
-        lastShutdownTimeString: document.querySelector('.last-shutdown-time .time-string')
+        lastShutdownTimeString: document.querySelector('.last-shutdown-time .time-string'),
+        relayLastSeenReadable: document.querySelector('.relay-last-seen-readable'),
+        relayLastSeenString: document.querySelector('.relay-last-seen-string')
     };
 
     // 각 요소가 존재할 때만 업데이트
@@ -281,6 +283,7 @@ function updateUI(data) {
         updateNFSStatus(data.nfs_status);
     }
     updateInitialScanNotice(initialScanInProgress);
+    updateRelayStatus(data.relay_status, data.relay_last_seen);
 
     if (elements.cpuUsage) elements.cpuUsage.innerText = data.cpu_usage + '%';
     if (elements.lowCpuCount) elements.lowCpuCount.innerText = data.low_cpu_count + '/' + data.threshold_count;
@@ -324,6 +327,52 @@ function updateInitialScanNotice(inProgress) {
     }
 
     notice.classList.add('hidden');
+}
+
+
+function updateRelayStatus(relayStatus, relayLastSeen) {
+    const relayContainer = document.getElementById('relayStatusContainer');
+    const relayLastSeenContainer = document.getElementById('relayLastSeen');
+    const relayBadge = document.getElementById('relayStatusBadge');
+    const relayDot = document.getElementById('relayStatusDot');
+    const relayReadable = document.querySelector('.relay-last-seen-readable');
+    const relayRaw = document.querySelector('.relay-last-seen-string');
+
+    if (!relayContainer || !relayLastSeenContainer || !relayBadge || !relayDot) {
+        return;
+    }
+
+    if (monitorMode !== 'event') {
+        relayContainer.classList.add('hidden');
+        relayLastSeenContainer.classList.add('hidden');
+        return;
+    }
+
+    relayContainer.classList.remove('hidden');
+    relayLastSeenContainer.classList.remove('hidden');
+
+    const normalizedStatus = relayStatus || 'UNKNOWN';
+    relayBadge.innerText = normalizedStatus;
+
+    relayBadge.classList.remove('bg-emerald-50', 'text-emerald-700', 'bg-red-50', 'text-red-700', 'bg-slate-50', 'text-slate-700');
+    relayDot.classList.remove('bg-green-500', 'bg-red-500', 'bg-gray-400');
+
+    if (normalizedStatus === 'ON') {
+        relayBadge.classList.add('bg-emerald-50', 'text-emerald-700');
+        relayDot.classList.add('bg-green-500');
+    } else if (normalizedStatus === 'OFF') {
+        relayBadge.classList.add('bg-red-50', 'text-red-700');
+        relayDot.classList.add('bg-red-500');
+    } else {
+        relayBadge.classList.add('bg-slate-50', 'text-slate-700');
+        relayDot.classList.add('bg-gray-400');
+    }
+
+    const lastSeenValue = relayLastSeen || '-';
+    if (relayRaw) relayRaw.innerText = lastSeenValue;
+    if (relayReadable) {
+        relayReadable.innerText = lastSeenValue !== '-' ? get_time_ago(lastSeenValue) : '-';
+    }
 }
 
 // 로그 콘텐츠 업데이트 함수
@@ -520,6 +569,12 @@ window.onload = function () {
             const readableTime = document.querySelector('.last-shutdown-time .readable-time');
             readableTime.innerText = lastShutdownTime.innerText !== '-' ?
                 get_time_ago(lastShutdownTime.innerText) : '정보없음';
+        }
+
+        const relayLastSeenTime = document.querySelector('.relay-last-seen-string');
+        const relayLastSeenReadable = document.querySelector('.relay-last-seen-readable');
+        if (relayLastSeenTime && relayLastSeenReadable) {
+            relayLastSeenReadable.innerText = relayLastSeenTime.innerText !== '-' ? get_time_ago(relayLastSeenTime.innerText) : '-';
         }
 
         // 화면에 보이는 폴더 요소만 수정 시간 업데이트

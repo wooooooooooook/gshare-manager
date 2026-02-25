@@ -11,6 +11,7 @@ TEMPLATE_PATH = os.path.join(CONFIG_DIR, 'config.yaml.template')
 INIT_FLAG_PATH = os.path.join(CONFIG_DIR, '.init_complete')
 RESTART_FLAG_PATH = os.path.join(CONFIG_DIR, '.restart_in_progress')
 LAST_SHUTDOWN_PATH = os.path.join(CONFIG_DIR, '.last_shutdown')
+FOLDER_SCAN_CACHE_PATH = os.path.join(CONFIG_DIR, '.folder_scan_cache.json')
 LOG_FILE_PATH = os.path.join(LOG_DIR, 'gshare_manager.log')
 
 @dataclass
