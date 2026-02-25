@@ -625,7 +625,7 @@ class GShareManager:
             # NFS 마운트 시도
             logging.debug(f"NFS 마운트 시도: {nfs_path} -> {mount_path}")
             mount_cmd = ['mount', '-t', 'nfs', '-o',
-                         'nolock,vers=3,soft,timeo=100', nfs_path, mount_path]
+                         'nolock,vers=3,hard,timeo=600,retrans=5,actimeo=30', nfs_path, mount_path]
             result = subprocess.run(mount_cmd, capture_output=True, text=True)
 
             if result.returncode == 0:

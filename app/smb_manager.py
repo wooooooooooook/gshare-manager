@@ -72,6 +72,10 @@ class SMBManager:
    ntlm auth = yes
    client ntlmv2 auth = no
    lanman auth = yes
+   # IO stall 대응: 유휴 연결 유지 및 keepalive
+   deadtime = 0
+   keepalive = 60
+   socket options = TCP_NODELAY SO_KEEPALIVE
    # 디버깅 설정
    log level = 3
 """
