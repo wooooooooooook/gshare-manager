@@ -1141,8 +1141,14 @@ function updateFolderState() {
 
 // 폴더 목록만 업데이트하는 함수로 분리
 function updateFolderList(sortedFolders) {
-    // 초기 상태 수신 전이거나 초기 스캔 중에는 빈 상태 메시지를 노출하지 않음
-    if (!hasReceivedStateUpdate || initialScanInProgress) {
+    // 초기 상태 수신 전에는 아무것도 하지 않음
+    if (!hasReceivedStateUpdate) {
+        return;
+    }
+
+    // 초기 스캔 중에는 빈 폴더 목록 메시지를 노출하지 않음
+    // (캐시된 데이터가 있으면 표시하고, 빈 목록만 억제)
+    if (initialScanInProgress && (!sortedFolders || sortedFolders.length === 0)) {
         return;
     }
 
