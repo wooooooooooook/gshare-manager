@@ -76,6 +76,11 @@ class SMBManager:
    deadtime = 0
    keepalive = 60
    socket options = TCP_NODELAY SO_KEEPALIVE
+   # NFS 경유 심볼릭 링크 캐싱 강화: IO stall 시 폴더 깜박임 방지
+   stat cache = yes
+   stat cache size = 1024
+   change notify = no
+   kernel change notify = no
    # 디버깅 설정
    log level = 3
 """

@@ -558,6 +558,33 @@ class FolderMonitor:
             logging.error(f"NFS 마운트 상태 확인 중 오류: {e}")
             return self._nfs_status_cache if self._nfs_status_cache is not None else False
 
+    def keepalive_nfs(self) -> None:
+        """NFS attribute 캐시를 따뜻하게 유지하여 IO stall 시 폴더 깜박임 방지
+
+        마운트 경로에 주기적으로 stat()을 수행하여 NFS 클라이언트의 attribute 캐시가
+        만료되지 않도록 합니다. 캐시가 유효하면 Samba가 NFS 스톨 중에도
+        캐시된 속성으로 SMB 응답을 할 수 있습니다.
+        """
+        try:
+            mount_path = self.config.MOUNT_PATH
+            if not mount_path or not os.path.exists(mount_path):
+                return
+
+            # 마운트 루트 stat (attribute 캐시 갱신)
+            os.stat(mount_path)
+
+            # 활성 심볼릭 링크의 대상 경로도 stat하여 캐시 유지
+            for subfolder in list(self.previous_mtimes.keys())[:50]:
+                try:
+                    full_path = os.path.join(mount_path, subfolder)
+                    os.stat(full_path)
+                except OSError:
+                    pass
+
+            logging.debug("NFS keepalive 완료")
+        except Exception as e:
+            logging.debug(f"NFS keepalive 실패 (무시): {e}")
+
     def cleanup_resources(self) -> None:
         """리소스 정리: 활성 심볼릭 링크 제거"""
         # 모든 링크 제거
@@ -935,6 +962,13 @@ class GShareManager:
                 update_log_level()
                 logging.debug(f"모니터링 루프 Count:{count}")
                 count += 1
+
+                # NFS attribute 캐시 keepalive (HDD IO stall 시 폴더 깜박임 방지)
+                if hasattr(self, 'folder_monitor'):
+                    try:
+                        self.folder_monitor.keepalive_nfs()
+                    except Exception as e:
+                        logging.debug(f"NFS keepalive 오류 (무시): {e}")
                 # VM 상태 확인
                 current_vm_status = self.proxmox_api.is_vm_running()
 
