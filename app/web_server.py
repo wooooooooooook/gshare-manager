@@ -185,7 +185,13 @@ class GshareWebServer:
             monitor_mode='event',
             initial_scan_in_progress=False,
             relay_status='UNKNOWN',
-            relay_last_seen='-'
+            relay_last_seen='-',
+            gshare_enabled=True,
+            nfs_mount_enabled=True,
+            polling_enabled=True,
+            event_enabled=True,
+            smb_enabled=True,
+            vm_monitor_enabled=True
         )
 
     def _get_container_ip(self):
@@ -252,6 +258,8 @@ class GshareWebServer:
                               'cancel_transcoding_scan', self.cancel_transcoding_scan, methods=['POST'])
         self.app.add_url_rule('/get_scan_status',
                               'get_scan_status', self.get_scan_status)
+        self.app.add_url_rule('/api/toggle_feature', 'toggle_feature',
+                              self.toggle_feature, methods=['POST'])
 
         # SocketIO 이벤트 핸들러 등록
         self._register_socket_events()
@@ -393,7 +401,13 @@ class GshareWebServer:
             'TOKEN_ID': creds.get('token_id', ''),
             'SECRET': creds.get('secret', ''),
             'TRANSCODING_ENABLED': transcoding.get('enabled', False),
-            'TRANSCODING_RULES': transcoding.get('rules', [])
+            'TRANSCODING_RULES': transcoding.get('rules', []),
+            'GSHARE_ENABLED': yaml_config.get('features', {}).get('gshare_enabled', True),
+            'NFS_MOUNT_ENABLED': yaml_config.get('features', {}).get('nfs_mount_enabled', True),
+            'POLLING_ENABLED': yaml_config.get('features', {}).get('polling_enabled', True),
+            'EVENT_ENABLED': yaml_config.get('features', {}).get('event_enabled', True),
+            'SMB_ENABLED': yaml_config.get('features', {}).get('smb_enabled', True),
+            'VM_MONITOR_ENABLED': yaml_config.get('features', {}).get('vm_monitor_enabled', True)
         }
 
         if mask_secrets:
@@ -1035,6 +1049,77 @@ class GshareWebServer:
                 return jsonify({"status": "success", "message": "스캔 취소 요청됨"})
             return jsonify({"status": "error", "message": "트랜스코더가 없습니다."}), 404
         except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+
+    def toggle_feature(self):
+        """기능 활성화/비활성화 토글"""
+        try:
+            if self.manager is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 503
+
+            data = request.get_json()
+            if not data:
+                return jsonify({"status": "error", "message": "요청 데이터가 없습니다."}), 400
+
+            feature = data.get('feature')
+            enabled = data.get('enabled')
+
+            if feature is None or enabled is None:
+                return jsonify({"status": "error", "message": "필수 파라미터가 누락되었습니다."}), 400
+
+            # config 업데이트 준비
+            config_update = {}
+
+            # 기능별 처리
+            if feature == 'gshare':
+                self.manager.config.GSHARE_ENABLED = enabled
+                config_update['GSHARE_ENABLED'] = enabled
+                logging.info(f"GShare 전체 기능 {'활성화' if enabled else '비활성화'}")
+
+            elif feature == 'nfs_mount':
+                self.manager.config.NFS_MOUNT_ENABLED = enabled
+                config_update['NFS_MOUNT_ENABLED'] = enabled
+                # 즉시 상태 반영
+                if hasattr(self.manager, '_update_nfs_mount_state'):
+                    self.manager._update_nfs_mount_state()
+
+            elif feature == 'polling':
+                self.manager.config.POLLING_ENABLED = enabled
+                config_update['POLLING_ENABLED'] = enabled
+                logging.info(f"폴링 모드 {'활성화' if enabled else '비활성화'}")
+
+            elif feature == 'event':
+                self.manager.config.EVENT_ENABLED = enabled
+                config_update['EVENT_ENABLED'] = enabled
+                logging.info(f"이벤트 수신 모드 {'활성화' if enabled else '비활성화'}")
+
+            elif feature == 'smb':
+                self.manager.config.SMB_ENABLED = enabled
+                config_update['SMB_ENABLED'] = enabled
+                # 즉시 상태 반영
+                if hasattr(self.manager, '_update_smb_state'):
+                    self.manager._update_smb_state()
+
+            elif feature == 'vm_monitor':
+                self.manager.config.VM_MONITOR_ENABLED = enabled
+                config_update['VM_MONITOR_ENABLED'] = enabled
+                logging.info(f"VM 모니터링 {'활성화' if enabled else '비활성화'}")
+
+            else:
+                return jsonify({"status": "error", "message": f"알 수 없는 기능입니다: {feature}"}), 400
+
+            # 설정 파일에 저장
+            GshareConfig.update_yaml_config(config_update)
+
+            # 상태 업데이트 트리거
+            self.manager.current_state = self.manager.update_state(update_monitored_folders=False)
+            self.emit_state_update()
+
+            return jsonify({"status": "success", "message": f"{feature} 기능이 {'활성화' if enabled else '비활성화'}되었습니다."})
+
+        except Exception as e:
+            logging.error(f"기능 토글 중 오류: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
 
     def get_scan_status(self):

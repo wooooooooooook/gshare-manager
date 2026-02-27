@@ -99,6 +99,14 @@ class GshareConfig:
     MONITOR_MODE: str = 'event'
     EVENT_AUTH_TOKEN: str = ''
 
+    # 기능 활성화 여부
+    GSHARE_ENABLED: bool = True
+    NFS_MOUNT_ENABLED: bool = True
+    POLLING_ENABLED: bool = True
+    EVENT_ENABLED: bool = True
+    SMB_ENABLED: bool = True
+    VM_MONITOR_ENABLED: bool = True
+
     def __post_init__(self):
         if self.TRANSCODING_RULES is None:
             self.TRANSCODING_RULES = []
@@ -192,7 +200,13 @@ class GshareConfig:
             'TRANSCODING_RULES': yaml_config.get('transcoding', {}).get('rules', []),
             'TRANSCODING_DONE_FILENAME': yaml_config.get('transcoding', {}).get('done_filename', '.transcoding_done'),
             'MONITOR_MODE': yaml_config.get('monitoring', {}).get('mode', 'event'),
-            'EVENT_AUTH_TOKEN': yaml_config.get('credentials', {}).get('event_auth_token', '')
+            'EVENT_AUTH_TOKEN': yaml_config.get('credentials', {}).get('event_auth_token', ''),
+            'GSHARE_ENABLED': yaml_config.get('features', {}).get('gshare_enabled', True),
+            'NFS_MOUNT_ENABLED': yaml_config.get('features', {}).get('nfs_mount_enabled', True),
+            'POLLING_ENABLED': yaml_config.get('features', {}).get('polling_enabled', True),
+            'EVENT_ENABLED': yaml_config.get('features', {}).get('event_enabled', True),
+            'SMB_ENABLED': yaml_config.get('features', {}).get('smb_enabled', True),
+            'VM_MONITOR_ENABLED': yaml_config.get('features', {}).get('vm_monitor_enabled', True),
         }
 
         # NFS 설정 추가
@@ -330,6 +344,23 @@ class GshareConfig:
         if 'TRANSCODING_RULES' in config_dict:
             yaml_config['transcoding']['rules'] = config_dict['TRANSCODING_RULES']
 
+        # 기능 활성화 설정 저장
+        if 'features' not in yaml_config or yaml_config['features'] is None:
+            yaml_config['features'] = {}
+
+        if 'GSHARE_ENABLED' in config_dict:
+            yaml_config['features']['gshare_enabled'] = config_dict['GSHARE_ENABLED']
+        if 'NFS_MOUNT_ENABLED' in config_dict:
+            yaml_config['features']['nfs_mount_enabled'] = config_dict['NFS_MOUNT_ENABLED']
+        if 'POLLING_ENABLED' in config_dict:
+            yaml_config['features']['polling_enabled'] = config_dict['POLLING_ENABLED']
+        if 'EVENT_ENABLED' in config_dict:
+            yaml_config['features']['event_enabled'] = config_dict['EVENT_ENABLED']
+        if 'SMB_ENABLED' in config_dict:
+            yaml_config['features']['smb_enabled'] = config_dict['SMB_ENABLED']
+        if 'VM_MONITOR_ENABLED' in config_dict:
+            yaml_config['features']['vm_monitor_enabled'] = config_dict['VM_MONITOR_ENABLED']
+
         # 설정 저장
         os.makedirs(os.path.dirname(yaml_path), exist_ok=True)
         with open(yaml_path, 'w', encoding='utf-8') as f:
@@ -377,7 +408,8 @@ class GshareConfig:
             'monitoring': {'mode': 'event'},
             'credentials': {'proxmox_host': '', 'token_id': '', 'secret': '', 'shutdown_webhook_url': '', 'smb_username': '', 'smb_password': '', 'mqtt_username': '', 'mqtt_password': '', 'event_auth_token': ''},
             'timezone': 'Asia/Seoul',
-            'transcoding': {'enabled': False, 'rules': []}
+            'transcoding': {'enabled': False, 'rules': []},
+            'features': {'gshare_enabled': True, 'nfs_mount_enabled': True, 'polling_enabled': True, 'event_enabled': True, 'smb_enabled': True, 'vm_monitor_enabled': True}
         }
 
     def __post_init_validation__(self):

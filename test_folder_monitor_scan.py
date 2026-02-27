@@ -10,6 +10,21 @@ sys.modules['proxmox_api'] = MagicMock()
 sys.modules['mqtt_manager'] = MagicMock()
 sys.modules['web_server'] = MagicMock()
 sys.modules['transcoder'] = MagicMock()
+sys.modules['requests'] = MagicMock()
+sys.modules['yaml'] = MagicMock()
+from datetime import timezone, timedelta
+from unittest.mock import MagicMock
+import sys
+
+# Mock pytz properly
+real_timezone = timezone(timedelta(hours=9))
+sys.modules['pytz'] = MagicMock()
+sys.modules['pytz'].timezone.return_value = real_timezone
+sys.modules['pytz'].UTC = timezone.utc
+
+sys.modules['flask'] = MagicMock()
+sys.modules['flask_socketio'] = MagicMock()
+sys.modules['urllib3'] = MagicMock()
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app'))
 from main import FolderMonitor, GShareManager, _is_nfs_mount_present  # noqa: E402
@@ -115,6 +130,12 @@ class DummyManagerConfig:
         self.CHECK_INTERVAL = 60
         self.NFS_PATH = ''
         self.MOUNT_PATH = '/tmp'
+        self.NFS_MOUNT_ENABLED = True
+        self.EVENT_ENABLED = True
+        self.SMB_ENABLED = True
+        self.VM_MONITOR_ENABLED = True
+        self.POLLING_ENABLED = True
+        self.GSHARE_ENABLED = True
 
 
 class TestGShareManagerInitialize(unittest.TestCase):
