@@ -133,7 +133,53 @@ class TestSMBManagerRefactor(unittest.TestCase):
         finally:
             self.patcher_perms.start()
 
+    @patch('smb_manager.os.lchown')
+    @patch('smb_manager.pwd')
+    @patch('smb_manager.grp')
+    @patch('smb_manager.os.listdir', return_value=['link1', 'link2', 'file1'])
+    @patch('smb_manager.os.path.islink')
+    @patch('smb_manager.os.path.exists', return_value=True)
+    @patch('smb_manager.subprocess.run')
+    def test_fix_symlinks_ownership_performance(self, mock_run, mock_exists, mock_islink, mock_listdir, mock_grp, mock_pwd, mock_lchown):
+        # Setup mocks
+        mock_pwd.getpwnam.return_value.pw_uid = 1001
 
+        # Make islink return True only if filename starts with 'link'
+        def side_effect_islink(path):
+             filename = os.path.basename(path)
+             return filename.startswith('link')
+        mock_islink.side_effect = side_effect_islink
+
+        # Scenario 1: Group exists
+        with patch.object(self.smb_manager, '_get_group_name', return_value='existing_group'):
+            mock_grp.getgrnam.return_value.gr_gid = 1002
+
+            self.smb_manager._fix_symlinks_ownership()
+
+            # Verify os.lchown called twice (for link1 and link2) with correct UID/GID
+            self.assertEqual(mock_lchown.call_count, 2)
+            mock_lchown.assert_any_call('/tmp/links/link1', 1001, 1002)
+            mock_lchown.assert_any_call('/tmp/links/link2', 1001, 1002)
+
+            # Verify subprocess.run NOT called for chown
+            for call in mock_run.call_args_list:
+                args = call[0][0]
+                self.assertNotIn('chown', args)
+
+        # Reset mocks for Scenario 2
+        mock_lchown.reset_mock()
+        mock_run.reset_mock()
+
+        # Scenario 2: Group does not exist, fallback to user group
+        with patch.object(self.smb_manager, '_get_group_name', return_value=None):
+            # First call to getgrnam (for user group fallback)
+            mock_grp.getgrnam.return_value.gr_gid = 1003
+
+            self.smb_manager._fix_symlinks_ownership()
+
+            self.assertEqual(mock_lchown.call_count, 2)
+            mock_lchown.assert_any_call('/tmp/links/link1', 1001, 1003)
+            mock_lchown.assert_any_call('/tmp/links/link2', 1001, 1003)
 
 class TestSMBManagerCache(unittest.TestCase):
     def setUp(self):
@@ -158,12 +204,10 @@ class TestSMBManagerCache(unittest.TestCase):
 
 
     def test_check_smb_status_requires_config_and_process(self):
-        with patch.object(self.smb_manager, '_check_smb_status_from_file', return_value=True), \
-             patch.object(self.smb_manager, '_check_samba_process_status', return_value=True):
+        with patch.object(self.smb_manager, '_check_smb_status_from_file', return_value=True),              patch.object(self.smb_manager, '_check_samba_process_status', return_value=True):
             self.assertTrue(self.smb_manager.check_smb_status())
 
-        with patch.object(self.smb_manager, '_check_smb_status_from_file', return_value=True), \
-             patch.object(self.smb_manager, '_check_samba_process_status', return_value=False):
+        with patch.object(self.smb_manager, '_check_smb_status_from_file', return_value=True),              patch.object(self.smb_manager, '_check_samba_process_status', return_value=False):
             self.assertFalse(self.smb_manager.check_smb_status())
 
     def test_cache_logic(self):
@@ -199,10 +243,7 @@ class TestSMBManagerCache(unittest.TestCase):
 
 
     def test_create_symlink_reuses_existing_same_target(self):
-        with patch('smb_manager.os.path.islink', return_value=True), \
-             patch('smb_manager.os.readlink', return_value='/mnt/gshare/Folder/A'), \
-             patch('smb_manager.os.path.lexists') as mock_lexists, \
-             patch('smb_manager.os.symlink') as mock_symlink:
+        with patch('smb_manager.os.path.islink', return_value=True),              patch('smb_manager.os.readlink', return_value='/mnt/gshare/Folder/A'),              patch('smb_manager.os.path.lexists') as mock_lexists,              patch('smb_manager.os.symlink') as mock_symlink:
             success = self.smb_manager.create_symlink('Folder/A')
 
         self.assertTrue(success)
@@ -211,11 +252,7 @@ class TestSMBManagerCache(unittest.TestCase):
         mock_lexists.assert_not_called()
 
     def test_create_symlink_file_exists_with_same_target_treated_as_success(self):
-        with patch('smb_manager.os.path.islink', side_effect=[False, True]), \
-             patch('smb_manager.os.path.lexists', return_value=False), \
-             patch('smb_manager.os.symlink', side_effect=FileExistsError), \
-             patch('smb_manager.os.readlink', return_value='/mnt/gshare/Folder/A'), \
-             patch('smb_manager.subprocess.run'):
+        with patch('smb_manager.os.path.islink', side_effect=[False, True]),              patch('smb_manager.os.path.lexists', return_value=False),              patch('smb_manager.os.symlink', side_effect=FileExistsError),              patch('smb_manager.os.readlink', return_value='/mnt/gshare/Folder/A'),              patch('smb_manager.subprocess.run'):
             success = self.smb_manager.create_symlink('Folder/A')
 
         self.assertTrue(success)

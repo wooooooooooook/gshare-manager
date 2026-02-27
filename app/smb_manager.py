@@ -2,10 +2,10 @@ import logging
 import os
 import subprocess
 import time
+import pwd
+import grp
 from config import GshareConfig  # type: ignore
 from typing import Optional, Tuple
-
-
 class SMBManager:
     """SMB 서비스 관리 클래스"""
 
@@ -692,24 +692,47 @@ class SMBManager:
         기존 심볼릭 링크의 소유권을 SMB 사용자로 변경합니다.
         """
         try:
-            if os.path.exists(self.links_dir):
-                # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
-                existing_group = self._get_group_name(self.nfs_gid)
+            if not os.path.exists(self.links_dir):
+                return
 
-                # 적절한 그룹 이름 결정
-                group_name = existing_group if existing_group else self.config.SMB_USERNAME
-                
-                # 모든 심볼릭 링크 소유권 변경
-                for filename in os.listdir(self.links_dir):
-                    file_path = os.path.join(self.links_dir, filename)
-                    if os.path.islink(file_path):
-                        try:
-                            subprocess.run(
-                                ['chown', '-h', f"{self.config.SMB_USERNAME}:{group_name}", file_path], check=False)
-                            logging.debug(f"심볼릭 링크 소유권 변경됨: {file_path}")
-                        except Exception as e:
-                            logging.warning(f"심볼릭 링크 소유권 변경 실패 ({file_path}): {e}")
-                            
-                logging.debug(f"모든 심볼릭 링크 소유권 변경 완료: {self.links_dir}")
+            # 1. 타겟 UID 결정
+            try:
+                target_uid = pwd.getpwnam(self.config.SMB_USERNAME).pw_uid
+            except KeyError:
+                logging.error(f"사용자 '{self.config.SMB_USERNAME}' 정보를 찾을 수 없어 소유권 변경을 중단합니다.")
+                return
+
+            # 2. 타겟 GID 결정
+            target_gid = self.nfs_gid # 기본값
+
+            # NFS GID가 이미 존재하는 그룹에 할당되어 있는지 확인
+            existing_group_name = self._get_group_name(self.nfs_gid)
+
+            if existing_group_name:
+                try:
+                    target_gid = grp.getgrnam(existing_group_name).gr_gid
+                except KeyError:
+                    pass
+            else:
+                # 그룹이 없는 경우 SMB 사용자의 primary group GID 시도
+                try:
+                    target_gid = grp.getgrnam(self.config.SMB_USERNAME).gr_gid
+                except KeyError:
+                    pass
+
+            logging.debug(f"심볼릭 링크 소유권 변경 시작 (UID={target_uid}, GID={target_gid})")
+
+            # 3. 모든 심볼릭 링크 소유권 변경
+            for filename in os.listdir(self.links_dir):
+                file_path = os.path.join(self.links_dir, filename)
+                if os.path.islink(file_path):
+                    try:
+                        # subprocess.run(['chown', ...]) 대신 os.lchown 사용 (N+1 최적화)
+                        os.lchown(file_path, target_uid, target_gid)
+                        logging.debug(f"심볼릭 링크 소유권 변경됨: {file_path}")
+                    except OSError as e:
+                        logging.warning(f"심볼릭 링크 소유권 변경 실패 ({file_path}): {e}")
+
+            logging.debug(f"모든 심볼릭 링크 소유권 변경 완료: {self.links_dir}")
         except Exception as e:
             logging.error(f"심볼릭 링크 소유권 변경 중 오류 발생: {e}")
