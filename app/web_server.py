@@ -46,6 +46,7 @@ class GshareWebServer:
         self.active_connections = 0
         self.state_update_timer = None
         self.timer_lock = threading.Lock()
+        self._cached_app_version = None
 
     def set_manager(self, manager):
         self.manager = manager
@@ -55,6 +56,9 @@ class GshareWebServer:
 
     def _get_app_version(self):
         """pyproject.toml에서 앱 버전 읽기"""
+        if self._cached_app_version is not None:
+            return self._cached_app_version
+
         try:
             # Docker 환경에서는 /app/pyproject.toml, 로컬 개발 환경에서는 상위 디렉토리 등 확인
             possible_paths = [
@@ -70,12 +74,15 @@ class GshareWebServer:
                         # version = "1.3.3" 형태 찾기
                         match = re.search(r'version\s*=\s*"([^"]+)"', toml_content)
                         if match:
-                            return match.group(1)
+                            self._cached_app_version = match.group(1)
+                            return self._cached_app_version
 
             logging.warning("pyproject.toml을 찾을 수 없거나 버전을 읽을 수 없습니다.")
+            self._cached_app_version = "Unknown"
             return "Unknown"
         except Exception as e:
             logging.error(f"앱 버전 읽기 실패: {e}")
+            self._cached_app_version = "Unknown"
             return "Unknown"
 
     def _is_nfs_mount_present(self, mount_path: str, nfs_path: str = None) -> bool:
