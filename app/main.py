@@ -91,6 +91,12 @@ class State:
     initial_scan_in_progress: bool = False
     relay_status: str = 'UNKNOWN'
     relay_last_seen: str = '-'
+    gshare_enabled: bool = True
+    nfs_mount_enabled: bool = True
+    polling_enabled: bool = True
+    event_enabled: bool = True
+    smb_enabled: bool = True
+    vm_monitor_enabled: bool = True
 
     def to_dict(self):
         data = asdict(self)
@@ -609,7 +615,10 @@ class GShareManager:
         self.last_shutdown_time = self._load_last_shutdown_time()
 
         # NFS 마운트 먼저 시도
-        self._mount_nfs()
+        if self.config.NFS_MOUNT_ENABLED:
+            self._mount_nfs()
+        else:
+            logging.info('NFS 마운트 기능이 비활성화되어 있어 마운트를 건너뜁니다.')
 
         # FolderMonitor 초기화 (NFS 마운트 이후에 수행)
         logging.info("FolderMonitor 초기화 시작")
@@ -809,6 +818,9 @@ class GShareManager:
 
     def handle_folder_event(self, folder_path: str) -> tuple[bool, str]:
         """NAS 이벤트 기반으로 전달된 폴더를 즉시 처리"""
+        if not self.config.EVENT_ENABLED:
+            return False, '이벤트 수신 기능이 비활성화되어 있습니다.'
+
         try:
             normalized = (folder_path or '').strip().strip('/')
             if not normalized:
@@ -925,7 +937,13 @@ class GShareManager:
                 monitor_mode=self.config.MONITOR_MODE,
                 initial_scan_in_progress=getattr(self, 'initial_scan_in_progress', False),
                 relay_status=relay_status,
-                relay_last_seen=relay_last_seen
+                relay_last_seen=relay_last_seen,
+                gshare_enabled=self.config.GSHARE_ENABLED,
+                nfs_mount_enabled=self.config.NFS_MOUNT_ENABLED,
+                polling_enabled=self.config.POLLING_ENABLED,
+                event_enabled=self.config.EVENT_ENABLED,
+                smb_enabled=self.config.SMB_ENABLED,
+                vm_monitor_enabled=self.config.VM_MONITOR_ENABLED
             )
             return current_state
         except Exception as e:
@@ -948,7 +966,13 @@ class GShareManager:
                 monitor_mode='event',
                 initial_scan_in_progress=False,
                 relay_status='UNKNOWN',
-                relay_last_seen='-'
+                relay_last_seen='-',
+                gshare_enabled=True,
+                nfs_mount_enabled=True,
+                polling_enabled=True,
+                event_enabled=True,
+                smb_enabled=True,
+                vm_monitor_enabled=True
             )
 
     def monitor(self) -> None:
@@ -960,17 +984,31 @@ class GShareManager:
                 next_run_time = time.time() + self.config.CHECK_INTERVAL
                 
                 update_log_level()
+
+                # 전체 기능 활성화 여부 확인
+                if not self.config.GSHARE_ENABLED:
+                    logging.debug('GShare 전체 기능이 비활성화되어 있습니다.')
+                    self.current_state = self.update_state(update_monitored_folders=False)
+                    if gshare_web_server:
+                        gshare_web_server.emit_state_update()
+                    time.sleep(self.config.CHECK_INTERVAL)
+                    continue
                 logging.debug(f"모니터링 루프 Count:{count}")
                 count += 1
 
                 # NFS attribute 캐시 keepalive (HDD IO stall 시 폴더 깜박임 방지)
-                if hasattr(self, 'folder_monitor'):
+                if self.config.NFS_MOUNT_ENABLED and hasattr(self, 'folder_monitor'):
                     try:
                         self.folder_monitor.keepalive_nfs()
                     except Exception as e:
                         logging.debug(f"NFS keepalive 오류 (무시): {e}")
                 # VM 상태 확인
-                current_vm_status = self.proxmox_api.is_vm_running()
+                current_vm_status = False
+                if self.config.VM_MONITOR_ENABLED:
+                    try:
+                        current_vm_status = self.proxmox_api.is_vm_running()
+                    except Exception as e:
+                        logging.error(f'VM 상태 확인 중 오류: {e}')
 
                 # VM 상태가 변경되었고, 현재 종료 상태인 경우
                 if last_vm_status is not None and last_vm_status != current_vm_status and not current_vm_status:
@@ -985,7 +1023,7 @@ class GShareManager:
 
                 last_vm_status = current_vm_status
 
-                if self.config.MONITOR_MODE == 'polling':
+                if self.config.POLLING_ENABLED:
                     try:
                         logging.debug("폴더 수정 시간 변화 확인 중")
                         changed_folders, should_start_vm, mount_targets = self.folder_monitor.check_modifications()
@@ -1001,14 +1039,14 @@ class GShareManager:
                                         logging.error(f"트랜스코딩 오류 ({folder}): {te}")
 
                             # SMB가 비활성 상태일 때만 공유 활성화(활성 상태 재시작 방지)
-                            if mount_targets:
+                            if mount_targets and self.config.SMB_ENABLED:
                                 if self.smb_manager.check_smb_status():
                                     logging.debug("SMB 공유가 이미 활성화되어 있어 재시작을 생략합니다.")
                                 elif self.smb_manager.activate_smb_share():
                                     self.last_action = f"SMB 공유 활성화: {', '.join(changed_folders)}"
 
                             # VM이 정지 상태이고 최근 수정된 파일이 있는 경우에만 시작
-                            if not self.proxmox_api.is_vm_running() and should_start_vm:
+                            if self.config.VM_MONITOR_ENABLED and not current_vm_status and should_start_vm:
                                 self.last_action = "VM 시작"
                                 if self.proxmox_api.start_vm():
                                     logging.info("VM 시작 성공")
@@ -1017,10 +1055,10 @@ class GShareManager:
                     except Exception as e:
                         logging.error(f"파일시스템 모니터링 중 오류: {e}")
                 else:
-                    logging.debug("이벤트 수신 모드이므로 폴링 스캔을 건너뜁니다.")
+                    logging.debug("폴링 모드가 비활성화되어 있어 폴더 스캔을 건너뜁니다.")
 
                 try:
-                    if self.proxmox_api.is_vm_running():
+                    if self.config.VM_MONITOR_ENABLED and self.proxmox_api.is_vm_running():
                         cpu_usage = self.proxmox_api.get_cpu_usage()
                         if cpu_usage is not None:
                             logging.debug(f"현재 CPU 사용량: {cpu_usage}%")
@@ -1075,6 +1113,32 @@ class GShareManager:
                 else:
                     # 이미 다음 실행 시간이 지났다면 짧은 시간만 대기 후 재시도
                     time.sleep(1)  # 1초 대기 후 재시도
+
+
+    def _update_nfs_mount_state(self) -> None:
+        "설정에 따라 NFS 마운트 상태를 업데이트합니다."
+        if self.config.NFS_MOUNT_ENABLED:
+            logging.info("NFS 마운트 활성화: 마운트 시도 중...")
+            self._mount_nfs()
+        else:
+            logging.info("NFS 마운트 비활성화: 마운트 해제 시도 중...")
+            try:
+                if self.config.MOUNT_PATH:
+                    subprocess.run(['umount', '-f', self.config.MOUNT_PATH], check=False)
+                    logging.info(f"NFS 마운트 해제 완료: {self.config.MOUNT_PATH}")
+            except Exception as e:
+                logging.error(f"NFS 마운트 해제 중 오류: {e}")
+
+    def _update_smb_state(self) -> None:
+        "설정에 따라 SMB 상태를 업데이트합니다."
+        if self.config.SMB_ENABLED:
+            logging.info("SMB 활성화: 필요한 경우 시작됩니다.")
+            # 강제로 시작하진 않고 활성화 플래그만 켬 (실제 시작은 trigger가 있을 때)
+            # 하지만 이미 실행 중이라면 유지
+            pass
+        else:
+            logging.info("SMB 비활성화: 서비스 중지 중...")
+            self.smb_manager.deactivate_smb_share()
 
     def save_last_shutdown_time(self) -> None:
         """현재 시간을 VM 마지막 종료 시간으로 저장 (UTC 기준)"""

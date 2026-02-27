@@ -214,6 +214,29 @@ function initSocketIO() {
 
 // 상태 UI 업데이트 함수
 function updateUI(data) {
+    // 기능 토글 상태 업데이트
+    const toggles = {
+        'gshare': data.gshare_enabled,
+        'nfs-mount': data.nfs_mount_enabled,
+        'polling': data.polling_enabled,
+        'event': data.event_enabled,
+        'smb': data.smb_enabled,
+        'vm-monitor': data.vm_monitor_enabled
+    };
+
+    for (const [key, value] of Object.entries(toggles)) {
+        const checkbox = document.getElementById(`toggle-${key}`);
+        if (checkbox) {
+            // 사용자가 조작 중이 아닐 때만 업데이트 (disabled 상태가 아닐 때)
+            if (!checkbox.disabled) {
+                // undefined 체크
+                if (value !== undefined) {
+                    checkbox.checked = value;
+                }
+            }
+        }
+    }
+
     // state 업데이트를 콘솔에 로깅
     logStateToConsole(data);
 
@@ -1875,4 +1898,44 @@ function resetScanUI() {
         scanBtn.classList.remove('opacity-50', 'cursor-not-allowed');
     }
     if (cancelBtn) cancelBtn.classList.add('hidden');
+}
+
+
+// 기능 토글 함수
+function toggleFeature(feature, enabled) {
+    console.log(`Toggling feature ${feature} to ${enabled}`);
+
+    // 체크박스 ID (feature 이름의 _를 -로 변환)
+    const checkboxId = `toggle-${feature.replace('_', '-')}`;
+    const checkbox = document.getElementById(checkboxId);
+    if (checkbox) checkbox.disabled = true;
+
+    fetch('/api/toggle_feature', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ feature: feature, enabled: enabled }),
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            console.log(`${feature} update success`);
+            // UI 업데이트는 소켓/폴링을 통해 수행됨
+        } else {
+            console.error(`${feature} update failed: ${data.message}`);
+            alert(`설정 변경 실패: ${data.message}`);
+            // 체크박스 상태 복구
+            if (checkbox) checkbox.checked = !enabled;
+        }
+    })
+    .catch(error => {
+        console.error('Error toggling feature:', error);
+        alert('설정 변경 중 오류가 발생했습니다.');
+        // 체크박스 상태 복구
+        if (checkbox) checkbox.checked = !enabled;
+    })
+    .finally(() => {
+        if (checkbox) checkbox.disabled = false;
+    });
 }
