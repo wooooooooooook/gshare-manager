@@ -101,6 +101,7 @@ class GshareConfig:
 
     # 기능 활성화 여부
     GSHARE_ENABLED: bool = True
+    MQTT_ENABLED: bool = True
     NFS_MOUNT_ENABLED: bool = True
     POLLING_ENABLED: bool = True
     EVENT_ENABLED: bool = True
@@ -202,6 +203,7 @@ class GshareConfig:
             'MONITOR_MODE': yaml_config.get('monitoring', {}).get('mode', 'event'),
             'EVENT_AUTH_TOKEN': yaml_config.get('credentials', {}).get('event_auth_token', ''),
             'GSHARE_ENABLED': yaml_config.get('features', {}).get('gshare_enabled', True),
+            'MQTT_ENABLED': yaml_config.get('features', {}).get('mqtt_enabled', True),
             'NFS_MOUNT_ENABLED': yaml_config.get('features', {}).get('nfs_mount_enabled', True),
             'POLLING_ENABLED': yaml_config.get('features', {}).get('polling_enabled', True),
             'EVENT_ENABLED': yaml_config.get('features', {}).get('event_enabled', True),
@@ -350,6 +352,8 @@ class GshareConfig:
 
         if 'GSHARE_ENABLED' in config_dict:
             yaml_config['features']['gshare_enabled'] = config_dict['GSHARE_ENABLED']
+        if 'MQTT_ENABLED' in config_dict:
+            yaml_config['features']['mqtt_enabled'] = config_dict['MQTT_ENABLED']
         if 'NFS_MOUNT_ENABLED' in config_dict:
             yaml_config['features']['nfs_mount_enabled'] = config_dict['NFS_MOUNT_ENABLED']
         if 'POLLING_ENABLED' in config_dict:
@@ -409,7 +413,7 @@ class GshareConfig:
             'credentials': {'proxmox_host': '', 'token_id': '', 'secret': '', 'shutdown_webhook_url': '', 'smb_username': '', 'smb_password': '', 'mqtt_username': '', 'mqtt_password': '', 'event_auth_token': ''},
             'timezone': 'Asia/Seoul',
             'transcoding': {'enabled': False, 'rules': []},
-            'features': {'gshare_enabled': True, 'nfs_mount_enabled': True, 'polling_enabled': True, 'event_enabled': True, 'smb_enabled': True, 'vm_monitor_enabled': True}
+            'features': {'gshare_enabled': True, 'mqtt_enabled': True, 'nfs_mount_enabled': True, 'polling_enabled': True, 'event_enabled': True, 'smb_enabled': True, 'vm_monitor_enabled': True}
         }
 
     def __post_init_validation__(self):

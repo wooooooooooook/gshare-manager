@@ -403,6 +403,7 @@ class GshareWebServer:
             'TRANSCODING_ENABLED': transcoding.get('enabled', False),
             'TRANSCODING_RULES': transcoding.get('rules', []),
             'GSHARE_ENABLED': yaml_config.get('features', {}).get('gshare_enabled', True),
+            'MQTT_ENABLED': yaml_config.get('features', {}).get('mqtt_enabled', True),
             'NFS_MOUNT_ENABLED': yaml_config.get('features', {}).get('nfs_mount_enabled', True),
             'POLLING_ENABLED': yaml_config.get('features', {}).get('polling_enabled', True),
             'EVENT_ENABLED': yaml_config.get('features', {}).get('event_enabled', True),
@@ -1105,6 +1106,16 @@ class GshareWebServer:
                 self.manager.config.VM_MONITOR_ENABLED = enabled
                 config_update['VM_MONITOR_ENABLED'] = enabled
                 logging.info(f"VM 모니터링 {'활성화' if enabled else '비활성화'}")
+
+            elif feature == 'mqtt':
+                self.manager.config.MQTT_ENABLED = enabled
+                config_update['MQTT_ENABLED'] = enabled
+                logging.info(f"MQTT {'활성화' if enabled else '비활성화'}")
+                if hasattr(self.manager, 'mqtt_manager') and self.manager.mqtt_manager:
+                    if enabled:
+                        self.manager.mqtt_manager._setup_client()
+                    else:
+                        self.manager.mqtt_manager.disconnect()
 
             else:
                 return jsonify({"status": "error", "message": f"알 수 없는 기능입니다: {feature}"}), 400
