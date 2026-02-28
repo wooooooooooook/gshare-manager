@@ -906,7 +906,13 @@
                         <div class="form-group col-md-3 mb-1"><label class="small mb-1">출력 패턴</label><input class="form-control form-control-sm" value="${escapeHtml(rule.output_pattern || '{{filename}}.transcoded.{{ext}}')}" onchange="updateRule(${index}, 'output_pattern', this.value)"></div>
                     </div>
                     <div class="form-row align-items-end">
-                        <div class="form-group col-md-10 mb-1"><label class="small mb-1">FFmpeg 옵션</label><input class="form-control form-control-sm" value="${escapeHtml(rule.ffmpeg_options || '')}" onchange="updateRule(${index}, 'ffmpeg_options', this.value)"></div>
+                        <div class="form-group col-md-8 mb-1"><label class="small mb-1">FFmpeg 옵션</label><input class="form-control form-control-sm" value="${escapeHtml(rule.ffmpeg_options || '')}" onchange="updateRule(${index}, 'ffmpeg_options', this.value)"></div>
+                        <div class="form-group col-md-2 mb-1">
+                            <div class="custom-control custom-checkbox">
+                                <input type="checkbox" class="custom-control-input" id="deleteOriginal${index}" ${rule.delete_original !== false ? 'checked' : ''} onchange="updateRule(${index}, 'delete_original', this.checked)">
+                                <label class="custom-control-label small" for="deleteOriginal${index}">원본 삭제</label>
+                            </div>
+                        </div>
                         <div class="form-group col-md-2 mb-1 text-right"><button type="button" class="btn btn-sm btn-outline-danger" onclick="removeTranscodingRule(${index})">삭제</button></div>
                     </div>
                 </div></div>`;
@@ -924,7 +930,7 @@
         }
 
         function addTranscodingRule() {
-            transcodingRules.push({ name: `규칙 ${transcodingRules.length + 1}`, folder_pattern: '', file_extensions: ['mp4'], ffmpeg_options: '-c:v copy -c:a aac', output_pattern: '{{filename}}.transcoded.{{ext}}' });
+            transcodingRules.push({ name: `규칙 ${transcodingRules.length + 1}`, folder_pattern: '', file_extensions: ['mp4'], ffmpeg_options: '-c:v copy -c:a aac', delete_original: true, output_pattern: '{{filename}}.transcoded.{{ext}}' });
             renderTranscodingRules();
             saveTranscodingConfig();
         }

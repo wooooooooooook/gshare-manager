@@ -1682,6 +1682,7 @@ function renderTranscodingRules() {
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-700">
                     <div><span class="text-gray-500">폴더 패턴:</span> ${escapeHtml(rule.folder_pattern || '-')}</div>
                     <div><span class="text-gray-500">파일 확장자:</span> ${escapeHtml(extensions || '-')}</div>
+                    <div><span class="text-gray-500">원본 삭제:</span> ${rule.delete_original !== false ? '예' : '아니오'}</div>
                     <div class="md:col-span-2"><span class="text-gray-500">FFmpeg 옵션:</span> <code class="text-[11px]">${escapeHtml(rule.ffmpeg_options || '-')}</code></div>
                     <div class="md:col-span-2"><span class="text-gray-500">출력 패턴:</span> ${escapeHtml(rule.output_pattern || '{{filename}}.transcoded.{{ext}}')}</div>
                 </div>
@@ -1938,4 +1939,9 @@ function toggleFeature(feature, enabled) {
     .finally(() => {
         if (checkbox) checkbox.disabled = false;
     });
+}
+
+function escapeHtml(text) {
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return String(text || '').replace(/[&<>"']/g, m => map[m]);
 }
