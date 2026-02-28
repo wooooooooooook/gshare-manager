@@ -92,6 +92,7 @@ class State:
     relay_status: str = 'UNKNOWN'
     relay_last_seen: str = '-'
     gshare_enabled: bool = True
+    mqtt_enabled: bool = True
     nfs_mount_enabled: bool = True
     polling_enabled: bool = True
     event_enabled: bool = True
@@ -939,6 +940,7 @@ class GShareManager:
                 relay_status=relay_status,
                 relay_last_seen=relay_last_seen,
                 gshare_enabled=self.config.GSHARE_ENABLED,
+                mqtt_enabled=self.config.MQTT_ENABLED,
                 nfs_mount_enabled=self.config.NFS_MOUNT_ENABLED,
                 polling_enabled=self.config.POLLING_ENABLED,
                 event_enabled=self.config.EVENT_ENABLED,
@@ -968,6 +970,7 @@ class GShareManager:
                 relay_status='UNKNOWN',
                 relay_last_seen='-',
                 gshare_enabled=True,
+                mqtt_enabled=True,
                 nfs_mount_enabled=True,
                 polling_enabled=True,
                 event_enabled=True,

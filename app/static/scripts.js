@@ -217,6 +217,7 @@ function updateUI(data) {
     // 기능 토글 상태 업데이트
     const toggles = {
         'gshare': data.gshare_enabled,
+        'mqtt': data.mqtt_enabled,
         'nfs-mount': data.nfs_mount_enabled,
         'polling': data.polling_enabled,
         'event': data.event_enabled,

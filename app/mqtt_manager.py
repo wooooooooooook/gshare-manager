@@ -13,6 +13,10 @@ class MQTTManager:
         self._setup_client()
 
     def _setup_client(self):
+        if not getattr(self.config, 'MQTT_ENABLED', True):
+            logging.info("MQTT 기능이 비활성화되어 있습니다.")
+            return
+
         if not self.config.MQTT_BROKER:
             logging.info("MQTT 브로커 설정이 없어 MQTT 기능을 비활성화합니다.")
             return
