@@ -1030,11 +1030,12 @@ class GShareManager:
                         if changed_folders:
                             # 변경된 폴더에 대해 트랜스코딩 실행 (SMB 활성화 전)
                             if self.transcoder.enabled:
-                                transcode_targets = mount_targets if mount_targets else changed_folders
+                                # 성능 최적화: 변경된 폴더만 정확히 타겟팅하여 비재귀 스캔 (거대 서브트리 스캔 방지)
+                                transcode_targets = changed_folders
                                 for folder in transcode_targets:
                                     try:
                                         folder_full_path = os.path.join(self.config.MOUNT_PATH, folder)
-                                        self.transcoder.process_folder(folder_full_path)
+                                        self.transcoder.process_folder(folder_full_path, recursive=False)
                                     except Exception as te:
                                         logging.error(f"트랜스코딩 오류 ({folder}): {te}")
 

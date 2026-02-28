@@ -8,15 +8,11 @@ sys.modules['requests'] = MagicMock()
 sys.modules['urllib3'] = MagicMock()
 sys.modules['yaml'] = MagicMock()
 
-# Ensure app is in path
-sys.path.append(os.getcwd())
+# Ensure app is in path so we can import modules like they are in the same package
+sys.path.append(os.path.join(os.getcwd(), 'app'))
 
-# Import Transcoder
-# We need to mock config imports inside transcoder if they fail, but they seem to use config.py which is local.
-# config.py imports yaml, so we mocked it.
-
-from app.transcoder import Transcoder  # noqa: E402
-from app.config import GshareConfig  # noqa: E402
+from transcoder import Transcoder  # noqa: E402
+from config import GshareConfig  # noqa: E402
 
 class TestTranscoderOptimization(unittest.TestCase):
     def setUp(self):
@@ -26,7 +22,7 @@ class TestTranscoderOptimization(unittest.TestCase):
         self.config.TRANSCODING_DONE_FILENAME = '.transcoding_done'
 
         # Patch threading to avoid starting threads
-        with patch('threading.Thread'), patch('app.transcoder.Transcoder._build_optimized_rules'):
+        with patch('threading.Thread'), patch('transcoder.Transcoder._build_optimized_rules'):
             self.transcoder = Transcoder(self.config)
 
     @patch('os.stat')
@@ -62,7 +58,7 @@ class TestTranscoderOptimization(unittest.TestCase):
         mock_file.assert_called() # Should open file again
 
     @patch('os.walk')
-    @patch('app.transcoder.Transcoder._load_done_list')
+    @patch('transcoder.Transcoder._load_done_list')
     def test_iter_walk_matches_optimization(self, mock_load_done, mock_walk):
         """Test that _iter_walk_matches skips _load_done_list if done file is missing"""
         scan_root = '/mnt/gshare'

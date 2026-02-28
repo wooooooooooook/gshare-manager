@@ -32,10 +32,16 @@ class Transcoder:
         """백그라운드에서 트랜스코딩 작업을 처리하는 루프"""
         while True:
             try:
-                folder_path = self.task_queue.get()
+                task = self.task_queue.get()
+                # 하위 호환성 및 튜플 처리
+                if isinstance(task, tuple):
+                    folder_path, recursive = task
+                else:
+                    folder_path, recursive = task, True
+
                 # 수동 스캔과 충돌 방지를 위해 락 사용
                 with self._lock:
-                    self._process_folder_sync(folder_path)
+                    self._process_folder_sync(folder_path, recursive=recursive)
             except Exception as e:
                 logging.error(f"트랜스코딩 워커 스레드 오류: {e}")
             finally:
@@ -124,10 +130,14 @@ class Transcoder:
             return True
         return False
 
-    def _iter_walk_matches(self, scan_root: str, log_prefix: str = ""):
+    def _iter_walk_matches(self, scan_root: str, log_prefix: str = "", recursive: bool = True):
         """os.walk 기반으로 규칙 매칭된 파일을 순회"""
         for root, dirs, files in os.walk(scan_root, followlinks=True):
-            dirs[:] = [d for d in dirs if not d.startswith('@') and not d.startswith('.')]
+            # 비재귀 스캔일 경우 하위 디렉토리 순회를 막음
+            if not recursive:
+                dirs[:] = []
+            else:
+                dirs[:] = [d for d in dirs if not d.startswith('@') and not d.startswith('.')]
 
             if files:
                 logging.info(f"{log_prefix}디렉토리 진입: {root} (검색 대상 파일 수: {len(files)})")
@@ -255,16 +265,16 @@ class Transcoder:
         except Exception as e:
             logging.error(f"처리 완료 기록 실패 ({directory}): {e}")
 
-    def process_folder(self, folder_path: str) -> int:
+    def process_folder(self, folder_path: str, recursive: bool = True) -> int:
         """폴더 트랜스코딩 요청을 큐에 추가 (비동기 처리)"""
         if not self.enabled or not self.rules:
             return 0
 
-        self.task_queue.put(folder_path)
-        logging.info(f"트랜스코딩 작업 큐에 추가됨: {folder_path}")
+        self.task_queue.put((folder_path, recursive))
+        logging.info(f"트랜스코딩 작업 큐에 추가됨: {folder_path} (recursive={recursive})")
         return 0  # 비동기 처리이므로 즉시 반환
 
-    def _process_folder_sync(self, folder_path: str) -> int:
+    def _process_folder_sync(self, folder_path: str, recursive: bool = True) -> int:
         """폴더 내 매칭되는 파일들을 트랜스코딩 (동기 실행). 처리된 파일 수 반환."""
         if not self.enabled or not self.rules:
             return 0
@@ -278,7 +288,7 @@ class Transcoder:
                 logging.warning(f"트랜스코딩 대상 폴더가 존재하지 않습니다: {folder_path}")
                 return 0
 
-            for root, filename, rule in self._iter_walk_matches(folder_path):
+            for root, filename, rule in self._iter_walk_matches(folder_path, recursive=recursive):
                     file_path = os.path.join(root, filename)
 
                     # 출력 패턴 기반 건너뛰기 (보조)
