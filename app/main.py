@@ -772,11 +772,25 @@ class GShareManager:
                     logging.error("SMB 공유 비활성화 실패")
 
                 logging.info(f"종료 웹훅 전송 성공, 업타임: {uptime_str}")
+
+                # 15초 후 qm stop 전송
+                def delayed_stop():
+                    time.sleep(15)
+                    try:
+                        if self.proxmox_api.stop_vm():
+                            logging.info("15초 후 VM 종료 명령(qm stop) 전송 성공")
+                        else:
+                            logging.error("15초 후 VM 종료 명령(qm stop) 전송 실패")
+                    except Exception as e:
+                        logging.error(f"지연된 VM 종료 명령 전송 중 오류: {e}")
+
+                threading.Thread(target=delayed_stop, daemon=True).start()
+                logging.debug("15초 후 VM 종료를 위한 백그라운드 스레드 시작됨")
+
             except Exception as e:
                 logging.error(f"종료 웹훅 전송 실패: {e}")
         else:
             logging.info("종료 웹훅을 전송하려했지만 vm이 이미 종료상태입니다.")
-
     def update_folder_mount_state(self, folder_path: str, is_mounted: bool) -> None:
         """특정 폴더의 마운트 상태만 업데이트 (효율적인 상태 업데이트)"""
         try:
