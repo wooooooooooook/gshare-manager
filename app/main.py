@@ -611,6 +611,7 @@ class GShareManager:
         self.restart_required = False
         self.event_relay_last_seen_epoch: Optional[float] = None
         self.event_relay_timeout_seconds = 90
+        self.pending_stop_at: Optional[float] = None
 
         # VM 마지막 종료 시간 로드
         self.last_shutdown_time = self._load_last_shutdown_time()
@@ -772,25 +773,38 @@ class GShareManager:
                     logging.error("SMB 공유 비활성화 실패")
 
                 logging.info(f"종료 웹훅 전송 성공, 업타임: {uptime_str}")
-
-                # 15초 후 qm stop 전송
-                def delayed_stop():
-                    time.sleep(15)
-                    try:
-                        if self.proxmox_api.stop_vm():
-                            logging.info("15초 후 VM 종료 명령(qm stop) 전송 성공")
-                        else:
-                            logging.error("15초 후 VM 종료 명령(qm stop) 전송 실패")
-                    except Exception as e:
-                        logging.error(f"지연된 VM 종료 명령 전송 중 오류: {e}")
-
-                threading.Thread(target=delayed_stop, daemon=True).start()
-                logging.debug("15초 후 VM 종료를 위한 백그라운드 스레드 시작됨")
+                self.pending_stop_at = time.time() + 15
+                logging.info("15초 후 VM 종료 명령(qm stop) 전송을 예약했습니다.")
 
             except Exception as e:
                 logging.error(f"종료 웹훅 전송 실패: {e}")
         else:
             logging.info("종료 웹훅을 전송하려했지만 vm이 이미 종료상태입니다.")
+
+    def _process_pending_stop(self) -> None:
+        """예약된 VM stop 명령이 있으면 단일 스레드에서 처리한다."""
+        if self.pending_stop_at is None:
+            return
+
+        if time.time() < self.pending_stop_at:
+            return
+
+        try:
+            if not self.proxmox_api.is_vm_running():
+                logging.info("예약된 stop 시점에 VM이 이미 종료되어 stop 전송을 생략합니다.")
+                self.pending_stop_at = None
+                return
+
+            if self.proxmox_api.stop_vm():
+                logging.info("예약된 VM 종료 명령(qm stop) 전송 성공")
+                self.pending_stop_at = None
+            else:
+                self.pending_stop_at = time.time() + 5
+                logging.warning("VM 종료 명령(qm stop) 전송 실패, 5초 후 재시도합니다.")
+        except Exception as e:
+            self.pending_stop_at = time.time() + 5
+            logging.error(f"예약된 VM 종료 명령 처리 중 오류: {e}")
+
     def update_folder_mount_state(self, folder_path: str, is_mounted: bool) -> None:
         """특정 폴더의 마운트 상태만 업데이트 (효율적인 상태 업데이트)"""
         try:
@@ -1076,6 +1090,8 @@ class GShareManager:
                     logging.debug("폴링 모드가 비활성화되어 있어 폴더 스캔을 건너뜁니다.")
 
                 try:
+                    self._process_pending_stop()
+
                     if self.config.VM_MONITOR_ENABLED and self.proxmox_api.is_vm_running():
                         cpu_usage = self.proxmox_api.get_cpu_usage()
                         if cpu_usage is not None:
