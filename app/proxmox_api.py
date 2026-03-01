@@ -99,3 +99,13 @@ class ProxmoxAPI:
         except Exception as e:
             logging.error(f"VM 시작 API 호출 실패: {e}")
             return False
+
+
+    def stop_vm(self) -> bool:
+        try:
+            self._request("POST", "status/stop")
+            logging.debug("VM 중지 응답 받음")
+            return True
+        except Exception as e:
+            logging.error(f"VM 중지 API 호출 실패: {e}")
+            return False
