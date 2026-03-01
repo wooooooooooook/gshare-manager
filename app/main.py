@@ -773,8 +773,8 @@ class GShareManager:
                     logging.error("SMB 공유 비활성화 실패")
 
                 logging.info(f"종료 웹훅 전송 성공, 업타임: {uptime_str}")
-                self.pending_stop_at = time.time() + 15
-                logging.info("15초 후 VM 종료 명령(qm stop) 전송을 예약했습니다.")
+                self.pending_stop_at = time.time() + 10
+                logging.info("10초 후 VM 종료 명령(qm stop) 전송을 예약했습니다.")
 
             except Exception as e:
                 logging.error(f"종료 웹훅 전송 실패: {e}")
@@ -1134,8 +1134,14 @@ class GShareManager:
                     logging.warning(f"체크 간격이 너무 짧습니다. 모니터링 작업이 체크 간격({self.config.CHECK_INTERVAL}초)보다 {abs(sleep_time):.2f}초 더 걸렸습니다.")
                     continue  # 즉시 다음 루프 실행
                 
-                # 남은 시간만큼만 대기
-                time.sleep(sleep_time)
+                # 남은 시간 대기(예약된 VM stop 시점이 더 이르면 그 시점까지만 대기)
+                sleep_until = next_run_time
+                if self.pending_stop_at is not None:
+                    sleep_until = min(sleep_until, self.pending_stop_at)
+
+                dynamic_sleep = max(0, sleep_until - time.time())
+                if dynamic_sleep > 0:
+                    time.sleep(dynamic_sleep)
 
             except Exception as e:
                 logging.error(f"모니터링 루프에서 예상치 못한 오류 발생: {e}")
