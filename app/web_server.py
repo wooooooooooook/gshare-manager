@@ -779,9 +779,8 @@ class GshareWebServer:
             if not self.manager.current_state.vm_running:
                 return jsonify({"status": "error", "message": "VM이 이미 종료되어 있습니다."}), 400
 
-            response = requests.post(
-                self.config.SHUTDOWN_WEBHOOK_URL, timeout=5)
-            response.raise_for_status()
+            # 메인 루프와 동일한 종료 플로우(웹훅 전송 + 예약 stop)를 재사용
+            self.manager._send_shutdown_webhook()
             return jsonify({"status": "success", "message": "VM 종료가 요청되었습니다."})
         except Exception as e:
             return jsonify({"status": "error", "message": f"VM 종료 요청 실패: {str(e)}"}), 500
