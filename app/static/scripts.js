@@ -90,9 +90,15 @@ let userScrolled = false; // userScrolled 변수를 전역 변수로 이동
 let monitorMode = 'event';
 let initialScanInProgress = false;
 let hasReceivedStateUpdate = false;
+let lastFolderRenderSignature = '';
+const ENABLE_STATE_DEBUG_LOG = false;
 
 // state를 콘솔에 로깅하는 함수
 function logStateToConsole(state) {
+    if (!ENABLE_STATE_DEBUG_LOG) {
+        return;
+    }
+
     console.log('=== State 업데이트 ===');
     console.log(state)
     // 마운트된 폴더 갯수 출력
@@ -1178,6 +1184,7 @@ function updateFolderList(sortedFolders) {
 
     // 폴더 목록이 비어있는 경우
     if (!sortedFolders || sortedFolders.length === 0) {
+        lastFolderRenderSignature = 'EMPTY';
         document.getElementById('monitoredFoldersContainer').innerHTML = `
             <div class="text-center py-4">
                 <p class="text-sm text-gray-600">감시 중인 폴더가 없습니다.</p>
@@ -1196,6 +1203,21 @@ function updateFolderList(sortedFolders) {
         }
         return;
     }
+
+    // 폴더 마운트 상태가 직전 렌더링과 동일하면 DOM 업데이트를 생략
+    const nextRenderSignature = sortedFolders
+        .map(([folderName, folder]) => `${folderName}:${folder.is_mounted ? 1 : 0}`)
+        .join('|');
+
+    if (nextRenderSignature === lastFolderRenderSignature) {
+        const statusIndicator = document.querySelector('.status-update-indicator');
+        if (statusIndicator) {
+            statusIndicator.classList.add('hidden');
+        }
+        return;
+    }
+
+    lastFolderRenderSignature = nextRenderSignature;
 
     // 로딩 요소 숨기기
     const loadingElement = document.getElementById('loadingFolders');
@@ -1233,8 +1255,10 @@ function updateFolderList(sortedFolders) {
     unmountedFolders.length = unmountedCount;
     mountedFolders.length = mountedCount;
 
-    console.log('마운트되지 않은 폴더 갯수:', unmountedCount);
-    console.log('마운트된 폴더 갯수:', mountedCount);
+    if (ENABLE_STATE_DEBUG_LOG) {
+        console.log('마운트되지 않은 폴더 갯수:', unmountedCount);
+        console.log('마운트된 폴더 갯수:', mountedCount);
+    }
 
     // 총 폴더 수가 많은 경우 비동기 처리 최적화
     const isBatchProcessingNeeded = sortedFolders.length > 200;
