@@ -1262,7 +1262,7 @@ class GshareWebServer:
                     try:
                         # 기존 마운트 지점에서 읽기 테스트
                         subprocess.run(
-                            f"ls {existing_mount_point}", shell=True, check=True, capture_output=True, text=True)
+                            ["ls", existing_mount_point], shell=False, check=True, capture_output=True, text=True)
                         return jsonify({
                             "status": "success",
                             "message": f"NFS 경로({nfs_path})가 이미 {existing_mount_point}에 마운트되어 있으며, 정상 작동합니다."
@@ -1277,14 +1277,14 @@ class GshareWebServer:
             with tempfile.TemporaryDirectory() as temp_mount:
                 try:
                     # 마운트 명령 수정 (temp_mount가 두 번 반복되는 오류 수정)
-                    mount_cmd = f"mount -t nfs -o nolock,vers=3,soft,timeo=100 {nfs_path} {temp_mount}"
+                    mount_cmd = ["mount", "-t", "nfs", "-o", "nolock,vers=3,soft,timeo=100", nfs_path, temp_mount]
                     result = subprocess.run(
-                        mount_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                        mount_cmd, shell=False, capture_output=True, text=True, timeout=60)
 
                     if result.returncode == 0:
                         try:
                             subprocess.run(
-                                f"ls {temp_mount}", shell=True, check=True, capture_output=True, text=True)
+                                ["ls", temp_mount], shell=False, check=True, capture_output=True, text=True)
                             message = "NFS 연결 테스트 성공: 읽기 권한이 정상입니다."
                             status = "success"
                         except Exception as e:
@@ -1303,7 +1303,7 @@ class GshareWebServer:
                 finally:
                     try:
                         subprocess.run(
-                            f"umount {temp_mount}", shell=True, check=False)
+                            ["umount", temp_mount], shell=False, check=False)
                     except Exception:
                         pass
 
