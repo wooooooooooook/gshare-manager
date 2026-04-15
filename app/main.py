@@ -883,6 +883,50 @@ class GShareManager:
             logging.error(f'이벤트 처리 실패: {e}')
             return False, str(e)
 
+    def manual_sync_recent_folders_and_start_android(self, days: int = 3) -> tuple[bool, str]:
+        """최근 N일 내 수정된 폴더를 SMB 공유 대상으로 반영하고 Android VM을 시작한다."""
+        try:
+            threshold_epoch = time.time() - (days * 86400)
+            recent_folders = [
+                path for path, mtime in self.folder_monitor.previous_mtimes.items()
+                if mtime and mtime >= threshold_epoch
+            ]
+            mount_targets = self.folder_monitor._filter_mount_targets(recent_folders)
+
+            mounted_folders: list[str] = []
+            for folder in mount_targets:
+                if self.smb_manager.create_symlink(folder):
+                    mounted_folders.append(folder)
+
+            if mounted_folders:
+                self.smb_manager.activate_smb_share()
+
+            vm_started = False
+            if not self.proxmox_api.is_vm_running():
+                vm_started = self.proxmox_api.start_vm()
+            else:
+                vm_started = True
+
+            self.last_action = (
+                f"수동 동기화(MQTT): 최근 {days}일 변경 폴더 {len(mounted_folders)}개 공유, "
+                f"Android VM {'ON' if vm_started else '시작실패'}"
+            )
+            logging.info(self.last_action)
+            return True, self.last_action
+        except Exception as e:
+            logging.error(f"수동 동기화(MQTT) 실행 실패: {e}")
+            return False, str(e)
+
+    def handle_mqtt_command(self, command: str, payload: Optional[dict] = None) -> None:
+        """MQTT 명령 처리"""
+        if command == "manual_sync_android_on":
+            days = 3
+            if payload and isinstance(payload.get("days"), int) and payload["days"] > 0:
+                days = payload["days"]
+            self.manual_sync_recent_folders_and_start_android(days=days)
+        else:
+            logging.warning(f"지원하지 않는 MQTT 명령: {command}")
+
     def touch_event_relay(self) -> None:
         """이벤트 릴레이의 마지막 신호 수신 시각을 업데이트한다."""
         self.event_relay_last_seen_epoch = time.time()
@@ -1437,6 +1481,8 @@ if __name__ == "__main__":
             try:
                 gshare_manager = GShareManager(config, proxmox_api, mqtt_manager)
                 logging.debug("GShareManager 객체 초기화 완료")
+                if mqtt_manager:
+                    mqtt_manager.set_command_handler(gshare_manager.handle_mqtt_command)
             except Exception as manager_error:
                 logging.error(f"GShareManager 객체 초기화 중 오류 발생: {manager_error}")
                 logging.error(f"상세 오류: {traceback.format_exc()}")

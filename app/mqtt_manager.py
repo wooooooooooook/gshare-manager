@@ -1,16 +1,20 @@
 import logging
 import json
 import time
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Callable
 import paho.mqtt.client as mqtt  # type: ignore
 from config import GshareConfig  # type: ignore
 
 class MQTTManager:
-    def __init__(self, config: GshareConfig):
+    def __init__(self, config: GshareConfig, command_handler: Optional[Callable[[str, Optional[Dict[str, Any]]], None]] = None):
         self.config = config
         self.client: Optional[mqtt.Client] = None
         self.connected = False
+        self.command_handler = command_handler
         self._setup_client()
+
+    def set_command_handler(self, handler: Optional[Callable[[str, Optional[Dict[str, Any]]], None]]) -> None:
+        self.command_handler = handler
 
     def _setup_client(self):
         if not getattr(self.config, 'MQTT_ENABLED', True):
@@ -31,6 +35,7 @@ class MQTTManager:
 
             self.client.on_connect = self._on_connect
             self.client.on_disconnect = self._on_disconnect
+            self.client.on_message = self._on_message
 
             # 비동기 연결 시작
             logging.info(f"MQTT 브로커 연결 시도: {self.config.MQTT_BROKER}:{self.config.MQTT_PORT}")
@@ -50,6 +55,8 @@ class MQTTManager:
             # Availability 토픽에 online 메시지 전송 (Retained)
             availability_topic = f"{self.config.MQTT_TOPIC_PREFIX}/status"
             self.client.publish(availability_topic, "online", retain=True)
+            command_topic = f"{self.config.MQTT_TOPIC_PREFIX}/command"
+            self.client.subscribe(command_topic, qos=0)
         else:
             logging.error(f"MQTT 연결 실패, 결과 코드: {rc}")
             self.connected = False
@@ -57,6 +64,30 @@ class MQTTManager:
     def _on_disconnect(self, client, userdata, rc):
         logging.warning("MQTT 브로커 연결이 끊어졌습니다.")
         self.connected = False
+
+    def _on_message(self, client, userdata, msg):
+        try:
+            payload_raw = msg.payload.decode("utf-8").strip()
+            data: Optional[Dict[str, Any]] = None
+            command = payload_raw
+
+            if payload_raw.startswith("{"):
+                data = json.loads(payload_raw)
+                command = str(data.get("command", "")).strip()
+
+            if not command:
+                logging.warning(f"MQTT 명령이 비어있습니다. topic={msg.topic}")
+                return
+
+            logging.info(f"MQTT 명령 수신: command={command}, topic={msg.topic}")
+
+            if self.command_handler:
+                self.command_handler(command, data)
+            else:
+                logging.warning("등록된 MQTT 명령 핸들러가 없어 명령을 무시합니다.")
+
+        except Exception as e:
+            logging.error(f"MQTT 명령 처리 실패: {e}")
 
     def publish_state(self, state: Any):
         """현재 상태를 MQTT로 발행"""
@@ -157,24 +188,37 @@ class MQTTManager:
                 "device_class": "timestamp",
                 "value_template": "{{ value_json.last_shutdown_time }}",
                 "icon": "mdi:clock-end"
+            },
+            {
+                "name": "Manual Sync Android On",
+                "id": "manual_sync_android_on",
+                "type": "button",
+                "command_topic": f"{self.config.MQTT_TOPIC_PREFIX}/command",
+                "payload_press": "manual_sync_android_on",
+                "icon": "mdi:sync"
             }
         ]
 
     def _build_discovery_payload(self, sensor: Dict[str, Any]) -> Dict[str, Any]:
-        base_topic = f"{self.config.MQTT_TOPIC_PREFIX}/state"
         availability_topic = f"{self.config.MQTT_TOPIC_PREFIX}/status"
         object_id = f"gshare_{sensor['id']}"
 
         payload = {
             "name": f"GShare {sensor['name']}",
             "unique_id": object_id,
-            "state_topic": base_topic,
             "availability_topic": availability_topic,
             "payload_available": "online",
             "payload_not_available": "offline",
-            "device": self._device_info,
-            "value_template": sensor["value_template"]
+            "device": self._device_info
         }
+
+        if sensor["type"] == "button":
+            payload["command_topic"] = sensor["command_topic"]
+            payload["payload_press"] = sensor["payload_press"]
+        else:
+            base_topic = f"{self.config.MQTT_TOPIC_PREFIX}/state"
+            payload["state_topic"] = base_topic
+            payload["value_template"] = sensor["value_template"]
 
         # Optional fields
         for field in ["device_class", "unit_of_measurement", "icon"]:
