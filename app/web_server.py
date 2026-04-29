@@ -234,8 +234,10 @@ class GshareWebServer:
                               self.update_config, methods=['POST'])
         self.app.add_url_rule('/api/folder-event', 'folder_event',
                               self.folder_event, methods=['POST'])
-        self.app.add_url_rule(
-            '/test_proxmox_api', 'test_proxmox_api', self.test_proxmox_api, methods=['POST'])
+        self.app.add_url_rule('/api/images', 'get_images', self.get_images, methods=['GET'])
+        self.app.add_url_rule('/api/upload_image', 'upload_image',
+                              self.upload_image, methods=['POST'])
+        self.app.add_url_rule('/test_proxmox_api', 'test_proxmox_api', self.test_proxmox_api, methods=['POST'])
         self.app.add_url_rule('/test_nfs', 'test_nfs',
                               self.test_nfs, methods=['POST'])
         self.app.add_url_rule('/test_mqtt', 'test_mqtt',
@@ -372,6 +374,7 @@ class GshareWebServer:
             'PROXMOX_HOST': creds.get('proxmox_host', ''),
             'NODE_NAME': proxmox.get('node_name', ''),
             'VM_ID': proxmox.get('vm_id', ''),
+            'ANDROID_VM_IP': proxmox.get('android_vm_ip', ''),
             'PROXMOX_TIMEOUT': proxmox.get('timeout', 5),
             'CPU_THRESHOLD': proxmox_cpu.get('threshold', 10),
             'CHECK_INTERVAL': proxmox_cpu.get('check_interval', 60),
@@ -469,6 +472,7 @@ class GshareWebServer:
                 'PROXMOX_HOST': form_data.get('PROXMOX_HOST', ''),
                 'NODE_NAME': form_data.get('NODE_NAME', ''),
                 'VM_ID': form_data.get('VM_ID', ''),
+                'ANDROID_VM_IP': form_data.get('ANDROID_VM_IP', ''),
                 'PROXMOX_TIMEOUT': form_data.get('PROXMOX_TIMEOUT', 5),
                 'TOKEN_ID': form_data.get('TOKEN_ID', ''),
                 'SECRET': form_data.get('SECRET', ''),
@@ -1142,6 +1146,107 @@ class GshareWebServer:
             return jsonify({'phase': 'idle', 'is_processing': False})
         except Exception as e:
             return jsonify({'phase': 'idle', 'is_processing': False, 'error': str(e)})
+
+    def get_images(self):
+        """저장된 이미지 목록 제공 API"""
+        try:
+            image_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'images')
+            if not os.path.exists(image_dir):
+                return jsonify({"status": "success", "images": []}), 200
+
+            allowed_extensions = {'.png', '.jpg', '.jpeg'}
+            images = []
+
+            for f in os.listdir(image_dir):
+                if f.startswith('image_') and any(f.endswith(e) for e in allowed_extensions):
+                    # 파일명 형식: image_YYYYMMDD_HHMMSS_ffffff.ext
+                    # 파싱하여 수신 시각 생성
+                    try:
+                        time_str = f[6:21] # YYYYMMDD_HHMMSS 부분 추출
+                        dt = datetime.strptime(time_str, "%Y%m%d_%H%M%S")
+                        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        formatted_time = "알 수 없음"
+
+                    images.append({
+                        "filename": f,
+                        "url": url_for('static', filename=f'images/{f}'),
+                        "time": formatted_time
+                    })
+
+            # 최신 이미지가 먼저 오도록 정렬 (파일명 기준 역순)
+            images.sort(key=lambda x: x['filename'], reverse=True)
+
+            return jsonify({"status": "success", "images": images}), 200
+
+        except Exception as e:
+            logging.error(f"이미지 목록 조회 중 오류 발생: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+    def upload_image(self):
+        """이미지 업로드 API"""
+        try:
+            # 설정 확인
+            if self.config is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 503
+
+            android_ip = getattr(self.config, 'ANDROID_VM_IP', '')
+            client_ip = request.remote_addr
+
+            # IP 검증
+            if not android_ip or client_ip != android_ip:
+                logging.warning(f"허용되지 않은 IP에서의 이미지 업로드 시도: {client_ip} (허용된 IP: {android_ip})")
+                return jsonify({"status": "error", "message": "접근이 거부되었습니다."}), 403
+
+            # 파일 확인
+            if 'image' not in request.files:
+                return jsonify({"status": "error", "message": "이미지 파일이 제공되지 않았습니다."}), 400
+
+            file = request.files['image']
+            if file.filename == '':
+                return jsonify({"status": "error", "message": "선택된 파일이 없습니다."}), 400
+
+            # 확장자 검증
+            allowed_extensions = {'.png', '.jpg', '.jpeg'}
+            ext = os.path.splitext(file.filename)[1].lower()
+            if ext not in allowed_extensions:
+                return jsonify({"status": "error", "message": "PNG, JPG 형식만 지원합니다."}), 400
+
+            # 저장 디렉토리 설정
+            image_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'images')
+            os.makedirs(image_dir, exist_ok=True)
+
+            # 파일명 생성 (타임스탬프)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            filename = f"image_{timestamp}{ext}"
+            filepath = os.path.join(image_dir, filename)
+
+            # 파일 저장
+            file.save(filepath)
+
+            # 오래된 파일 삭제 (100개 유지)
+            files = []
+            for f in os.listdir(image_dir):
+                if f.startswith('image_') and any(f.endswith(e) for e in allowed_extensions):
+                    files.append(os.path.join(image_dir, f))
+
+            # 오래된 순으로 정렬 (수정 시간 또는 파일명 기준, 파일명이 타임스탬프이므로 파일명 기준 정렬)
+            files.sort()
+
+            while len(files) > 100:
+                oldest_file = files.pop(0)
+                try:
+                    os.remove(oldest_file)
+                    logging.debug(f"오래된 이미지 삭제됨: {oldest_file}")
+                except Exception as e:
+                    logging.error(f"오래된 이미지 삭제 실패: {e}")
+
+            return jsonify({"status": "success", "message": "이미지가 성공적으로 업로드되었습니다.", "filename": filename}), 200
+
+        except Exception as e:
+            logging.error(f"이미지 업로드 처리 중 오류 발생: {e}")
+            logging.error(traceback.format_exc())
+            return jsonify({"status": "error", "message": str(e)}), 500
 
     def test_proxmox_api(self):
         """Proxmox API 연결 테스트"""

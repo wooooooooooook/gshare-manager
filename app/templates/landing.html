@@ -180,6 +180,11 @@
                             <input type="text" class="form-control" id="vm_id" name="VM_ID" required placeholder="100" value="{{ form_data.get('VM_ID', '') }}">
                         </div>
                         <div class="form-group">
+                            <label for="android_vm_ip">Android VM IP</label>
+                            <input type="text" class="form-control" id="android_vm_ip" name="ANDROID_VM_IP" required placeholder="192.168.1.50" value="{{ form_data.get('ANDROID_VM_IP', '') }}">
+                            <small class="form-text text-muted">안드로이드 VM의 내부 IP 주소를 입력하세요.</small>
+                        </div>
+                        <div class="form-group">
                             <label for="proxmox_timeout">API 연결 타임아웃 (초)</label>
                             <input type="number" class="form-control" id="proxmox_timeout" name="PROXMOX_TIMEOUT" value="{{ form_data.get('PROXMOX_TIMEOUT', 5) }}" min="1" required>
                             <small class="form-text text-muted">기본값: 5초. 네트워크가 느릴 경우 늘려주세요.</small>
