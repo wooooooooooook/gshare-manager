@@ -1198,19 +1198,7 @@ class GshareWebServer:
                 logging.warning(f"허용되지 않은 IP에서의 이미지 업로드 시도: {client_ip} (허용된 IP: {android_ip})")
                 return jsonify({"status": "error", "message": "접근이 거부되었습니다."}), 403
 
-            # 파일 확인
-            if 'image' not in request.files:
-                return jsonify({"status": "error", "message": "이미지 파일이 제공되지 않았습니다."}), 400
-
-            file = request.files['image']
-            if file.filename == '':
-                return jsonify({"status": "error", "message": "선택된 파일이 없습니다."}), 400
-
-            # 확장자 검증
             allowed_extensions = {'.png', '.jpg', '.jpeg'}
-            ext = os.path.splitext(file.filename)[1].lower()
-            if ext not in allowed_extensions:
-                return jsonify({"status": "error", "message": "PNG, JPG 형식만 지원합니다."}), 400
 
             # 저장 디렉토리 설정
             image_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'images')
@@ -1218,11 +1206,46 @@ class GshareWebServer:
 
             # 파일명 생성 (타임스탬프)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            filename = f"image_{timestamp}{ext}"
-            filepath = os.path.join(image_dir, filename)
 
-            # 파일 저장
-            file.save(filepath)
+            # Content-Type에 따른 처리
+            if request.content_type and request.content_type.startswith('image/'):
+                # Raw binary upload
+                content_type_ext = request.content_type.split('/')[-1].lower()
+                ext = f".{content_type_ext}"
+                if ext == '.jpeg':
+                    ext = '.jpg'
+
+                if ext not in allowed_extensions:
+                    return jsonify({"status": "error", "message": "PNG, JPG 형식만 지원합니다."}), 400
+
+                data = request.get_data()
+                if not data:
+                    return jsonify({"status": "error", "message": "이미지 데이터가 제공되지 않았습니다."}), 400
+
+                filename = f"image_{timestamp}{ext}"
+                filepath = os.path.join(image_dir, filename)
+
+                with open(filepath, 'wb') as f:
+                    f.write(data)
+            else:
+                # Multipart form upload
+                if 'image' not in request.files:
+                    return jsonify({"status": "error", "message": "이미지 파일이 제공되지 않았습니다."}), 400
+
+                file = request.files['image']
+                if file.filename == '':
+                    return jsonify({"status": "error", "message": "선택된 파일이 없습니다."}), 400
+
+                # 확장자 검증
+                ext = os.path.splitext(file.filename)[1].lower()
+                if ext not in allowed_extensions:
+                    return jsonify({"status": "error", "message": "PNG, JPG 형식만 지원합니다."}), 400
+
+                filename = f"image_{timestamp}{ext}"
+                filepath = os.path.join(image_dir, filename)
+
+                # 파일 저장
+                file.save(filepath)
 
             # 오래된 파일 삭제 (100개 유지)
             files = []
