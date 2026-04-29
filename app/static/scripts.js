@@ -1970,3 +1970,79 @@ function escapeHtml(text) {
     const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
     return String(text || '').replace(/[&<>"']/g, m => map[m]);
 }
+
+// 이미지 뷰어 관련 로직
+let currentImageList = [];
+let currentImageIndex = 0;
+
+function fetchImages() {
+    fetch('/api/images')
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                currentImageList = data.images;
+                updateImageViewer();
+            } else {
+                console.error('이미지 목록 로드 실패:', data.message);
+            }
+        })
+        .catch(error => {
+            console.error('이미지 API 호출 중 오류 발생:', error);
+        });
+}
+
+function updateImageViewer() {
+    const container = document.getElementById('imageViewerContainer');
+    const noMsg = document.getElementById('noImagesMsg');
+    const imgEl = document.getElementById('currentImage');
+    const timeEl = document.getElementById('imageTime');
+    const counterEl = document.getElementById('imageCounter');
+    const prevBtn = document.getElementById('prevImageBtn');
+    const nextBtn = document.getElementById('nextImageBtn');
+
+    if (!currentImageList || currentImageList.length === 0) {
+        container.classList.add('hidden');
+        noMsg.classList.remove('hidden');
+        counterEl.textContent = '0/0';
+        return;
+    }
+
+    container.classList.remove('hidden');
+    noMsg.classList.add('hidden');
+
+    // 현재 인덱스 유효성 검사
+    if (currentImageIndex < 0) currentImageIndex = 0;
+    if (currentImageIndex >= currentImageList.length) currentImageIndex = currentImageList.length - 1;
+
+    const currentData = currentImageList[currentImageIndex];
+
+    // 이미지 및 정보 업데이트
+    imgEl.src = currentData.url;
+    timeEl.textContent = currentData.time;
+    counterEl.textContent = `${currentImageIndex + 1}/${currentImageList.length}`;
+
+    // 버튼 상태 업데이트 (최신이 인덱스 0)
+    prevBtn.disabled = currentImageIndex >= currentImageList.length - 1; // 과거로 이동
+    nextBtn.disabled = currentImageIndex <= 0; // 최신으로 이동
+}
+
+function showPrevImage() {
+    if (currentImageIndex < currentImageList.length - 1) {
+        currentImageIndex++;
+        updateImageViewer();
+    }
+}
+
+function showNextImage() {
+    if (currentImageIndex > 0) {
+        currentImageIndex--;
+        updateImageViewer();
+    }
+}
+
+// 초기화 시 이미지 로드
+document.addEventListener('DOMContentLoaded', function() {
+    fetchImages();
+    // 30초마다 이미지 갱신
+    setInterval(fetchImages, 30000);
+});
