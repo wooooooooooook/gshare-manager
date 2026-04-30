@@ -237,6 +237,8 @@ class GshareWebServer:
         self.app.add_url_rule('/api/images', 'get_images', self.get_images, methods=['GET'])
         self.app.add_url_rule('/api/upload_image', 'upload_image',
                               self.upload_image, methods=['POST'])
+        self.app.add_url_rule('/api/vm-stop', 'api_vm_stop',
+                              self.api_vm_stop, methods=['POST'])
         self.app.add_url_rule('/test_proxmox_api', 'test_proxmox_api', self.test_proxmox_api, methods=['POST'])
         self.app.add_url_rule('/test_nfs', 'test_nfs',
                               self.test_nfs, methods=['POST'])
@@ -788,6 +790,31 @@ class GshareWebServer:
             return jsonify({"status": "success", "message": "VM 종료가 요청되었습니다."})
         except Exception as e:
             return jsonify({"status": "error", "message": f"VM 종료 요청 실패: {str(e)}"}), 500
+
+    def api_vm_stop(self):
+        """안드로이드 VM IP 요청만 허용하는 VM stop API"""
+        try:
+            if self.manager is None or self.config is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 503
+
+            android_ip = getattr(self.config, 'ANDROID_VM_IP', '')
+            client_ip = request.remote_addr
+
+            if not android_ip or client_ip != android_ip:
+                logging.warning(
+                    f"허용되지 않은 IP에서 VM stop API 호출 시도: {client_ip} (허용된 IP: {android_ip})")
+                return jsonify({"status": "error", "message": "접근이 거부되었습니다."}), 403
+
+            if not self.manager.proxmox_api.is_vm_running():
+                return jsonify({"status": "success", "message": "VM이 이미 종료되어 있습니다."}), 200
+
+            if self.manager.proxmox_api.stop_vm():
+                return jsonify({"status": "success", "message": "VM stop 명령이 전송되었습니다."}), 200
+
+            return jsonify({"status": "error", "message": "VM stop 명령 전송에 실패했습니다."}), 500
+        except Exception as e:
+            logging.error(f"VM stop API 처리 중 오류 발생: {e}")
+            return jsonify({"status": "error", "message": f"VM stop API 처리 실패: {str(e)}"}), 500
 
     def toggle_mount(self, folder):
         """마운트 토글"""
