@@ -2,6 +2,8 @@
 
 GShare Manager는 Proxmox 환경에서 Android VM을 효율적으로 관리하기 위한 자동화 도구입니다. 기본 동작은 NAS에서 전달되는 inotify 이벤트를 수신해 폴더를 SMB 공유하고 VM을 자동으로 시작하며, VM의 사용량이 감소하면 자동으로 종료합니다.
 
+<img width="1024" height="1536" alt="image" src="https://github.com/user-attachments/assets/f35c9881-f7e6-440e-8f6f-08ba73913db4" />
+
 ## 주요 기능
 
 - NAS로부터 NFS로 폴더를 공유받아 파일이 있는 폴더만 모니터링하되, 동일 경로에서 중간/하위 폴더 모두 변경되면 상위 폴더만 대상으로 처리
@@ -82,7 +84,3 @@ MIT License
 > relay는 시작 시 계산한 디렉토리 목록(`watch_dirs_effective`)만 감시하며, 재귀 `-r` 옵션은 사용하지 않습니다.
 > 새 디렉토리 생성이 감지되면 목록 갱신 필요 상태로 표시하고 하루 1회 목록을 재계산합니다(기본 86400초, `WATCHLIST_REFRESH_INTERVAL_SECONDS`로 조정 가능).
 > 추가 제외 디렉토리가 필요하면 `EXCLUDED_DIR_NAMES` 환경변수에 쉼표로 구분해 지정하세요. 예: `@eaDir,#recycle`
-
-## 아키텍처 문서
-
-- GShare/NAS/VM 신호 흐름 모식도: [`docs/gshare-nas-vm-relationship.md`](docs/gshare-nas-vm-relationship.md)
