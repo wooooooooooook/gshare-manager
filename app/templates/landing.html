@@ -180,11 +180,6 @@
                             <input type="text" class="form-control" id="vm_id" name="VM_ID" required placeholder="100" value="{{ form_data.get('VM_ID', '') }}">
                         </div>
                         <div class="form-group">
-                            <label for="android_vm_ip">Android VM IP</label>
-                            <input type="text" class="form-control" id="android_vm_ip" name="ANDROID_VM_IP" required placeholder="192.168.1.50" value="{{ form_data.get('ANDROID_VM_IP', '') }}">
-                            <small class="form-text text-muted">안드로이드 VM의 내부 IP 주소를 입력하세요.</small>
-                        </div>
-                        <div class="form-group">
                             <label for="proxmox_timeout">API 연결 타임아웃 (초)</label>
                             <input type="number" class="form-control" id="proxmox_timeout" name="PROXMOX_TIMEOUT" value="{{ form_data.get('PROXMOX_TIMEOUT', 5) }}" min="1" required>
                             <small class="form-text text-muted">기본값: 5초. 네트워크가 느릴 경우 늘려주세요.</small>
@@ -273,6 +268,11 @@
                 <div class="tab-pane fade" id="vm" role="tabpanel" aria-labelledby="vm-tab">
                     <div class="form-section">
                         <h3>VM 설정</h3>
+                        <div class="form-group">
+                            <label for="android_vm_ip">Android VM IP</label>
+                            <input type="text" class="form-control" id="android_vm_ip" name="ANDROID_VM_IP" required placeholder="192.168.1.50" value="{{ form_data.get('ANDROID_VM_IP', '') }}">
+                            <small class="form-text text-muted">안드로이드 VM의 내부 IP 주소를 입력하세요.</small>
+                        </div>
                         <div class="form-group">
                             <label for="shutdown_webhook">MacroDroid 종료 웹훅 URL</label>
                             <input type="text" class="form-control" id="shutdown_webhook" name="SHUTDOWN_WEBHOOK_URL" required placeholder="https://example.com/webhook" value="{{ form_data.get('SHUTDOWN_WEBHOOK_URL', '') }}">
