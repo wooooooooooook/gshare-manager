@@ -808,6 +808,9 @@ class GshareWebServer:
             if not self.manager.proxmox_api.is_vm_running():
                 return jsonify({"status": "success", "message": "VM이 이미 종료되어 있습니다."}), 200
 
+            # VM 내부에서 종료를 요청한 경우에도 모니터링 idle 종료와 동일한 워크플로우를 수행
+            self.manager._run_vm_shutdown_workflow()
+
             if self.manager.proxmox_api.stop_vm():
                 return jsonify({"status": "success", "message": "VM stop 명령이 전송되었습니다."}), 200
 

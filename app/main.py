@@ -760,17 +760,7 @@ class GShareManager:
                 uptime_str = self._format_uptime(
                     uptime) if uptime is not None else "알 수 없음"
 
-                # VM 종료 시간 저장
-                self.save_last_shutdown_time()
-
-                # VM 종료 시 모든 SMB 공유 비활성화
-                if self.smb_manager.deactivate_smb_share():
-                    # SMB 비활성화 후 상태 즉시 업데이트
-                    if hasattr(self, 'current_state') and self.current_state is not None:
-                        self.current_state.smb_running = False
-                    logging.info("SMB 공유 비활성화 완료 및 상태 업데이트")
-                else:
-                    logging.error("SMB 공유 비활성화 실패")
+                self._run_vm_shutdown_workflow()
 
                 logging.info(f"종료 웹훅 전송 성공, 업타임: {uptime_str}")
                 self.pending_stop_at = time.time() + 10
@@ -780,6 +770,20 @@ class GShareManager:
                 logging.error(f"종료 웹훅 전송 실패: {e}")
         else:
             logging.info("종료 웹훅을 전송하려했지만 vm이 이미 종료상태입니다.")
+
+    def _run_vm_shutdown_workflow(self) -> None:
+        """VM 종료 시 공통 후처리(종료시각 기록, SMB 비활성화)를 실행한다."""
+        # VM 종료 시간 저장
+        self.save_last_shutdown_time()
+
+        # VM 종료 시 모든 SMB 공유 비활성화
+        if self.smb_manager.deactivate_smb_share():
+            # SMB 비활성화 후 상태 즉시 업데이트
+            if hasattr(self, 'current_state') and self.current_state is not None:
+                self.current_state.smb_running = False
+            logging.info("SMB 공유 비활성화 완료 및 상태 업데이트")
+        else:
+            logging.error("SMB 공유 비활성화 실패")
 
     def _process_pending_stop(self) -> None:
         """예약된 VM stop 명령이 있으면 단일 스레드에서 처리한다."""
