@@ -766,7 +766,8 @@ class GshareWebServer:
             if self.manager is None:
                 return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
 
-            if self.manager.current_state.vm_running:
+            vm_running = self.manager.proxmox_api.is_vm_running()
+            if vm_running:
                 return jsonify({"status": "error", "message": "VM이 이미 실행 중입니다."}), 400
 
             if self.manager.proxmox_api.start_vm():
