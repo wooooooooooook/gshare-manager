@@ -1114,7 +1114,7 @@ class GShareManager:
                                 for folder in transcode_targets:
                                     try:
                                         folder_full_path = os.path.join(self.config.MOUNT_PATH, folder)
-                                        self.transcoder.process_folder(folder_full_path, recursive=False)
+                                        self.transcoder.process_folder_blocking(folder_full_path, recursive=False)
                                     except Exception as te:
                                         logging.error(f"트랜스코딩 오류 ({folder}): {te}")
 
