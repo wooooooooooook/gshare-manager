@@ -19,7 +19,7 @@ import traceback
 from flask_socketio import SocketIO  # type: ignore
 
 VM_STOP_CONFIRMATION_WINDOW_SECONDS = 15 * 60
-VM_STOP_SIGNAL_GRACE_SECONDS = 90
+VM_STOP_SIGNAL_GRACE_SECONDS = 5 * 60
 
 
 class GshareWebServer:
