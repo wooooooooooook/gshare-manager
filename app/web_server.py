@@ -18,6 +18,9 @@ import time
 import traceback
 from flask_socketio import SocketIO  # type: ignore
 
+VM_STOP_CONFIRMATION_WINDOW_SECONDS = 15 * 60
+VM_STOP_SIGNAL_GRACE_SECONDS = 90
+
 
 class GshareWebServer:
     """GShare 웹 서버를 관리하는 클래스"""
@@ -47,6 +50,8 @@ class GshareWebServer:
         self.state_update_timer = None
         self.timer_lock = threading.Lock()
         self._cached_app_version = None
+        self.vm_stop_window_start = 0.0
+        self.vm_stop_last_signal = 0.0
 
     def set_manager(self, manager):
         self.manager = manager
@@ -809,10 +814,36 @@ class GshareWebServer:
             if not self.manager.proxmox_api.is_vm_running():
                 return jsonify({"status": "success", "message": "VM이 이미 종료되어 있습니다."}), 200
 
-            # VM 내부에서 종료를 요청한 경우에도 모니터링 idle 종료와 동일한 워크플로우를 수행
+            now = time.time()
+            if (
+                self.vm_stop_window_start <= 0
+                or now - self.vm_stop_last_signal > VM_STOP_SIGNAL_GRACE_SECONDS
+            ):
+                self.vm_stop_window_start = now
+                self.vm_stop_last_signal = now
+                return jsonify({
+                    "status": "pending",
+                    "message": "종료 신호 확인을 시작했습니다. 15분 동안 종료 신호가 계속 들어오면 VM을 종료합니다.",
+                    "elapsed_seconds": 0,
+                    "required_seconds": VM_STOP_CONFIRMATION_WINDOW_SECONDS
+                }), 202
+
+            self.vm_stop_last_signal = now
+            elapsed_seconds = int(now - self.vm_stop_window_start)
+            if elapsed_seconds < VM_STOP_CONFIRMATION_WINDOW_SECONDS:
+                return jsonify({
+                    "status": "pending",
+                    "message": "종료 신호가 누적되는 중입니다. 15분 연속 신호 수신 후 VM을 종료합니다.",
+                    "elapsed_seconds": elapsed_seconds,
+                    "required_seconds": VM_STOP_CONFIRMATION_WINDOW_SECONDS
+                }), 202
+
+            # VM 내부에서 15분 연속 종료 신호를 요청한 경우에만 동일한 종료 워크플로우를 수행
             self.manager._run_vm_shutdown_workflow()
 
             if self.manager.proxmox_api.stop_vm():
+                self.vm_stop_window_start = 0.0
+                self.vm_stop_last_signal = 0.0
                 return jsonify({"status": "success", "message": "VM stop 명령이 전송되었습니다."}), 200
 
             return jsonify({"status": "error", "message": "VM stop 명령 전송에 실패했습니다."}), 500
