@@ -274,6 +274,14 @@ class Transcoder:
         logging.info(f"트랜스코딩 작업 큐에 추가됨: {folder_path} (recursive={recursive})")
         return 0  # 비동기 처리이므로 즉시 반환
 
+    def process_folder_blocking(self, folder_path: str, recursive: bool = True) -> int:
+        """폴더 트랜스코딩을 즉시 실행하고 완료될 때까지 대기"""
+        if not self.enabled or not self.rules:
+            return 0
+
+        with self._lock:
+            return self._process_folder_sync(folder_path, recursive=recursive)
+
     def _process_folder_sync(self, folder_path: str, recursive: bool = True) -> int:
         """폴더 내 매칭되는 파일들을 트랜스코딩 (동기 실행). 처리된 파일 수 반환."""
         if not self.enabled or not self.rules:
