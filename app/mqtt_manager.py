@@ -1,6 +1,7 @@
 import logging
 import json
 import time
+import base64
 from typing import Any, Dict, Optional, List, Callable
 import paho.mqtt.client as mqtt  # type: ignore
 from config import GshareConfig  # type: ignore
@@ -190,6 +191,14 @@ class MQTTManager:
                 "icon": "mdi:clock-end"
             },
             {
+                "name": "Latest Screenshot",
+                "id": "latest_screenshot",
+                "type": "camera",
+                "topic": f"{self.config.MQTT_TOPIC_PREFIX}/camera/latest",
+                "image_encoding": "b64",
+                "icon": "mdi:camera"
+            },
+            {
                 "name": "Manual Sync Android On",
                 "id": "manual_sync_android_on",
                 "type": "button",
@@ -215,6 +224,9 @@ class MQTTManager:
         if sensor["type"] == "button":
             payload["command_topic"] = sensor["command_topic"]
             payload["payload_press"] = sensor["payload_press"]
+        elif sensor["type"] == "camera":
+            payload["topic"] = sensor["topic"]
+            payload["image_encoding"] = sensor.get("image_encoding", "b64")
         else:
             base_topic = f"{self.config.MQTT_TOPIC_PREFIX}/state"
             payload["state_topic"] = base_topic
@@ -244,6 +256,19 @@ class MQTTManager:
 
         except Exception as e:
             logging.error(f"Discovery 메시지 발행 중 오류: {e}")
+
+
+    def publish_latest_image(self, image_bytes: bytes):
+        """최근 스크린샷 이미지를 MQTT camera 토픽으로 발행"""
+        if not self.client or not self.connected or not image_bytes:
+            return
+
+        try:
+            image_topic = f"{self.config.MQTT_TOPIC_PREFIX}/camera/latest"
+            payload = base64.b64encode(image_bytes).decode("ascii")
+            self.client.publish(image_topic, payload, retain=True)
+        except Exception as e:
+            logging.error(f"MQTT 이미지 발행 중 오류: {e}")
 
     def disconnect(self):
         if self.client:

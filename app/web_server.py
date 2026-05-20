@@ -1289,6 +1289,7 @@ class GshareWebServer:
 
                 with open(filepath, 'wb') as f:
                     f.write(data)
+                image_bytes = data
             else:
                 # Multipart form upload
                 if 'image' not in request.files:
@@ -1308,6 +1309,8 @@ class GshareWebServer:
 
                 # 파일 저장
                 file.save(filepath)
+                with open(filepath, 'rb') as f:
+                    image_bytes = f.read()
 
             # 오래된 파일 삭제 (100개 유지)
             files = []
@@ -1325,6 +1328,9 @@ class GshareWebServer:
                     logging.debug(f"오래된 이미지 삭제됨: {oldest_file}")
                 except Exception as e:
                     logging.error(f"오래된 이미지 삭제 실패: {e}")
+
+            if getattr(self.manager, 'mqtt_manager', None):
+                self.manager.mqtt_manager.publish_latest_image(image_bytes)
 
             return jsonify({"status": "success", "message": "이미지가 성공적으로 업로드되었습니다.", "filename": filename}), 200
 
