@@ -881,6 +881,18 @@ class GshareWebServer:
                     if os.path.exists(link_file) and os.path.islink(link_file):
                         is_mounted = True
 
+            # 부모 폴더 내 일괄 파일 마운트 방식도 체크
+            if not is_mounted:
+                parts = folder.rsplit('/', 1)
+                if len(parts) > 1:
+                    subfolder, file_name = parts[0], parts[1]
+                    parent_dir_name = f"{subfolder.replace(os.sep, '_')}_files"
+                    parent_dir_path = os.path.join(links_dir, parent_dir_name)
+                    if os.path.exists(parent_dir_path) and os.path.isdir(parent_dir_path):
+                        link_file = os.path.join(parent_dir_path, file_name)
+                        if os.path.lexists(link_file) and os.path.islink(link_file):
+                            is_mounted = True
+
             # 실제 대상이 파일인지 폴더인지 구분
             source_path = os.path.join(self.manager.config.MOUNT_PATH, folder)
             is_target_file = os.path.isfile(source_path)
@@ -932,14 +944,24 @@ class GshareWebServer:
                 full_file_path = os.path.join(abs_path, name)
                 if os.path.isfile(full_file_path):
                     # 마운트 상태 체크
+                    is_mounted = False
+                    
+                    # 1) 개별 파일 전용 폴더 방식 체크
                     unique_folder_name = f"{folder_path}_{name}".replace(os.sep, '_')
                     target_dir_path = os.path.join(links_dir, unique_folder_name)
-
-                    is_mounted = False
                     if os.path.exists(target_dir_path) and os.path.isdir(target_dir_path):
                         link_file = os.path.join(target_dir_path, name)
-                        if os.path.exists(link_file) and os.path.islink(link_file):
+                        if os.path.lexists(link_file) and os.path.islink(link_file):
                             is_mounted = True
+                            
+                    # 2) 부모 폴더 내 일괄 파일 마운트 방식 체크
+                    if not is_mounted:
+                        parent_dir_name = f"{folder_path.replace(os.sep, '_')}_files"
+                        parent_dir_path = os.path.join(links_dir, parent_dir_name)
+                        if os.path.exists(parent_dir_path) and os.path.isdir(parent_dir_path):
+                            link_file = os.path.join(parent_dir_path, name)
+                            if os.path.lexists(link_file) and os.path.islink(link_file):
+                                is_mounted = True
 
                     mtime = os.path.getmtime(full_file_path)
                     mtime_str = datetime.fromtimestamp(mtime, self.manager.local_tz).strftime('%Y-%m-%d %H:%M:%S')

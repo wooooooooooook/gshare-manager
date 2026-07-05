@@ -468,7 +468,7 @@ class FolderMonitor:
             is_mounted = False
             is_folder_mount = False
             if self.config.SMB_SHARE_MODE == 'file':
-                is_folder_mount = self.smb_manager.is_link_active(path)
+                is_folder_mount = self.smb_manager.is_folder_mount_active(path)
                 is_mounted = is_folder_mount or (path in active_folders)
             else:
                 is_mounted = self.smb_manager.is_link_active(path)
@@ -486,16 +486,39 @@ class FolderMonitor:
             for active_link in self.smb_manager._active_links:
                 if active_link == ".tmp":
                     continue
-                # 만약 active_link 자체가 감시 대상 폴더 중 하나와 정확히 일치하면, 파일 마운트가 아니라 폴더 마운트이므로 무시합니다.
-                is_direct_folder = False
-                for path in folders_with_mtime:
-                    if path.replace(os.sep, '_') == active_link:
-                        is_direct_folder = True
-                        break
-                if is_direct_folder:
+
+                # 1) 만약 active_link가 "_files"로 끝나고 그에 해당하는 원래 폴더 경로가 있으면:
+                # 그 폴더 내부의 파일들(symlinks)을 각각 개별 파일 마운트 항목으로 목록에 주입합니다.
+                matched_folder_path = None
+                if active_link.endswith("_files"):
+                    base_link_name = active_link[:-6] # "_files" 제거
+                    for path in folders_with_mtime:
+                        if path.replace(os.sep, '_') == base_link_name:
+                            matched_folder_path = path
+                            break
+
+                if matched_folder_path:
+                    # 해당 공유 폴더 내부를 직접 조회하여 실제 마운트된 파일 심링크 목록을 주입
+                    parent_dir_path = os.path.join(self.smb_manager.links_dir, active_link)
+                    if os.path.exists(parent_dir_path) and os.path.isdir(parent_dir_path):
+                        try:
+                            for name in os.listdir(parent_dir_path):
+                                if name == ".tmp":
+                                    continue
+                                file_link_path = os.path.join(parent_dir_path, name)
+                                if os.path.lexists(file_link_path) and os.path.islink(file_link_path):
+                                    file_path = f"{matched_folder_path}/{name}"
+                                    if file_path not in monitored_folders:
+                                        monitored_folders[file_path] = {
+                                            'mtime': '-',
+                                            'is_mounted': True,
+                                            'is_file': True
+                                        }
+                        except Exception as e:
+                            logging.error(f"공유 디렉토리 파일 조회 중 오류: {e}")
                     continue
 
-                # 감시 목록 상의 원래 폴더 형식이 아니면 개별 파일 가상 폴더로 간주하여 목록에 추가
+                # 2) 감시 목록 상의 원래 폴더 형식이 아니면 개별 파일 가상 폴더(구 방식)로 간주하여 목록에 추가
                 # 이때, active_link (예: MobileBackup_영욱의 Z Flip6_DCIM_2026_photo.jpg)를 실제 파일 경로 형식으로 변환하여 추가합니다.
                 longest_match = None
                 longest_len = -1

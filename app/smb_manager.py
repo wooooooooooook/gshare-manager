@@ -50,6 +50,12 @@ class SMBManager:
         link_name = subfolder.replace(os.sep, '_')
         return link_name in self._active_links
 
+    def is_folder_mount_active(self, subfolder: str) -> bool:
+        """폴더 단위 마운트가 활성화되어 있는지 실제 심볼릭 링크 여부로 판별"""
+        link_name = subfolder.replace(os.sep, '_')
+        link_path = os.path.join(self.links_dir, link_name)
+        return os.path.lexists(link_path) and os.path.islink(link_path)
+
     def _init_smb_config(self) -> None:
         """기본 SMB 설정 초기화"""
         try:
@@ -563,7 +569,7 @@ class SMBManager:
 
     def remove_symlink(self, subfolder: str) -> bool:
         """
-        특정 폴더의 심볼릭 링크 제거 (파일단위 디렉토리도 지원)
+        특정 폴더의 심볼릭 링크 제거 (파일단위 디렉토리 및 부모 공유 디렉토리 내 개별 파일 제거 지원)
 
         Args:
             subfolder: 제거할 심볼릭 링크 서브폴더 경로 (또는 고유 폴더명)
@@ -574,17 +580,57 @@ class SMBManager:
         try:
             link_name = subfolder.replace(os.sep, '_')
             link_path = os.path.join(self.links_dir, link_name)
+            removed = False
+
+            # 1) 개별 폴더/파일 전용 폴더 방식 제거
             if os.path.exists(link_path):
                 if os.path.islink(link_path):
                     os.remove(link_path)
                 elif os.path.isdir(link_path):
                     shutil.rmtree(link_path)
                 logging.info(f"공유 리소스 제거됨: {link_path}")
+                self._active_links.discard(link_name)
+                removed = True
 
-            self._active_links.discard(link_name)
+            # 2) 부모 공유 디렉토리 내부의 개별 파일 제거 방식 지원 (원자적 교체 사용)
+            parts = subfolder.rsplit('/', 1)
+            if len(parts) > 1:
+                parent_subfolder, file_name = parts[0], parts[1]
+                parent_dir_name = f"{parent_subfolder.replace(os.sep, '_')}_files"
+                parent_dir_path = os.path.join(self.links_dir, parent_dir_name)
+                if os.path.exists(parent_dir_path) and os.path.isdir(parent_dir_path):
+                    # 현재 마운트된 파일 목록 읽기
+                    current_files = set()
+                    try:
+                        for name in os.listdir(parent_dir_path):
+                            if name == ".tmp":
+                                continue
+                            file_link_path = os.path.join(parent_dir_path, name)
+                            if os.path.lexists(file_link_path) and os.path.islink(file_link_path):
+                                current_files.add(name)
+                    except Exception as e:
+                        logging.warning(f"기존 파일 목록 조회 실패: {e}")
 
-            # 성능 최적화: 매 삭제마다 links_dir 전체 스캔(os.listdir + os.path.islink)을
-            # 피하고 메모리 캐시(self._active_links)로 남은 링크 여부를 우선 판단합니다.
+                    # 대상 파일 제거
+                    if file_name in current_files:
+                        current_files.remove(file_name)
+                        removed = True
+
+                    if not current_files:
+                        # 남은 파일이 없으면 폴더 전체 삭제
+                        trash_dir = tempfile.mktemp(dir=os.path.join(self.links_dir, ".tmp"))
+                        os.rename(parent_dir_path, trash_dir)
+                        shutil.rmtree(trash_dir)
+                        logging.info(f"남은 파일이 없어 부모 공유 폴더가 제거됨: {parent_dir_path}")
+                        self._active_links.discard(parent_dir_name)
+                    else:
+                        # 남은 파일이 있으면 원자적으로 폴더 갱신
+                        self._atomic_update_files_directory(parent_subfolder, current_files)
+
+            if not removed:
+                logging.warning(f"제거할 공유 리소스를 찾지 못했습니다: {subfolder}")
+
+            # 성능 최적화: 매 삭제마다 links_dir 전체 스캔을 피하고 메모리 캐시로 남은 링크 여부를 우선 판단
             remaining_symlinks = len(self._active_links) > 0
 
             # 캐시가 비어있더라도 외부 프로세스가 링크를 생성했을 가능성은 남아있으므로
@@ -597,7 +643,6 @@ class SMBManager:
                 )
             
             if not remaining_symlinks:
-                # 모니터링 루프 블로킹을 피하기 위해 지연 대기 없이 즉시 비활성화
                 logging.info("남은 공유 리소스가 없어 SMB 공유를 비활성화합니다.")
                 self.deactivate_smb_share()
 
@@ -606,65 +651,98 @@ class SMBManager:
             logging.error(f"공유 리소스 제거 실패 ({subfolder}): {e}")
             return False
 
+    def _atomic_update_files_directory(self, subfolder: str, new_files: set[str]) -> bool:
+        """
+        특정 서브폴더의 공유 파일 심링크 디렉토리를 원자적으로 생성/갱신합니다.
+        기존 마운트된 파일들이 끊김 없이 최신 버전으로 노출되며, 깨진 심링크 노출이 방지됩니다.
+        """
+        try:
+            parent_dir_name = f"{subfolder.replace(os.sep, '_')}_files"
+            target_dir_path = os.path.join(self.links_dir, parent_dir_name)
+            
+            # 1. 임시 디렉토리 생성
+            tmp_base = os.path.join(self.links_dir, ".tmp")
+            os.makedirs(tmp_base, exist_ok=True)
+            temp_subdir = tempfile.mkdtemp(dir=tmp_base)
+            
+            # 2. 임시 디렉토리 내에 파일 심링크들 생성 및 소유권 설정
+            target_uid = pwd.getpwnam(self.config.SMB_USERNAME).pw_uid
+            target_gid = self.nfs_gid
+            existing_group_name = self._get_group_name(self.nfs_gid)
+            if existing_group_name:
+                try:
+                    target_gid = grp.getgrnam(existing_group_name).gr_gid
+                except KeyError:
+                    pass
+            else:
+                try:
+                    target_gid = grp.getgrnam(self.config.SMB_USERNAME).gr_gid
+                except KeyError:
+                    pass
+
+            for file_name in new_files:
+                source_path = os.path.join(self.config.MOUNT_PATH, subfolder, file_name)
+                temp_link_path = os.path.join(temp_subdir, file_name)
+                os.symlink(source_path, temp_link_path)
+                try:
+                    os.lchown(temp_link_path, target_uid, target_gid)
+                except Exception as pe:
+                    logging.warning(f"심링크 소유권 설정 오류 (무시): {pe}")
+
+            try:
+                os.chown(temp_subdir, target_uid, target_gid)
+                os.chmod(temp_subdir, 0o755)
+            except Exception as pe:
+                logging.warning(f"임시 폴더 소유권/권한 설정 오류 (무시): {pe}")
+
+            # 3. 원자적으로 디렉토리 교체
+            # 기존 폴더가 존재하면 rename으로 교체하기 위해 먼저 기존 폴더를 .tmp 아래의 임시 이름으로 격리 이동시킵니다.
+            trash_dir = None
+            if os.path.exists(target_dir_path):
+                trash_dir = tempfile.mktemp(dir=tmp_base)
+                os.rename(target_dir_path, trash_dir)
+                
+            os.rename(temp_subdir, target_dir_path)
+            self._active_links.add(parent_dir_name)
+            
+            # 4. 백그라운드로 격리된 기존 폴더 제거
+            if trash_dir and os.path.exists(trash_dir):
+                shutil.rmtree(trash_dir)
+                
+            logging.info(f"원자적 파일 마운트 디렉토리 갱신 완료 ({parent_dir_name}): {new_files}")
+            return True
+        except Exception as e:
+            logging.error(f"원자적 파일 마운트 디렉토리 갱신 실패 ({subfolder}): {e}")
+            return False
+
     def create_file_symlink(self, subfolder: str, file_name: str) -> bool:
         """
-        특정 파일에 대해 고유 디렉토리를 생성하고 심링크를 파일단위로 생성하여 원자적으로 이동합니다.
+        특정 파일에 대해 부모 폴더 이름에 _files를 붙인 공유 디렉토리를 원자적으로 갱신하여 마운트합니다.
 
         Args:
             subfolder: 파일이 속한 서브폴더 경로
             file_name: 파일명
         """
-        try:
-            source_path = os.path.join(self.config.MOUNT_PATH, subfolder, file_name)
-            
-            # 1. 임시 작업 폴더 확보
-            tmp_base = os.path.join(self.links_dir, ".tmp")
-            os.makedirs(tmp_base, exist_ok=True)
-            
-            # 임시 하위 디렉토리 생성
-            temp_subdir = tempfile.mkdtemp(dir=tmp_base)
-            
-            # 2. 임시 폴더에 파일 심링크 생성
-            temp_link_path = os.path.join(temp_subdir, file_name)
-            os.symlink(source_path, temp_link_path)
-            
-            # 3. 소유권 및 권한 설정
+        parent_dir_name = f"{subfolder.replace(os.sep, '_')}_files"
+        target_dir_path = os.path.join(self.links_dir, parent_dir_name)
+        
+        # 현재 마운트되어 있는 파일 목록 읽기
+        current_files = set()
+        if os.path.exists(target_dir_path) and os.path.isdir(target_dir_path):
             try:
-                target_uid = pwd.getpwnam(self.config.SMB_USERNAME).pw_uid
-                target_gid = self.nfs_gid
-                existing_group_name = self._get_group_name(self.nfs_gid)
-                if existing_group_name:
-                    try:
-                        target_gid = grp.getgrnam(existing_group_name).gr_gid
-                    except KeyError:
-                        pass
-                else:
-                    try:
-                        target_gid = grp.getgrnam(self.config.SMB_USERNAME).gr_gid
-                    except KeyError:
-                        pass
+                for name in os.listdir(target_dir_path):
+                    if name == ".tmp":
+                        continue
+                    file_link_path = os.path.join(target_dir_path, name)
+                    if os.path.lexists(file_link_path) and os.path.islink(file_link_path):
+                        current_files.add(name)
+            except Exception as e:
+                logging.warning(f"기존 파일 목록 조회 실패: {e}")
                 
-                os.chown(temp_subdir, target_uid, target_gid)
-                os.lchown(temp_link_path, target_uid, target_gid)
-                os.chmod(temp_subdir, 0o755)
-            except Exception as pe:
-                logging.warning(f"임시 파일 소유권/권한 설정 오류 (무시): {pe}")
-
-            # 4. 원자적 이동으로 공유 디렉토리에 노출
-            unique_folder_name = f"{subfolder}_{file_name}".replace(os.sep, '_')
-            target_dir_path = os.path.join(self.links_dir, unique_folder_name)
-            
-            if os.path.exists(target_dir_path):
-                shutil.rmtree(target_dir_path)
-                
-            os.rename(temp_subdir, target_dir_path)
-            self._active_links.add(unique_folder_name)
-            
-            logging.info(f"파일 심링크 폴더 생성됨: {target_dir_path} -> {source_path}")
-            return True
-        except Exception as e:
-            logging.error(f"파일 심링크 폴더 생성 실패 ({subfolder}/{file_name}): {e}")
-            return False
+        # 신규 파일 추가
+        current_files.add(file_name)
+        
+        return self._atomic_update_files_directory(subfolder, current_files)
 
     def create_symlink(self, subfolder: str) -> bool:
         """
