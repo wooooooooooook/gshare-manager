@@ -986,6 +986,10 @@ class GShareManager:
             for folder in mount_targets:
                 if share_mode == 'file':
                     if file_name:
+                        # 부모 폴더가 이미 공유중인지 체크하여 스킵
+                        if self.smb_manager.is_ancestor_shared(folder):
+                            logging.info(f"부모 폴더 '{folder}'가 이미 공유 중이므로 파일 '{file_name}'의 개별 마운트를 스킵합니다.")
+                            continue
                         self.smb_manager.create_file_symlink(folder, file_name)
                     else:
                         logging.debug("파일 단위 공유 모드이나 파일명이 전달되지 않아 심링크 생성을 생략합니다.")

@@ -56,6 +56,16 @@ class SMBManager:
         link_path = os.path.join(self.links_dir, link_name)
         return os.path.lexists(link_path) and os.path.islink(link_path)
 
+    def is_ancestor_shared(self, subfolder: str) -> bool:
+        """주어진 서브폴더 또는 상위 부모 폴더 중 하나라도 이미 공유(마운트)되어 있는지 확인합니다."""
+        parent = subfolder
+        while parent:
+            if self.is_link_active(parent) or self.is_folder_mount_active(parent):
+                return True
+            parent_parts = parent.rsplit('/', 1)
+            parent = parent_parts[0] if len(parent_parts) > 1 else ""
+        return False
+
     def _init_smb_config(self) -> None:
         """기본 SMB 설정 초기화"""
         try:

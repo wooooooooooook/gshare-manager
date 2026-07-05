@@ -909,6 +909,12 @@ class GshareWebServer:
 
                 # 2-2. 파일 일괄 마운트 (동일 서브폴더에 속한 파일은 한 번에 업데이트)
                 for subfolder, file_names in files_by_subfolder.items():
+                    # 부모 폴더가 이미 공유중인지 체크하여 스킵
+                    if subfolder and self.manager.smb_manager.is_ancestor_shared(subfolder):
+                        logging.info(f"부모 폴더가 이미 공유 중이므로 서브폴더 {subfolder} 내의 {len(file_names)}개 파일 공유를 스킵합니다.")
+                        success_count += len(file_names)
+                        continue
+
                     parent_dir_name = f"{subfolder.replace(os.sep, '_')}_files"
                     target_dir_path = os.path.join(self.manager.smb_manager.links_dir, parent_dir_name)
                     
@@ -1075,6 +1081,14 @@ class GshareWebServer:
                     parts = folder.rsplit('/', 1)
                     subfolder = parts[0] if len(parts) > 1 else ""
                     file_name = parts[1] if len(parts) > 1 else parts[0]
+                    
+                    # 부모 폴더가 이미 공유중인지 체크하여 스킵
+                    if subfolder and self.manager.smb_manager.is_ancestor_shared(subfolder):
+                        logging.info(f"부모 폴더가 이미 공유 중이므로 파일 {file_name} 공유를 스킵합니다.")
+                        self.manager.update_folder_mount_state(folder, True)
+                        self.emit_state_update()
+                        return jsonify({"status": "success", "message": f"부모 폴더가 이미 공유 중이므로 {file_name} 공유를 스킵합니다."})
+
                     success = self.manager.smb_manager.create_file_symlink(subfolder, file_name)
                 else:
                     # 기존 폴더 단위 공유 마운트
