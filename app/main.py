@@ -402,8 +402,11 @@ class FolderMonitor:
                         logging.info(f"VM 시작 조건 충족 - 수정 시간: {last_modified}")
 
             mount_targets = self._filter_mount_targets(changed_folders)
-            for path in mount_targets:
-                self.smb_manager.create_symlink(path)
+            if self.config.SMB_SHARE_MODE == 'folder':
+                for path in mount_targets:
+                    self.smb_manager.create_symlink(path)
+            else:
+                logging.debug("파일 단위 공유 모드이므로 폴링 스캔에 의한 폴더 단위 마운트를 건너뜁니다.")
 
             if full_scan:
                 self._save_scan_cache()
@@ -460,12 +463,15 @@ class FolderMonitor:
             mount_targets = self._filter_mount_targets(recently_modified)
             if mount_targets:
                 logging.info(
-                    f"마지막 VM 종료({datetime.fromtimestamp(self.last_shutdown_time, self.local_tz).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(mount_targets)}개의 링크를 생성합니다.")
-                for folder in mount_targets:
-                    if self.smb_manager.create_symlink(folder):
-                        logging.debug(f"초기 링크 생성 성공: {folder}")
-                    else:
-                        logging.error(f"초기 링크 생성 실패: {folder}")
+                    f"마지막 VM 종료({datetime.fromtimestamp(self.last_shutdown_time, self.local_tz).strftime('%Y-%m-%d %H:%M:%S')}) 이후 수정된 폴더 {len(mount_targets)}개의 링크 처리를 확인합니다.")
+                if self.config.SMB_SHARE_MODE == 'folder':
+                    for folder in mount_targets:
+                        if self.smb_manager.create_symlink(folder):
+                            logging.debug(f"초기 링크 생성 성공: {folder}")
+                        else:
+                            logging.error(f"초기 링크 생성 실패: {folder}")
+                else:
+                    logging.debug("파일 단위 공유 모드이므로 초기 폴더 단위 마운트를 건너뜁니다.")
 
                 # SMB 공유 활성화
                 self.smb_manager.activate_smb_share()

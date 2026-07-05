@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VERSION="2.2.0"
+echo "──────────────────────────────────────────────────"
+echo "NAS Event Relay v${VERSION} starting..."
+echo "──────────────────────────────────────────────────"
+
 WATCH_PATH="${WATCH_PATH:-/watch}"
 GSHARE_EVENT_URL="${GSHARE_EVENT_URL:-}"
 EVENT_AUTH_TOKEN="${EVENT_AUTH_TOKEN:-}"
