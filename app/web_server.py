@@ -397,6 +397,7 @@ class GshareWebServer:
             'SMB_GUEST_OK': 'yes' if smb.get('guest_ok', False) else 'no',
             'SMB_READ_ONLY': 'yes' if smb.get('read_only', True) else 'no',
             'SMB_LINKS_DIR': smb.get('links_dir', '/mnt/gshare_links'),
+            'SMB_SHARE_MODE': smb.get('share_mode', 'folder'),
             'SMB_PORT': smb.get('port', 445),
             'TIMEZONE': yaml_config.get('timezone', 'Asia/Seoul'),
             'LOG_LEVEL': yaml_config.get('log_level', 'INFO'),
@@ -497,6 +498,7 @@ class GshareWebServer:
                 'SMB_GUEST_OK': form_data.get('SMB_GUEST_OK', 'no'),
                 'SMB_READ_ONLY': form_data.get('SMB_READ_ONLY', 'yes'),
                 'SMB_LINKS_DIR': form_data.get('SMB_LINKS_DIR', '/mnt/gshare_links'),
+                'SMB_SHARE_MODE': form_data.get('SMB_SHARE_MODE', 'folder'),
                 'TIMEZONE': form_data.get('TIMEZONE', 'Asia/Seoul'),
                 'LOG_LEVEL': form_data.get('LOG_LEVEL', 'INFO'),
                 'MQTT_BROKER': form_data.get('MQTT_BROKER', ''),
@@ -554,6 +556,7 @@ class GshareWebServer:
 
             payload = request.get_json(silent=True) or {}
             folder = (payload.get('folder') or payload.get('folder_path') or '').strip()
+            file_name = (payload.get('file') or payload.get('file_name') or '').strip()
             token = request.headers.get('X-GShare-Token', '')
             if not token:
                 token = (payload.get('token') or '').strip()
@@ -574,7 +577,7 @@ class GshareWebServer:
             if not folder:
                 return jsonify({"status": "error", "message": "folder 필드가 필요합니다."}), 400
 
-            success, detail = self.manager.handle_folder_event(folder)
+            success, detail = self.manager.handle_folder_event(folder, file_name=file_name)
             if not success:
                 return jsonify({"status": "error", "message": f"이벤트 처리 실패: {detail}"}), 500
 

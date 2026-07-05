@@ -23,6 +23,7 @@ smb:
   guest_ok: false  # 게스트 접근 허용 여부
   read_only: true  # 읽기 전용 여부
   links_dir: "/mnt/gshare_links"  # SMB 링크 디렉토리
+  share_mode: "folder"  # SMB 공유 모드 (folder: 폴더 단위, file: 파일 단위)
 
 # 자격 증명 정보 (보안을 위해 수정 필요)
 credentials:

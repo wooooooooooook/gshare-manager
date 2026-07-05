@@ -247,7 +247,7 @@
                             </div>
                             <div class="form-group">
                                 <label for="monitor_mode">NFS 폴더 감시 방식</label>
-                                <select class="form-control" id="monitor_mode" name="MONITOR_MODE" onchange="toggleMonitorModeFields()">
+                                <select class="form-control" id="monitor_mode" name="MONITOR_MODE" onchange="toggleMonitorModeFields(); validateShareMode();">
                                     <option value="event" {% if form_data.get('MONITOR_MODE', 'event') == 'event' %}selected{% endif %}>이벤트 수신 (event)</option>
                                     <option value="polling" {% if form_data.get('MONITOR_MODE') == 'polling' %}selected{% endif %}>주기 스캔 (polling)</option>
                                 </select>
@@ -346,6 +346,17 @@
                                 <option value="no" {% if form_data.get('SMB_READ_ONLY') != 'yes' %}selected{% endif %}>아니오</option>
                                 <option value="yes" {% if form_data.get('SMB_READ_ONLY') == 'yes' %}selected{% endif %}>예</option>
                             </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="smb_share_mode">SMB 공유 모드</label>
+                            <select class="form-control" id="smb_share_mode" name="SMB_SHARE_MODE" onchange="validateShareMode()">
+                                <option value="folder" {% if form_data.get('SMB_SHARE_MODE', 'folder') == 'folder' %}selected{% endif %}>폴더 단위 공유 (기존 방식)</option>
+                                <option value="file" {% if form_data.get('SMB_SHARE_MODE') == 'file' %}selected{% endif %}>파일 단위 공유 (추가할 방식)</option>
+                            </select>
+                            <small class="form-text text-muted">파일 단위 공유는 NFS 폴더 감시 방식이 '이벤트 수신 (event)'인 경우에만 사용 가능합니다.</small>
+                            <div id="share_mode_warning" class="text-danger mt-1" style="display: none; font-size: 0.9rem;">
+                                <i class="fas fa-exclamation-triangle"></i> 파일 단위 공유는 '이벤트 수신 (event)' 모드에서만 사용할 수 있습니다. 감시 방식을 확인하세요.
+                            </div>
                         </div>
                         <div class="form-group hidden">
                             <label for="smb_links_dir">SMB 링크 디렉토리</label>
@@ -506,6 +517,13 @@
         document.getElementById('setup-form').addEventListener('submit', async function(e) {
             e.preventDefault(); // 항상 먼저 제출을 방지
             saveTranscodingConfig();
+
+            if (!validateShareMode()) {
+                alert("파일 단위 공유는 '이벤트 수신 (event)' 모드에서만 사용할 수 있습니다. 감시 방식을 확인하세요.");
+                $('#setupTabs a[href="#smb"]').tab('show');
+                updateProgressBar('smb-tab');
+                return;
+            }
 
             const firstInvalidField = this.querySelector(':invalid');
             if (firstInvalidField) {
@@ -880,11 +898,30 @@
             }
         }
         
+        function validateShareMode() {
+            const monitorMode = document.getElementById('monitor_mode');
+            const shareMode = document.getElementById('smb_share_mode');
+            const warningDiv = document.getElementById('share_mode_warning');
+            
+            if (!monitorMode || !shareMode || !warningDiv) {
+                return true;
+            }
+            
+            if (shareMode.value === 'file' && monitorMode.value !== 'event') {
+                warningDiv.style.display = 'block';
+                return false;
+            } else {
+                warningDiv.style.display = 'none';
+                return true;
+            }
+        }
+
         // 페이지 로드 시 초기 버튼 상태 설정
         document.addEventListener('DOMContentLoaded', function() {
             updateNextButtonState('proxmox');
             updateNextButtonState('nfs');
             toggleMonitorModeFields();
+            validateShareMode();
             
             // 설정 파일 접기/펼치기 버튼 아이콘 변경
             $('#configImportExport').on('show.bs.collapse', function () {

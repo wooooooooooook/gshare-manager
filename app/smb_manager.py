@@ -4,6 +4,8 @@ import subprocess
 import time
 import pwd
 import grp
+import shutil
+import tempfile
 from config import GshareConfig  # type: ignore
 from typing import Optional, Tuple
 class SMBManager:
@@ -561,10 +563,10 @@ class SMBManager:
 
     def remove_symlink(self, subfolder: str) -> bool:
         """
-        특정 폴더의 심볼릭 링크 제거
+        특정 폴더의 심볼릭 링크 제거 (파일단위 디렉토리도 지원)
 
         Args:
-            subfolder: 제거할 심볼릭 링크 서브폴더 경로
+            subfolder: 제거할 심볼릭 링크 서브폴더 경로 (또는 고유 폴더명)
 
         Returns:
             bool: 제거 성공 여부
@@ -573,33 +575,95 @@ class SMBManager:
             link_name = subfolder.replace(os.sep, '_')
             link_path = os.path.join(self.links_dir, link_name)
             if os.path.exists(link_path):
-                os.remove(link_path)
-                logging.info(f"심볼릭 링크 제거됨: {link_path}")
+                if os.path.islink(link_path):
+                    os.remove(link_path)
+                elif os.path.isdir(link_path):
+                    shutil.rmtree(link_path)
+                logging.info(f"공유 리소스 제거됨: {link_path}")
 
             self._active_links.discard(link_name)
 
             # 성능 최적화: 매 삭제마다 links_dir 전체 스캔(os.listdir + os.path.islink)을
             # 피하고 메모리 캐시(self._active_links)로 남은 링크 여부를 우선 판단합니다.
-            # 측정(로컬 micro-benchmark 기준): 10,000개 링크 환경에서
-            # 디스크 스캔 O(n) 대비 set 길이 확인 O(1)로 체크 시간이 유의미하게 감소합니다.
             remaining_symlinks = len(self._active_links) > 0
 
             # 캐시가 비어있더라도 외부 프로세스가 링크를 생성했을 가능성은 남아있으므로
             # 비활성화 직전 1회만 디스크를 재확인해 정확성을 유지합니다.
             if not remaining_symlinks and os.path.exists(self.links_dir):
                 remaining_symlinks = any(
-                    os.path.islink(os.path.join(self.links_dir, filename))
+                    (os.path.islink(os.path.join(self.links_dir, filename)) or 
+                     (os.path.isdir(os.path.join(self.links_dir, filename)) and filename != ".tmp"))
                     for filename in os.listdir(self.links_dir)
                 )
             
             if not remaining_symlinks:
                 # 모니터링 루프 블로킹을 피하기 위해 지연 대기 없이 즉시 비활성화
-                logging.info("남은 심볼릭 링크가 없어 SMB 공유를 비활성화합니다.")
+                logging.info("남은 공유 리소스가 없어 SMB 공유를 비활성화합니다.")
                 self.deactivate_smb_share()
 
             return True
         except Exception as e:
-            logging.error(f"심볼릭 링크 제거 실패 ({subfolder}): {e}")
+            logging.error(f"공유 리소스 제거 실패 ({subfolder}): {e}")
+            return False
+
+    def create_file_symlink(self, subfolder: str, file_name: str) -> bool:
+        """
+        특정 파일에 대해 고유 디렉토리를 생성하고 심링크를 파일단위로 생성하여 원자적으로 이동합니다.
+
+        Args:
+            subfolder: 파일이 속한 서브폴더 경로
+            file_name: 파일명
+        """
+        try:
+            source_path = os.path.join(self.config.MOUNT_PATH, subfolder, file_name)
+            
+            # 1. 임시 작업 폴더 확보
+            tmp_base = os.path.join(self.links_dir, ".tmp")
+            os.makedirs(tmp_base, exist_ok=True)
+            
+            # 임시 하위 디렉토리 생성
+            temp_subdir = tempfile.mkdtemp(dir=tmp_base)
+            
+            # 2. 임시 폴더에 파일 심링크 생성
+            temp_link_path = os.path.join(temp_subdir, file_name)
+            os.symlink(source_path, temp_link_path)
+            
+            # 3. 소유권 및 권한 설정
+            try:
+                target_uid = pwd.getpwnam(self.config.SMB_USERNAME).pw_uid
+                target_gid = self.nfs_gid
+                existing_group_name = self._get_group_name(self.nfs_gid)
+                if existing_group_name:
+                    try:
+                        target_gid = grp.getgrnam(existing_group_name).gr_gid
+                    except KeyError:
+                        pass
+                else:
+                    try:
+                        target_gid = grp.getgrnam(self.config.SMB_USERNAME).gr_gid
+                    except KeyError:
+                        pass
+                
+                os.chown(temp_subdir, target_uid, target_gid)
+                os.lchown(temp_link_path, target_uid, target_gid)
+                os.chmod(temp_subdir, 0o755)
+            except Exception as pe:
+                logging.warning(f"임시 파일 소유권/권한 설정 오류 (무시): {pe}")
+
+            # 4. 원자적 이동으로 공유 디렉토리에 노출
+            unique_folder_name = f"{subfolder}_{file_name}".replace(os.sep, '_')
+            target_dir_path = os.path.join(self.links_dir, unique_folder_name)
+            
+            if os.path.exists(target_dir_path):
+                shutil.rmtree(target_dir_path)
+                
+            os.rename(temp_subdir, target_dir_path)
+            self._active_links.add(unique_folder_name)
+            
+            logging.info(f"파일 심링크 폴더 생성됨: {target_dir_path} -> {source_path}")
+            return True
+        except Exception as e:
+            logging.error(f"파일 심링크 폴더 생성 실패 ({subfolder}/{file_name}): {e}")
             return False
 
     def create_symlink(self, subfolder: str) -> bool:
@@ -668,28 +732,35 @@ class SMBManager:
 
     def cleanup_all_symlinks(self) -> None:
         """
-        links_dir 디렉토리에 있는 모든 심볼릭 링크를 제거합니다.
+        links_dir 디렉토리에 있는 모든 공유 리소스(심링크 및 디렉토리)를 제거합니다.
         """
         try:
             if os.path.exists(self.links_dir):
                 for filename in os.listdir(self.links_dir):
                     file_path = os.path.join(self.links_dir, filename)
-                    if os.path.islink(file_path):
-                        try:
+                    if filename == ".tmp":
+                        # 임시 디렉토리는 내부만 비움
+                        shutil.rmtree(file_path, ignore_errors=True)
+                        continue
+                    try:
+                        if os.path.islink(file_path):
                             os.remove(file_path)
                             logging.debug(f"심볼릭 링크 제거됨: {file_path}")
-                        except Exception as e:
-                            logging.error(f"심볼릭 링크 제거 실패 ({file_path}): {e}")
+                        elif os.path.isdir(file_path):
+                            shutil.rmtree(file_path)
+                            logging.debug(f"디렉토리 제거됨: {file_path}")
+                    except Exception as e:
+                        logging.error(f"공유 리소스 제거 실패 ({file_path}): {e}")
 
             self._active_links.clear()
-            logging.info(f"모든 심볼릭 링크 제거 완료: {self.links_dir}")
+            logging.info(f"모든 공유 리소스 제거 완료: {self.links_dir}")
 
         except Exception as e:
-            logging.error(f"심볼릭 링크 정리 중 오류 발생: {e}")
+            logging.error(f"공유 리소스 정리 중 오류 발생: {e}")
             
     def _fix_symlinks_ownership(self) -> None:
         """
-        기존 심볼릭 링크의 소유권을 SMB 사용자로 변경합니다.
+        기존 심볼릭 링크 및 하위 파일들의 소유권을 SMB 사용자로 변경합니다.
         """
         try:
             if not os.path.exists(self.links_dir):
@@ -720,10 +791,12 @@ class SMBManager:
                 except KeyError:
                     pass
 
-            logging.debug(f"심볼릭 링크 소유권 변경 시작 (UID={target_uid}, GID={target_gid})")
+            logging.debug(f"공유 리소스 소유권 변경 시작 (UID={target_uid}, GID={target_gid})")
 
-            # 3. 모든 심볼릭 링크 소유권 변경
+            # 3. 모든 공유 리소스 소유권 변경
             for filename in os.listdir(self.links_dir):
+                if filename == ".tmp":
+                    continue
                 file_path = os.path.join(self.links_dir, filename)
                 if os.path.islink(file_path):
                     try:
@@ -732,7 +805,17 @@ class SMBManager:
                         logging.debug(f"심볼릭 링크 소유권 변경됨: {file_path}")
                     except OSError as e:
                         logging.warning(f"심볼릭 링크 소유권 변경 실패 ({file_path}): {e}")
+                elif os.path.isdir(file_path):
+                    try:
+                        os.chown(file_path, target_uid, target_gid)
+                        for sub_file in os.listdir(file_path):
+                            sub_path = os.path.join(file_path, sub_file)
+                            if os.path.islink(sub_path):
+                                os.lchown(sub_path, target_uid, target_gid)
+                        logging.debug(f"디렉토리 내부 소유권 변경됨: {file_path}")
+                    except OSError as e:
+                        logging.warning(f"디렉토리 내부 소유권 변경 실패 ({file_path}): {e}")
 
-            logging.debug(f"모든 심볼릭 링크 소유권 변경 완료: {self.links_dir}")
+            logging.debug(f"모든 공유 리소스 소유권 변경 완료: {self.links_dir}")
         except Exception as e:
-            logging.error(f"심볼릭 링크 소유권 변경 중 오류 발생: {e}")
+            logging.error(f"공유 리소스 소유권 변경 중 오류 발생: {e}")

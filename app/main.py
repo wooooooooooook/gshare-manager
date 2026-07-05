@@ -612,6 +612,7 @@ class GShareManager:
         self.event_relay_last_seen_epoch: Optional[float] = None
         self.event_relay_timeout_seconds = 90
         self.pending_stop_at: Optional[float] = None
+        self.last_file_event_time: Optional[float] = None
 
         # VM 마지막 종료 시간 로드
         self.last_shutdown_time = self._load_last_shutdown_time()
@@ -849,7 +850,7 @@ class GShareManager:
             self.current_state = self.update_state(update_monitored_folders=False)
 
 
-    def handle_folder_event(self, folder_path: str) -> tuple[bool, str]:
+    def handle_folder_event(self, folder_path: str, file_name: Optional[str] = None) -> tuple[bool, str]:
         """NAS 이벤트 기반으로 전달된 폴더를 즉시 처리"""
         if not self.config.EVENT_ENABLED:
             return False, '이벤트 수신 기능이 비활성화되어 있습니다.'
@@ -859,6 +860,12 @@ class GShareManager:
             if not normalized:
                 return False, '폴더 경로가 비어 있습니다.'
 
+            # 방어적 코드: 설정 제약 검증 및 강제 보정
+            share_mode = self.config.SMB_SHARE_MODE
+            if share_mode == 'file' and self.config.MONITOR_MODE != 'event':
+                logging.warning("공유 모드가 'file'이지만 감시 방식이 'event'가 아닙니다. 강제로 'folder' 모드로 처리합니다.")
+                share_mode = 'folder'
+
             event_mtime = time.time()
             self.folder_monitor.previous_mtimes[normalized] = event_mtime
             self.folder_monitor._save_scan_cache()
@@ -866,14 +873,26 @@ class GShareManager:
             if not mount_targets:
                 mount_targets = [normalized]
 
+            # 파일 이벤트 시간 갱신
+            if file_name:
+                self.last_file_event_time = time.time()
+
             for folder in mount_targets:
-                self.smb_manager.create_symlink(folder)
+                if share_mode == 'file':
+                    if file_name:
+                        self.smb_manager.create_file_symlink(folder, file_name)
+                    else:
+                        logging.debug("파일 단위 공유 모드이나 파일명이 전달되지 않아 심링크 생성을 생략합니다.")
+                else:
+                    self.smb_manager.create_symlink(folder)
 
             if mount_targets:
                 if self.smb_manager.check_smb_status():
                     logging.debug('SMB 공유가 이미 활성화되어 있어 재시작을 생략합니다.')
                 elif self.smb_manager.activate_smb_share():
                     self.last_action = f"SMB 공유 활성화(이벤트): {', '.join(mount_targets)}"
+                    if share_mode == 'file' and file_name:
+                        self.last_action += f" -> {file_name}"
 
             if not self.proxmox_api.is_vm_running():
                 self.last_action = 'VM 시작(이벤트)'
@@ -882,7 +901,10 @@ class GShareManager:
                 else:
                     logging.error('VM 시작 실패 (이벤트 기반)')
 
-            return True, ', '.join(mount_targets)
+            ret_detail = ', '.join(mount_targets)
+            if share_mode == 'file' and file_name:
+                ret_detail += f" ({file_name})"
+            return True, ret_detail
         except Exception as e:
             logging.error(f'이벤트 처리 실패: {e}')
             return False, str(e)
@@ -1149,9 +1171,15 @@ class GShareManager:
                                 logging.debug(
                                     f"낮은 CPU 사용량 카운트: {self.low_cpu_count}/{self.config.THRESHOLD_COUNT}")
                                 if self.low_cpu_count >= self.config.THRESHOLD_COUNT:
-                                    self.last_action = "종료 웹훅 전송"
-                                    self._send_shutdown_webhook()
-                                    self.low_cpu_count = 0
+                                    # 마지막 파일 이벤트 수신 후 30분(1800초) 유예 검사
+                                    if self.last_file_event_time is not None and (time.time() - self.last_file_event_time) < 1800:
+                                        remaining = 1800 - (time.time() - self.last_file_event_time)
+                                        logging.info(f"마지막 파일 이벤트 수신 후 30분이 지나지 않아 VM 종료를 유예합니다. (남은 시간: {remaining:.1f}초)")
+                                        self.low_cpu_count = self.config.THRESHOLD_COUNT
+                                    else:
+                                        self.last_action = "종료 웹훅 전송"
+                                        self._send_shutdown_webhook()
+                                        self.low_cpu_count = 0
                             else:
                                 self.low_cpu_count = 0
                 except Exception as e:

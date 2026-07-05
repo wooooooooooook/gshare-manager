@@ -200,8 +200,14 @@ mark_refresh_if_needed() {
 
 post_event() {
   local folder="$1"
+  local file="${2:-}"
   local payload http_code curl_exit attempt max_attempts
-  payload="{\"folder\":\"${folder//\"/\\\"}\"}"
+
+  if [[ -n "$file" ]]; then
+    payload="{\"folder\":\"${folder//\"/\\\"}\",\"file\":\"${file//\"/\\\"}\"}"
+  else
+    payload="{\"folder\":\"${folder//\"/\\\"}\"}"
+  fi
   max_attempts=3
 
   for attempt in $(seq 1 "$max_attempts"); do
@@ -229,7 +235,7 @@ post_event() {
     fi
   done
 
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [warn] notify request failed folder=$folder curl_exit=$curl_exit http_code=${http_code:-000}" >&2
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [warn] notify request failed folder=$folder file=$file curl_exit=$curl_exit http_code=${http_code:-000}" >&2
   return 1
 }
 
@@ -325,8 +331,10 @@ while true; do
 
       if [[ -d "$changed" ]]; then
         folder="$changed"
+        file=""
       else
         folder="$(dirname "$changed")"
+        file="$(basename "$changed")"
       fi
 
       if is_excluded_path "$folder" "$EXCLUDED_DIR_NAMES"; then
@@ -338,10 +346,10 @@ while true; do
         rel="."
       fi
 
-      if post_event "$rel"; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] notified folder=$rel"
+      if post_event "$rel" "$file"; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] notified folder=$rel file=$file"
       else
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [warn] notify failed folder=$rel"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [warn] notify failed folder=$rel file=$file"
       fi
       continue
     fi

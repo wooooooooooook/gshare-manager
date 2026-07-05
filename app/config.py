@@ -61,6 +61,8 @@ class GshareConfig:
     SMB_READ_ONLY: bool
     ## SMB 링크 디렉토리
     SMB_LINKS_DIR: str
+    ## SMB 공유 모드 (folder: 폴더 단위, file: 파일 단위)
+    SMB_SHARE_MODE: str = 'folder'
     
     # 로그 시간대
     TIMEZONE: str = 'Asia/Seoul'
@@ -191,6 +193,7 @@ class GshareConfig:
             'SMB_GUEST_OK': yaml_config['smb'].get('guest_ok', False),
             'SMB_READ_ONLY': yaml_config['smb'].get('read_only', True),
             'SMB_LINKS_DIR': yaml_config['smb'].get('links_dir', '/mnt/gshare_links'),
+            'SMB_SHARE_MODE': yaml_config['smb'].get('share_mode', 'folder'),
             'SMB_PORT': yaml_config['smb'].get('port') or 445,
             'TIMEZONE': yaml_config.get('timezone') or 'Asia/Seoul',
             'LOG_LEVEL': log_level,
@@ -298,6 +301,8 @@ class GshareConfig:
             yaml_config['smb']['read_only'] = config_dict['SMB_READ_ONLY'] == 'yes'
         if 'SMB_LINKS_DIR' in config_dict:
             yaml_config['smb']['links_dir'] = config_dict['SMB_LINKS_DIR']
+        if 'SMB_SHARE_MODE' in config_dict:
+            yaml_config['smb']['share_mode'] = config_dict['SMB_SHARE_MODE']
         if 'SMB_PORT' in config_dict and str(config_dict['SMB_PORT']).strip():
             yaml_config['smb']['port'] = int(config_dict['SMB_PORT'])
         if 'TIMEZONE' in config_dict:
@@ -411,7 +416,7 @@ class GshareConfig:
         return {
             'proxmox': {'node_name': '', 'vm_id': '', 'android_vm_ip': '', 'timeout': 5, 'cpu': {'threshold': 10.0, 'check_interval': 60, 'threshold_count': 3}},
             'mount': {'path': '/mnt/gshare', 'folder_size_timeout': 30},
-            'smb': {'share_name': 'gshare', 'comment': 'GShare SMB 공유', 'guest_ok': False, 'read_only': True, 'links_dir': '/mnt/gshare_links', 'port': 445},
+            'smb': {'share_name': 'gshare', 'comment': 'GShare SMB 공유', 'guest_ok': False, 'read_only': True, 'links_dir': '/mnt/gshare_links', 'port': 445, 'share_mode': 'folder'},
             'nfs': {'path': ''},
             'mqtt': {'broker': '', 'port': 1883, 'topic_prefix': 'gshare', 'ha_discovery_prefix': 'homeassistant'},
             'monitoring': {'mode': 'event'},
