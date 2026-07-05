@@ -2348,6 +2348,9 @@ function loadFolderFiles(nodePath, filesContainer) {
                     const isSelected = selectedFiles.has(filePath);
                     const selectedClass = isSelected ? 'selected-file' : '';
 
+                    const isParentShared = isAncestorMountedInState(filePath);
+                    const btnHiddenClass = isParentShared ? 'hidden' : '';
+
                     filesHtml += `
                         <div class="file-item flex justify-between items-center py-1 px-2 hover:bg-gray-50 rounded-lg ml-6 cursor-pointer ${selectedClass}" 
                              data-file-path="${filePath}" 
@@ -2376,7 +2379,7 @@ function loadFolderFiles(nodePath, filesContainer) {
                             <!-- 파일 마운트 버튼 -->
                             <div class="flex-shrink-0">
                                 <button onclick="event.stopPropagation(); toggleMount('${filePath}', '${action}')" 
-                                    class="toggle-btn text-[10px] px-2 py-0.5 rounded ${buttonClass} transition-colors duration-200">
+                                    class="toggle-btn text-[10px] px-2 py-0.5 rounded ${buttonClass} transition-colors duration-200 ${btnHiddenClass}">
                                     ${buttonText}
                                 </button>
                             </div>
@@ -2431,6 +2434,25 @@ function updateFolderTreeContainer(containerId, folderData) {
     }
 }
 
+// 주어진 파일 경로의 상위 부모 폴더 중 마운트되어 공유 중인 폴더가 있는지 판별하는 헬퍼 함수
+function isAncestorMountedInState(filePath) {
+    if (!currentSystemState || !currentSystemState.monitored_folders) return false;
+    const parts = filePath.split('/');
+    parts.pop(); // 파일명 제거
+    let parent = parts.join('/');
+    
+    while (parent) {
+        const folderState = currentSystemState.monitored_folders[parent];
+        if (folderState && folderState.is_mounted) {
+            return true;
+        }
+        const parentParts = parent.split('/');
+        parentParts.pop();
+        parent = parentParts.join('/');
+    }
+    return false;
+}
+
 // DOM에 렌더링된 폴더 및 파일들의 마운트 상태만 직접 업데이트하는 함수
 function updateMountStatesInDOM() {
     if (!currentSystemState || !currentSystemState.monitored_folders) return;
@@ -2441,6 +2463,18 @@ function updateMountStatesInDOM() {
     document.querySelectorAll('.file-item').forEach(element => {
         const filePath = element.dataset.filePath;
         const fileState = monitoredFolders[filePath];
+        
+        // 상위 부모 폴더가 공유 중인 경우 하위 파일의 마운트 버튼 비활성화/숨김 처리
+        const isParentShared = isAncestorMountedInState(filePath);
+        const button = element.querySelector('.toggle-btn');
+        if (button) {
+            if (isParentShared) {
+                button.classList.add('hidden');
+            } else {
+                button.classList.remove('hidden');
+            }
+        }
+
         if (fileState) {
             const isMounted = fileState.is_mounted;
             
@@ -2448,8 +2482,7 @@ function updateMountStatesInDOM() {
             element.dataset.mounted = isMounted ? 'true' : 'false';
             
             // 마운트 버튼 업데이트
-            const button = element.querySelector('.toggle-btn');
-            if (button) {
+            if (button && !isParentShared) {
                 const buttonText = isMounted ? '마운트 해제' : '마운트';
                 if (button.innerText !== buttonText) {
                     button.innerText = buttonText;
