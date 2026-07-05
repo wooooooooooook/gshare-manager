@@ -2375,7 +2375,6 @@ function loadFolderFiles(nodePath, filesContainer) {
 
 // 시간 표시 토글 도우미
 function toggleTimeText(event, element) {
-    event.stopPropagation();
     element.querySelector('.time-string').classList.toggle('hidden');
     element.querySelector('.readable-time').classList.toggle('hidden');
 }
