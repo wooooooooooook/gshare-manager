@@ -437,13 +437,29 @@ class FolderMonitor:
             # mtime가 있는 항목 우선, 이후 최신순, 마지막으로 경로명 순 정렬
             return (0 if mtime is not None else 1, -(mtime or 0.0), path)
 
+        # 파일 단위 공유 모드이고 활성 링크가 있는 경우, 각 활성 링크가 실제로 가리키는 가장 구체적인(가장 긴) 감시 폴더를 구합니다.
+        active_folders = set()
+        if self.config.SMB_SHARE_MODE == 'file' and hasattr(self.smb_manager, '_active_links'):
+            for item in self.smb_manager._active_links:
+                longest_match = None
+                longest_len = -1
+                for path in folders_with_mtime:
+                    link_name = path.replace(os.sep, '_')
+                    if item.startswith(link_name + '_'):
+                        if len(link_name) > longest_len:
+                            longest_len = len(link_name)
+                            longest_match = path
+                if longest_match:
+                    active_folders.add(longest_match)
+
         monitored_folders = {}
         for path, mtime in sorted(folders_with_mtime.items(), key=sort_key):
             # 실제 심볼릭 링크가 존재하는지 확인 (메모리 캐시 사용)
             is_mounted = False
-            link_name = path.replace(os.sep, '_')
+            is_folder_mount = False
             if self.config.SMB_SHARE_MODE == 'file':
-                is_mounted = any(item.startswith(link_name + '_') for item in self.smb_manager._active_links)
+                is_folder_mount = self.smb_manager.is_link_active(path)
+                is_mounted = is_folder_mount or (path in active_folders)
             else:
                 is_mounted = self.smb_manager.is_link_active(path)
 
@@ -451,7 +467,8 @@ class FolderMonitor:
 
             monitored_folders[path] = {
                 'mtime': mtime_str,
-                'is_mounted': is_mounted
+                'is_mounted': is_mounted,
+                'is_folder_mount': is_folder_mount
             }
 
         # 파일 모드일 때 현재 실제 활성화되어 있는 개별 파일 심링크 폴더들을 목록에 동적 주입해 줍니다.
@@ -459,12 +476,43 @@ class FolderMonitor:
             for active_link in self.smb_manager._active_links:
                 if active_link == ".tmp":
                     continue
+                # 만약 active_link 자체가 감시 대상 폴더 중 하나와 정확히 일치하면, 파일 마운트가 아니라 폴더 마운트이므로 무시합니다.
+                is_direct_folder = False
+                for path in folders_with_mtime:
+                    if path.replace(os.sep, '_') == active_link:
+                        is_direct_folder = True
+                        break
+                if is_direct_folder:
+                    continue
+
                 # 감시 목록 상의 원래 폴더 형식이 아니면 개별 파일 가상 폴더로 간주하여 목록에 추가
-                if active_link not in monitored_folders:
-                    monitored_folders[active_link] = {
-                        'mtime': '-',
-                        'is_mounted': True
-                    }
+                # 이때, active_link (예: MobileBackup_영욱의 Z Flip6_DCIM_2026_photo.jpg)를 실제 파일 경로 형식으로 변환하여 추가합니다.
+                longest_match = None
+                longest_len = -1
+                for path in folders_with_mtime:
+                    link_name = path.replace(os.sep, '_')
+                    if active_link.startswith(link_name + '_'):
+                        if len(link_name) > longest_len:
+                            longest_len = len(link_name)
+                            longest_match = path
+                
+                if longest_match:
+                    file_name = active_link[longest_len + 1:]  # link_name + '_' 이후가 파일명
+                    file_path = f"{longest_match}/{file_name}"
+                    if file_path not in monitored_folders:
+                        monitored_folders[file_path] = {
+                            'mtime': '-',
+                            'is_mounted': True,
+                            'is_file': True
+                        }
+                else:
+                    # 매칭되는 폴더가 없는 극히 예외적인 경우 기존 방식 유지
+                    if active_link not in monitored_folders:
+                        monitored_folders[active_link] = {
+                            'mtime': '-',
+                            'is_mounted': True,
+                            'is_file': True
+                        }
 
         return monitored_folders
 
@@ -848,8 +896,9 @@ class GShareManager:
                     logging.debug(f"폴더 '{folder_path}'의 마운트 상태가 '{is_mounted}'로 업데이트되었습니다.")
                 else:
                     logging.debug(f"폴더 '{folder_path}'가 monitored_folders에 없어 전체 상태를 업데이트합니다.")
-                    # 폴더가 monitored_folders에 없는 경우, 전체 상태 업데이트 (monitored_folders는 업데이트 안 함)
-                    self.current_state = self.update_state(update_monitored_folders=False)
+                    # 폴더가 monitored_folders에 없는 경우 (예: 파일 단위 마운트 시 파일 경로가 넘어온 경우),
+                    # 전체 상태를 업데이트하면서 monitored_folders의 마운트 상태도 다시 계산합니다.
+                    self.current_state = self.update_state(update_monitored_folders=True)
             else:
                 logging.debug("current_state가 초기화되지 않아 전체 상태를 업데이트합니다.")
                 # current_state가 초기화되지 않은 경우, 전체 상태 업데이트

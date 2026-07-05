@@ -1255,7 +1255,14 @@ function updateFolderList(sortedFolders) {
     for (let i = 0; i < sortedFolders.length; i++) {
         const folderEntry = sortedFolders[i];
         if (folderEntry[1].is_mounted) {
-            mountedFolders[mountedCount++] = folderEntry;
+            // 파일 공유 모드일 때는 개별 파일 항목('is_file') 또는 직접 폴더 마운트된 항목('is_folder_mount')만 GShare(SMB) 공유 목록에 표시합니다.
+            if (window.SMB_SHARE_MODE === 'file') {
+                if (folderEntry[1].is_file || folderEntry[1].is_folder_mount) {
+                    mountedFolders[mountedCount++] = folderEntry;
+                }
+            } else {
+                mountedFolders[mountedCount++] = folderEntry;
+            }
         } else {
             unmountedFolders[unmountedCount++] = folderEntry;
         }
@@ -1270,6 +1277,9 @@ function updateFolderList(sortedFolders) {
         console.log('마운트된 폴더 갯수:', mountedCount);
     }
 
+    // NFS 패널 트리에는 파일 항목은 제외하고 폴더 노드들만 전달합니다.
+    const foldersOnly = sortedFolders.filter(entry => !entry[1].is_file);
+
     // 총 폴더 수가 많은 경우 비동기 처리 최적화
     const isBatchProcessingNeeded = sortedFolders.length > 200;
 
@@ -1278,7 +1288,7 @@ function updateFolderList(sortedFolders) {
         // 비동기적으로 컨테이너 업데이트 (타이밍 조정)
         setTimeout(() => {
             // NFS 패널에는 전체 감시 폴더를 트리 구조로 표시
-            updateFolderTreeContainer('monitoredFoldersContainer', sortedFolders);
+            updateFolderTreeContainer('monitoredFoldersContainer', foldersOnly);
 
             // 다음 프레임에서 SMB 패널 업데이트
             setTimeout(() => {
@@ -1294,7 +1304,7 @@ function updateFolderList(sortedFolders) {
         }, 0);
     } else {
         // 적은 수의 폴더는 일반적인 방식으로 처리
-        updateFolderTreeContainer('monitoredFoldersContainer', sortedFolders);
+        updateFolderTreeContainer('monitoredFoldersContainer', foldersOnly);
         updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
 
         // 상태 표시기 숨기기
@@ -1402,10 +1412,20 @@ function updateFolderContainer(containerId, folderData, action) {
                 // 캐시된 시간 가져오기
                 const cachedTimeAgo = info.mtime === '-' ? '수정시간 수집 중' : getCachedTimeAgo(info.mtime);
 
+                let displayName = folder;
+                let subPathHtml = '';
+                if (window.SMB_SHARE_MODE === 'file' && info.is_file) {
+                    const parts = folder.split('/');
+                    displayName = parts[parts.length - 1];
+                    const dirPath = parts.slice(0, -1).join('/');
+                    subPathHtml = `<span class="text-[10px] text-gray-400 block truncate mt-0.5">${dirPath}</span>`;
+                }
+
                 newItem.innerHTML = `
                     <div class="flex-1 overflow-hidden">
                         <div class="folder-name-wrapper min-w-0 text-sm mb-1 font-medium text-gray-800">
-                            <span class="folder-name-text">${folder}</span>
+                            <span class="folder-name-text">${displayName}</span>
+                            ${subPathHtml}
                         </div>
                         <div class="flex items-center toggle-text text-xs text-gray-500">
                             <svg class="w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
