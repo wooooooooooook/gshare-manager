@@ -230,6 +230,8 @@ class GshareWebServer:
         self.app.add_url_rule('/shutdown_vm', 'shutdown_vm', self.shutdown_vm)
         self.app.add_url_rule('/toggle_mount/<path:folder>',
                               'toggle_mount', self.toggle_mount)
+        self.app.add_url_rule('/api/files/<path:folder_path>',
+                              'get_folder_files', self.get_folder_files)
         # SMB 토글 엔드포인트를 두 개로 분리
         self.app.add_url_rule('/activate_smb', 'activate_smb', self.activate_smb)
         self.app.add_url_rule('/deactivate_smb', 'deactivate_smb', self.deactivate_smb)
@@ -855,21 +857,37 @@ class GshareWebServer:
             return jsonify({"status": "error", "message": f"VM stop API 처리 실패: {str(e)}"}), 500
 
     def toggle_mount(self, folder):
-        """마운트 토글"""
+        """마운트 토글 (폴더 및 파일 모두 지원)"""
         try:
             if self.manager is None:
                 return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
 
-            # 실제 심볼릭 링크가 존재하는지 확인
+            # 실제 심볼릭 링크(또는 파일 공유 디렉토리)가 존재하는지 확인
             links_dir = self.manager.smb_manager.links_dir
-            symlink_path = os.path.join(links_dir, folder.replace(os.sep, '_'))
-            is_mounted = os.path.exists(
-                symlink_path) and os.path.islink(symlink_path)
+            normalized_folder = folder.replace(os.sep, '_')
+            target_path = os.path.join(links_dir, normalized_folder)
+            
+            # 마운트 여부 판단
+            is_mounted = False
+            if os.path.exists(target_path):
+                if os.path.islink(target_path):
+                    # 폴더 단위 마운트인 경우
+                    is_mounted = True
+                elif os.path.isdir(target_path):
+                    # 파일 단위 마운트인 경우 (디렉토리 내부에 실제 파일 링크가 있음)
+                    parts = folder.split('/')
+                    file_name = parts[-1] if parts else ""
+                    link_file = os.path.join(target_path, file_name)
+                    if os.path.exists(link_file) and os.path.islink(link_file):
+                        is_mounted = True
+
+            # 실제 대상이 파일인지 폴더인지 구분
+            source_path = os.path.join(self.manager.config.MOUNT_PATH, folder)
+            is_target_file = os.path.isfile(source_path)
 
             if is_mounted:
                 # 마운트 해제
                 if self.manager.smb_manager.remove_symlink(folder):
-                    # 마운트 상태만 업데이트 (효율적인 상태 업데이트)
                     self.manager.update_folder_mount_state(folder, False)
                     self.emit_state_update()
                     return jsonify({"status": "success", "message": f"{folder} 마운트가 해제되었습니다."})
@@ -877,8 +895,18 @@ class GshareWebServer:
                     return jsonify({"status": "error", "message": f"{folder} 마운트 해제 실패"}), 500
             else:
                 # 마운트 활성화
-                if self.manager.smb_manager.create_symlink(folder) and self.manager.smb_manager.activate_smb_share():
-                    # 마운트 상태만 업데이트 (효율적인 상태 업데이트)
+                success = False
+                if is_target_file:
+                    # 파일 단위 공유 모드 시 파일 심링크 생성
+                    parts = folder.rsplit('/', 1)
+                    subfolder = parts[0] if len(parts) > 1 else ""
+                    file_name = parts[1] if len(parts) > 1 else parts[0]
+                    success = self.manager.smb_manager.create_file_symlink(subfolder, file_name)
+                else:
+                    # 기존 폴더 단위 공유 마운트
+                    success = self.manager.smb_manager.create_symlink(folder)
+
+                if success and self.manager.smb_manager.activate_smb_share():
                     self.manager.update_folder_mount_state(folder, True)
                     self.emit_state_update()
                     return jsonify({"status": "success", "message": f"{folder} 마운트가 활성화되었습니다."})
@@ -886,6 +914,47 @@ class GshareWebServer:
                     return jsonify({"status": "error", "message": f"{folder} 마운트 활성화 실패"}), 500
         except Exception as e:
             return jsonify({"status": "error", "message": f"마운트 상태 변경 실패: {str(e)}"}), 500
+
+    def get_folder_files(self, folder_path):
+        """특정 폴더 내의 파일 목록 및 각 파일의 마운트 상태 반환"""
+        try:
+            if self.manager is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
+
+            abs_path = os.path.join(self.manager.config.MOUNT_PATH, folder_path)
+            if not os.path.exists(abs_path) or not os.path.isdir(abs_path):
+                return jsonify({"status": "error", "message": "존재하지 않거나 폴더가 아닙니다."}), 400
+
+            files = []
+            links_dir = self.manager.smb_manager.links_dir
+
+            for name in os.listdir(abs_path):
+                full_file_path = os.path.join(abs_path, name)
+                if os.path.isfile(full_file_path):
+                    # 마운트 상태 체크
+                    unique_folder_name = f"{folder_path}_{name}".replace(os.sep, '_')
+                    target_dir_path = os.path.join(links_dir, unique_folder_name)
+
+                    is_mounted = False
+                    if os.path.exists(target_dir_path) and os.path.isdir(target_dir_path):
+                        link_file = os.path.join(target_dir_path, name)
+                        if os.path.exists(link_file) and os.path.islink(link_file):
+                            is_mounted = True
+
+                    mtime = os.path.getmtime(full_file_path)
+                    mtime_str = datetime.fromtimestamp(mtime, self.manager.local_tz).strftime('%Y-%m-%d %H:%M:%S')
+
+                    files.append({
+                        "name": name,
+                        "is_mounted": is_mounted,
+                        "mtime": mtime_str
+                    })
+
+            # 알파벳 오름차순 정렬
+            files.sort(key=lambda x: x['name'])
+            return jsonify({"status": "success", "files": files})
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
 
     def activate_smb(self):
         """SMB 활성화"""

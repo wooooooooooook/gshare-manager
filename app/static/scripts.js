@@ -1277,8 +1277,8 @@ function updateFolderList(sortedFolders) {
     if (isBatchProcessingNeeded) {
         // 비동기적으로 컨테이너 업데이트 (타이밍 조정)
         setTimeout(() => {
-            // NFS 패널에는 마운트되지 않은 폴더만 표시 (마운트 가능한 목록)
-            updateFolderContainer('monitoredFoldersContainer', unmountedFolders, 'mount');
+            // NFS 패널에는 전체 감시 폴더를 트리 구조로 표시
+            updateFolderTreeContainer('monitoredFoldersContainer', sortedFolders);
 
             // 다음 프레임에서 SMB 패널 업데이트
             setTimeout(() => {
@@ -1294,7 +1294,7 @@ function updateFolderList(sortedFolders) {
         }, 0);
     } else {
         // 적은 수의 폴더는 일반적인 방식으로 처리
-        updateFolderContainer('monitoredFoldersContainer', unmountedFolders, 'mount');
+        updateFolderTreeContainer('monitoredFoldersContainer', sortedFolders);
         updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
 
         // 상태 표시기 숨기기
@@ -2056,3 +2056,309 @@ document.addEventListener('DOMContentLoaded', function() {
     // 30초마다 이미지 갱신
     setInterval(fetchImages, 30000);
 });
+
+// ==================== From NAS 폴더 트리 뷰 기능 추가 ====================
+
+// 트리 노드의 접힘/펼침 상태 저장 (key: 노드 경로, value: boolean)
+let treeNodeStates = {};
+
+// 평면 정렬 목록을 계층 트리로 변환
+function buildFolderTree(folders) {
+    const root = {};
+    for (const [folderPath, info] of folders) {
+        const parts = folderPath.split('/');
+        let current = root;
+
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            if (!current[part]) {
+                current[part] = {
+                    name: part,
+                    children: {},
+                    isLeaf: false,
+                    folderPath: parts.slice(0, i + 1).join('/'),
+                    info: null,
+                    fullPath: parts.slice(0, i + 1).join('/')
+                };
+            }
+            if (i === parts.length - 1) {
+                current[part].isLeaf = true;
+                current[part].info = info;
+            }
+            current = current[part].children;
+        }
+    }
+    return root;
+}
+
+// 재귀적으로 트리를 HTML로 변환
+function renderTree(node, depth = 0, pathPrefix = '') {
+    let html = '';
+    const keys = Object.keys(node).sort();
+
+    for (const key of keys) {
+        const item = node[key];
+        const hasChildren = Object.keys(item.children).length > 0;
+        const nodePath = item.fullPath;
+        const isFileShareMode = window.SMB_SHARE_MODE === 'file';
+
+        if (treeNodeStates[nodePath] === undefined) {
+            // 기본 상태는 열림
+            treeNodeStates[nodePath] = true;
+        }
+        const isOpen = treeNodeStates[nodePath];
+        const folderId = `tree-folder-${encodeURIComponent(nodePath).replace(/%/g, '_')}`;
+
+        // 마운트 뱃지 & 마운트 상태 버튼 결정
+        let buttonHtml = '';
+        let badgeHtml = '';
+
+        if (item.info) {
+            const isMounted = item.info.is_mounted;
+            const buttonText = isMounted ? '마운트 해제' : '마운트';
+            const buttonClass = isMounted ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-green-50 text-green-700 hover:bg-green-100';
+            const action = isMounted ? 'unmount' : 'mount';
+
+            buttonHtml = `
+                <button onclick="toggleMount('${item.fullPath}', '${action}')" 
+                    class="toggle-btn text-[11px] px-2 py-0.5 rounded ${buttonClass} transition-colors duration-200">
+                    ${buttonText}
+                </button>
+            `;
+
+            if (isMounted) {
+                badgeHtml = `<span class="px-1.5 py-0.5 text-[9px] font-semibold bg-green-100 text-green-800 rounded-full flex-shrink-0">ON</span>`;
+            }
+        }
+
+        html += `<div class="tree-node-wrapper" data-node-path="${nodePath}">`;
+        
+        // 노드 행 (Row)
+        html += `
+            <div class="tree-node-row flex justify-between items-center py-1.5 px-2 hover:bg-gray-50 rounded-lg transition-colors duration-150" style="padding-left: ${depth * 16 + 8}px">
+                <div class="flex items-center gap-2 overflow-hidden flex-1">
+                    <!-- 토글 화살표 (자식이 있거나 파일 공유 모드에서 리프 노드인 경우 표시) -->
+                    ${(hasChildren || (isFileShareMode && item.isLeaf)) ? `
+                        <button onclick="toggleTreeNode(event, '${nodePath}')" class="focus:outline-none p-1 hover:bg-gray-200 rounded transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}">
+                            <svg class="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"></path>
+                            </svg>
+                        </button>
+                    ` : `
+                        <div class="w-5.5"></div>
+                    `}
+                    
+                    <!-- 아이콘 (자식이 있는 노드는 📂, 리프 폴더 노드는 📁) -->
+                    <span class="text-blue-500 flex-shrink-0">
+                        ${hasChildren ? `
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                            </svg>
+                        ` : `
+                            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1a2 2 0 002 2h2a2 2 0 012 2v3a2 2 0 01-2 2H5z"></path>
+                            </svg>
+                        `}
+                    </span>
+                    
+                    <!-- 이름, 시간 정보 및 마운트 완료 뱃지 -->
+                    <div class="flex flex-col min-w-0 flex-1">
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-sm font-medium text-gray-800 truncate">${item.name}</span>
+                            ${badgeHtml}
+                        </div>
+                        ${(item.isLeaf && item.info) ? `
+                            <div class="flex items-center text-[10px] text-gray-400 toggle-text cursor-pointer mt-0.5" onclick="toggleTimeText(event, this)">
+                                <span class="readable-time">${item.info.mtime === '-' ? '수정시간 수집 중' : get_time_ago(item.info.mtime)}</span>
+                                <span class="hidden time-string">${item.info.mtime}</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+                
+                <!-- 마운트/마운트해제 버튼 -->
+                <div class="flex-shrink-0">
+                    ${buttonHtml}
+                </div>
+            </div>
+        `;
+
+        // 파일 트리 가상 컨테이너 (파일 모드 & 리프 노드인 경우 하위에 파일 추가)
+        let fileContainerHtml = '';
+        if (isFileShareMode && item.isLeaf) {
+            fileContainerHtml = `
+                <div class="tree-files-container ${isOpen ? '' : 'hidden'} pl-4" id="files-${folderId}" data-loaded="false">
+                    <!-- 파일 목록 비동기 삽입 구역 -->
+                    <div class="text-[11px] text-gray-400 py-1 px-4 flex items-center gap-1">
+                        <svg class="animate-spin h-3.5 w-3.5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        파일 목록 불러오는 중...
+                    </div>
+                </div>
+            `;
+        }
+
+        // 자식 폴더 렌더링
+        if (hasChildren) {
+            html += `
+                <div class="tree-children-container ${isOpen ? '' : 'hidden'}" id="children-${folderId}">
+                    ${renderTree(item.children, depth + 1, nodePath)}
+                    ${fileContainerHtml}
+                </div>
+            `;
+        } else if (fileContainerHtml) {
+            html += fileContainerHtml;
+        }
+
+        html += `</div>`;
+    }
+    return html;
+}
+
+// 트리 노드 접기/펴기 및 파일 로딩
+function toggleTreeNode(event, nodePath) {
+    event.stopPropagation();
+    const isOpen = treeNodeStates[nodePath];
+    treeNodeStates[nodePath] = !isOpen;
+
+    const folderId = `tree-folder-${encodeURIComponent(nodePath).replace(/%/g, '_')}`;
+    const childrenContainer = document.getElementById(`children-${folderId}`);
+    const filesContainer = document.getElementById(`files-${folderId}`);
+    const button = event.currentTarget;
+
+    // 1. 화살표 회전 토글
+    if (!isOpen) {
+        button.classList.add('rotate-90');
+    } else {
+        button.classList.remove('rotate-90');
+    }
+
+    // 2. 하위 폴더 컨테이너 토글
+    if (childrenContainer) {
+        if (!isOpen) {
+            childrenContainer.classList.remove('hidden');
+        } else {
+            childrenContainer.classList.add('hidden');
+        }
+    }
+
+    // 3. 하위 파일 컨테이너 토글 & 파일 목록 로드
+    if (filesContainer) {
+        if (!isOpen) {
+            filesContainer.classList.remove('hidden');
+            // 로딩 전이거나 강제 새로고침 필요 시 파일 목록 로드
+            if (filesContainer.dataset.loaded === 'false') {
+                loadFolderFiles(nodePath, filesContainer);
+            }
+        } else {
+            filesContainer.classList.add('hidden');
+        }
+    }
+}
+
+// 특정 폴더 내부 파일 목록 비동기 로딩 및 렌더링
+function loadFolderFiles(nodePath, filesContainer) {
+    fetch(`/api/files/${encodeURIComponent(nodePath)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                filesContainer.dataset.loaded = 'true';
+                if (!data.files || data.files.length === 0) {
+                    filesContainer.innerHTML = `
+                        <div class="text-[11px] text-gray-500 py-1 px-4 italic">
+                            파일이 없습니다.
+                        </div>
+                    `;
+                    return;
+                }
+
+                let filesHtml = '';
+                data.files.forEach(file => {
+                    const filePath = `${nodePath}/${file.name}`;
+                    const isMounted = file.is_mounted;
+                    const buttonText = isMounted ? '마운트 해제' : '마운트';
+                    const buttonClass = isMounted ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-green-50 text-green-700 hover:bg-green-100';
+                    const action = isMounted ? 'unmount' : 'mount';
+                    const badgeHtml = isMounted ? `<span class="px-1.5 py-0.5 text-[9px] font-semibold bg-green-100 text-green-800 rounded-full">ON</span>` : '';
+
+                    filesHtml += `
+                        <div class="file-item flex justify-between items-center py-1 px-2 hover:bg-gray-50 rounded-lg ml-6" style="contain: content;">
+                            <div class="flex items-center gap-2 overflow-hidden flex-1">
+                                <!-- 파일 아이콘 (📄) -->
+                                <span class="text-gray-400 flex-shrink-0">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                                    </svg>
+                                </span>
+                                <!-- 파일명 및 마운트 상태 뱃지 -->
+                                <div class="flex flex-col min-w-0 flex-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-xs text-gray-700 truncate">${file.name}</span>
+                                        ${badgeHtml}
+                                    </div>
+                                    <div class="flex items-center text-[9px] text-gray-400 toggle-text cursor-pointer mt-0.5" onclick="toggleTimeText(event, this)">
+                                        <span class="readable-time">${file.mtime === '-' ? '정보없음' : get_time_ago(file.mtime)}</span>
+                                        <span class="hidden time-string">${file.mtime}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- 파일 마운트 버튼 -->
+                            <div class="flex-shrink-0">
+                                <button onclick="toggleMount('${filePath}', '${action}')" 
+                                    class="toggle-btn text-[10px] px-2 py-0.5 rounded ${buttonClass} transition-colors duration-200">
+                                    ${buttonText}
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+                filesContainer.innerHTML = filesHtml;
+            } else {
+                filesContainer.innerHTML = `<div class="text-[11px] text-red-500 py-1 px-4">에러: ${data.message}</div>`;
+            }
+        })
+        .catch(error => {
+            console.error('파일 목록 로딩 중 에러:', error);
+            filesContainer.innerHTML = `<div class="text-[11px] text-red-500 py-1 px-4">파일 목록 로드 실패</div>`;
+        });
+}
+
+// 시간 표시 토글 도우미
+function toggleTimeText(event, element) {
+    event.stopPropagation();
+    element.querySelector('.time-string').classList.toggle('hidden');
+    element.querySelector('.readable-time').classList.toggle('hidden');
+}
+
+// From NAS 컨테이너 렌더 갱신 함수
+function updateFolderTreeContainer(containerId, folderData) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // 로딩바 숨기기
+    const loadingElement = document.getElementById('loadingFolders');
+    if (loadingElement) {
+        loadingElement.style.display = 'none';
+    }
+
+    // 폴더 데이터 정리 및 트리 구성
+    const tree = buildFolderTree(folderData);
+    
+    // HTML 렌더링 및 주입
+    container.innerHTML = renderTree(tree);
+    
+    // 비동기 렌더링된 화살표 노드들 중 현재 활성화된(열려있는) 파일 컨테이너 갱신 처리
+    const isFileShareMode = window.SMB_SHARE_MODE === 'file';
+    if (isFileShareMode) {
+        container.querySelectorAll('.tree-files-container').forEach(filesContainer => {
+            const nodePath = filesContainer.closest('.tree-node-wrapper').dataset.nodePath;
+            const isOpen = treeNodeStates[nodePath];
+            // 열려있는 경우 상태 업데이트에 맞춰 다시 백엔드 파일 상태 동기화
+            if (isOpen) {
+                loadFolderFiles(nodePath, filesContainer);
+            }
+        });
+    }
+}

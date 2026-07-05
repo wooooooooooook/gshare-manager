@@ -585,6 +585,9 @@
 		</div>
 	</div>
 
+	<script>
+		window.SMB_SHARE_MODE = "{{ config.SMB_SHARE_MODE if config else 'folder' }}";
+	</script>
 	<script src="{{ url_for('static', filename='scripts.js') }}"></script>
 	<script>
 		function switchTab(tabId) {
