@@ -12,6 +12,7 @@ import pytz  # type: ignore
 import yaml  # type: ignore
 import socket
 import tempfile
+import shutil
 from config import (GshareConfig, CONFIG_PATH, INIT_FLAG_PATH,
                     RESTART_FLAG_PATH, LOG_FILE_PATH)  # type: ignore
 import time
@@ -230,6 +231,8 @@ class GshareWebServer:
         self.app.add_url_rule('/shutdown_vm', 'shutdown_vm', self.shutdown_vm)
         self.app.add_url_rule('/toggle_mount/<path:folder>',
                               'toggle_mount', self.toggle_mount)
+        self.app.add_url_rule('/api/bulk_mount', 'bulk_mount',
+                              self.bulk_mount, methods=['POST'])
         self.app.add_url_rule('/api/files/<path:folder_path>',
                               'get_folder_files', self.get_folder_files)
         # SMB 토글 엔드포인트를 두 개로 분리
@@ -855,6 +858,165 @@ class GshareWebServer:
         except Exception as e:
             logging.error(f"VM stop API 처리 중 오류 발생: {e}")
             return jsonify({"status": "error", "message": f"VM stop API 처리 실패: {str(e)}"}), 500
+
+    def bulk_mount(self):
+        """일괄 마운트/마운트해제 (Samba 서비스 재시작 최소화 및 단일 트랜잭션 최적화)"""
+        try:
+            if self.manager is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
+
+            data = request.get_json()
+            if not data or 'action' not in data or 'paths' not in data:
+                return jsonify({"status": "error", "message": "잘못된 요청입니다. action과 paths가 필요합니다."}), 400
+
+            action = data['action']  # 'mount' 또는 'unmount'
+            paths = data['paths']    # 대상 경로 목록
+            
+            if not isinstance(paths, list) or len(paths) == 0:
+                return jsonify({"status": "success", "message": "처리할 경로가 없습니다."}), 200
+
+            if action not in ['mount', 'unmount']:
+                return jsonify({"status": "error", "message": "잘못된 action입니다."}), 400
+
+            # 1. 파일과 폴더 경로 구분
+            folders = []
+            files_by_subfolder = {}  # subfolder -> set of file_names
+            
+            for path in paths:
+                source_path = os.path.join(self.manager.config.MOUNT_PATH, path)
+                if os.path.isfile(source_path):
+                    parts = path.rsplit('/', 1)
+                    subfolder = parts[0] if len(parts) > 1 else ""
+                    file_name = parts[1] if len(parts) > 1 else parts[0]
+                    if subfolder not in files_by_subfolder:
+                        files_by_subfolder[subfolder] = set()
+                    files_by_subfolder[subfolder].add(file_name)
+                else:
+                    folders.append(path)
+
+            success_count = 0
+            fail_count = 0
+            
+            # 2. 마운트 동작 수행
+            if action == 'mount':
+                # 2-1. 폴더 일괄 마운트
+                for folder in folders:
+                    if self.manager.smb_manager.create_symlink(folder):
+                        success_count += 1
+                    else:
+                        fail_count += 1
+                        logging.error(f"일괄 마운트 중 폴더 마운트 실패: {folder}")
+
+                # 2-2. 파일 일괄 마운트 (동일 서브폴더에 속한 파일은 한 번에 업데이트)
+                for subfolder, file_names in files_by_subfolder.items():
+                    parent_dir_name = f"{subfolder.replace(os.sep, '_')}_files"
+                    target_dir_path = os.path.join(self.manager.smb_manager.links_dir, parent_dir_name)
+                    
+                    # 기존 마운트된 파일 목록 조회
+                    current_files = set()
+                    if os.path.exists(target_dir_path) and os.path.isdir(target_dir_path):
+                        try:
+                            for name in os.listdir(target_dir_path):
+                                if name == ".tmp":
+                                    continue
+                                file_link_path = os.path.join(target_dir_path, name)
+                                if os.path.lexists(file_link_path) and os.path.islink(file_link_path):
+                                    current_files.add(name)
+                        except Exception as e:
+                            logging.warning(f"일괄 마운트 기존 파일 목록 조회 실패: {e}")
+                            
+                    # 신규 파일 추가
+                    for name in file_names:
+                        current_files.add(name)
+                        
+                    # 원자적 디렉토리 한 번에 갱신
+                    if self.manager.smb_manager._atomic_update_files_directory(subfolder, current_files):
+                        success_count += len(file_names)
+                    else:
+                        fail_count += len(file_names)
+                        logging.error(f"일괄 마운트 중 파일 디렉토리 갱신 실패: {subfolder}")
+
+                # 2-3. 최종 SMB 활성화 및 설정 반영 (단 한 번만 실행!)
+                if success_count > 0:
+                    self.manager.smb_manager.activate_smb_share()
+
+            elif action == 'unmount':
+                # 2-1. 폴더 일괄 마운트 해제
+                for folder in folders:
+                    if self.manager.smb_manager.remove_symlink(folder):
+                        success_count += 1
+                    else:
+                        fail_count += 1
+                        logging.error(f"일괄 해제 중 폴더 마운트 해제 실패: {folder}")
+
+                # 2-2. 파일 일괄 마운트 해제 (동일 서브폴더에 속한 파일은 한 번에 업데이트)
+                for subfolder, file_names in files_by_subfolder.items():
+                    parent_dir_name = f"{subfolder.replace(os.sep, '_')}_files"
+                    parent_dir_path = os.path.join(self.manager.smb_manager.links_dir, parent_dir_name)
+                    
+                    if os.path.exists(parent_dir_path) and os.path.isdir(parent_dir_path):
+                        # 기존 마운트된 파일 목록 조회
+                        current_files = set()
+                        try:
+                            for name in os.listdir(parent_dir_path):
+                                if name == ".tmp":
+                                    continue
+                                file_link_path = os.path.join(parent_dir_path, name)
+                                if os.path.lexists(file_link_path) and os.path.islink(file_link_path):
+                                    current_files.add(name)
+                        except Exception as e:
+                            logging.warning(f"일괄 해제 기존 파일 목록 조회 실패: {e}")
+                            
+                        # 대상 파일들 제거
+                        removed_any = False
+                        for name in file_names:
+                            if name in current_files:
+                                current_files.remove(name)
+                                removed_any = True
+                                
+                        if removed_any:
+                            if not current_files:
+                                # 남은 파일이 없으면 폴더 전체 삭제
+                                trash_dir = tempfile.mktemp(dir=os.path.join(self.manager.smb_manager.links_dir, ".tmp"))
+                                os.rename(parent_dir_path, trash_dir)
+                                shutil.rmtree(trash_dir)
+                                self.manager.smb_manager._active_links.discard(parent_dir_name)
+                                success_count += len(file_names)
+                            else:
+                                # 남은 파일이 있으면 원자적으로 폴더 갱신 (단 한 번만 호출!)
+                                if self.manager.smb_manager._atomic_update_files_directory(subfolder, current_files):
+                                    success_count += len(file_names)
+                                else:
+                                    fail_count += len(file_names)
+                        else:
+                            success_count += len(file_names)
+                    else:
+                        success_count += len(file_names)
+
+                # 2-3. 남은 심볼릭 링크 존재 여부 확인 및 최종 SMB 비활성화 여부 판단 (단 한 번만 실행!)
+                remaining_symlinks = len(self.manager.smb_manager._active_links) > 0
+                if not remaining_symlinks and os.path.exists(self.manager.smb_manager.links_dir):
+                    remaining_symlinks = any(
+                        (os.path.islink(os.path.join(self.manager.smb_manager.links_dir, filename)) or 
+                         (os.path.isdir(os.path.join(self.manager.smb_manager.links_dir, filename)) and filename != ".tmp"))
+                        for filename in os.listdir(self.manager.smb_manager.links_dir)
+                    )
+                
+                if not remaining_symlinks:
+                    logging.info("일괄 해제 완료: 남은 공유 리소스가 없어 SMB 공유를 비활성화합니다.")
+                    self.manager.smb_manager.deactivate_smb_share()
+
+            # 전체 감시 폴더 마운트 상태 갱신 (1회만 호출하여 전체 동기화)
+            self.manager.current_state = self.manager.update_state(update_monitored_folders=True)
+            self.emit_state_update()
+            
+            return jsonify({
+                "status": "success", 
+                "message": f"일괄 작업 완료 (성공: {success_count}개, 실패: {fail_count}개)"
+            }), 200
+        except Exception as e:
+            logging.error(f"일괄 마운트 API 처리 중 오류 발생: {e}")
+            return jsonify({"status": "error", "message": f"일괄 작업 실패: {str(e)}"}), 500
 
     def toggle_mount(self, folder):
         """마운트 토글 (폴더 및 파일 모두 지원)"""
