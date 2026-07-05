@@ -2325,10 +2325,10 @@ function loadFolderFiles(nodePath, filesContainer) {
                     const badgeHtml = isMounted ? `<span class="px-1.5 py-0.5 text-[9px] font-semibold bg-green-100 text-green-800 rounded-full">ON</span>` : '';
 
                     const isSelected = selectedFiles.has(filePath);
-                    const selectedClass = isSelected ? 'selected-file bg-blue-50/80 border-l-4 border-blue-500 pl-1' : 'border-l-4 border-transparent';
+                    const selectedClass = isSelected ? 'selected-file' : '';
 
                     filesHtml += `
-                        <div class="file-item flex justify-between items-center py-1 px-2 hover:bg-gray-50 rounded-lg ml-6 cursor-pointer ${selectedClass} transition-all duration-150" 
+                        <div class="file-item flex justify-between items-center py-1 px-2 hover:bg-gray-50 rounded-lg ml-6 cursor-pointer ${selectedClass}" 
                              data-file-path="${filePath}" 
                              data-mounted="${isMounted}"
                              onclick="handleFileClick(event, this)"
@@ -2465,14 +2465,7 @@ function updateSelectedFilesUI() {
     document.querySelectorAll('.file-item').forEach(element => {
         const filePath = element.dataset.filePath;
         const isSelected = selectedFiles.has(filePath);
-        
-        if (isSelected) {
-            element.classList.add('selected-file', 'bg-blue-50/80', 'border-l-4', 'border-blue-500', 'pl-1');
-            element.classList.remove('border-l-4', 'border-transparent');
-        } else {
-            element.classList.remove('selected-file', 'bg-blue-50/80', 'border-l-4', 'border-blue-500', 'pl-1');
-            element.classList.add('border-l-4', 'border-transparent');
-        }
+        element.classList.toggle('selected-file', isSelected);
     });
 
     // 2. 플로팅 액션바 제어

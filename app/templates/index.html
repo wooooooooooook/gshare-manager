@@ -28,6 +28,17 @@
 			display: inline-block;
 			white-space: nowrap;
 		}
+
+		.file-item {
+			border-left: 4px solid transparent;
+			transition: all 0.15s ease-in-out;
+		}
+
+		.file-item.selected-file {
+			background-color: rgba(239, 246, 255, 0.8) !important;
+			border-left-color: #3b82f6 !important;
+			padding-left: 0.25rem !important;
+		}
 	</style>
 </head>
 
@@ -588,7 +599,7 @@
 	<script>
 		window.SMB_SHARE_MODE = "{{ config.SMB_SHARE_MODE if config else 'folder' }}";
 	</script>
-	<script src="{{ url_for('static', filename='scripts.js') }}"></script>
+	<script src="{{ url_for('static', filename='scripts.js') }}?v=1.2"></script>
 	<script>
 		function switchTab(tabId) {
 			// 모든 탭 컨텐츠 숨기기
