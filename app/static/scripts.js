@@ -91,6 +91,7 @@ let monitorMode = 'event';
 let initialScanInProgress = false;
 let hasReceivedStateUpdate = false;
 let lastFolderRenderSignature = '';
+let lastFolderTreeSignature = '';
 const ENABLE_STATE_DEBUG_LOG = false;
 
 // state를 콘솔에 로깅하는 함수
@@ -1196,6 +1197,7 @@ function updateFolderList(sortedFolders) {
     // 폴더 목록이 비어있는 경우
     if (!sortedFolders || sortedFolders.length === 0) {
         lastFolderRenderSignature = 'EMPTY';
+        lastFolderTreeSignature = 'EMPTY';
         document.getElementById('monitoredFoldersContainer').innerHTML = `
             <div class="text-center py-4">
                 <p class="text-sm text-gray-600">감시 중인 폴더가 없습니다.</p>
@@ -1281,31 +1283,50 @@ function updateFolderList(sortedFolders) {
     // NFS 패널 트리에는 파일 항목은 제외하고 폴더 노드들만 전달합니다.
     const foldersOnly = sortedFolders.filter(entry => !entry[1].is_file);
 
+    const nextFolderTreeSignature = foldersOnly
+        .map(([folderName]) => folderName)
+        .join('|');
+
+    const shouldRebuildFolderTree = (nextFolderTreeSignature !== lastFolderTreeSignature);
+
     // 총 폴더 수가 많은 경우 비동기 처리 최적화
     const isBatchProcessingNeeded = sortedFolders.length > 200;
 
     // 컨테이너 업데이트 함수 실행
-    if (isBatchProcessingNeeded) {
-        // 비동기적으로 컨테이너 업데이트 (타이밍 조정)
-        setTimeout(() => {
-            // NFS 패널에는 전체 감시 폴더를 트리 구조로 표시
-            updateFolderTreeContainer('monitoredFoldersContainer', foldersOnly);
-
-            // 다음 프레임에서 SMB 패널 업데이트
+    if (shouldRebuildFolderTree) {
+        lastFolderTreeSignature = nextFolderTreeSignature;
+        if (isBatchProcessingNeeded) {
+            // 비동기적으로 컨테이너 업데이트 (타이밍 조정)
             setTimeout(() => {
-                // SMB 패널에는 마운트된 폴더만 표시 (언마운트 가능한 목록)
-                updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
+                // NFS 패널에는 전체 감시 폴더를 트리 구조로 표시
+                updateFolderTreeContainer('monitoredFoldersContainer', foldersOnly);
 
-                // 상태 표시기 숨기기
-                const statusIndicator = document.querySelector('.status-update-indicator');
-                if (statusIndicator) {
-                    statusIndicator.classList.add('hidden');
-                }
-            }, 50);
-        }, 0);
+                // 다음 프레임에서 SMB 패널 업데이트
+                setTimeout(() => {
+                    // SMB 패널에는 마운트된 폴더만 표시 (언마운트 가능한 목록)
+                    updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
+
+                    // 상태 표시기 숨기기
+                    const statusIndicator = document.querySelector('.status-update-indicator');
+                    if (statusIndicator) {
+                        statusIndicator.classList.add('hidden');
+                    }
+                }, 50);
+            }, 0);
+        } else {
+            // 적은 수의 폴더는 일반적인 방식으로 처리
+            updateFolderTreeContainer('monitoredFoldersContainer', foldersOnly);
+            updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
+
+            // 상태 표시기 숨기기
+            const statusIndicator = document.querySelector('.status-update-indicator');
+            if (statusIndicator) {
+                statusIndicator.classList.add('hidden');
+            }
+        }
     } else {
-        // 적은 수의 폴더는 일반적인 방식으로 처리
-        updateFolderTreeContainer('monitoredFoldersContainer', foldersOnly);
+        // 폴더 구조는 동일하고 상태(마운트 등)만 변경되었으므로 DOM 직접 업데이트
+        updateMountStatesInDOM();
         updateFolderContainer('smbFoldersContainer', mountedFolders, 'unmount');
 
         // 상태 표시기 숨기기
@@ -2086,9 +2107,9 @@ let treeNodeStates = {};
 // 전역 시스템 상태 저장
 let currentSystemState = null;
 
-// 선택된 파일 목록 및 이전 선택한 파일
+// 선택된 파일 목록 및 이전 선택한 파일 경로
 let selectedFiles = new Set();
-let lastSelectedFile = null;
+let lastSelectedFilePath = null;
 
 // 특정 트리 노드 또는 하위 노드 중 마운트(ON)된 것이 있는지 재귀적 판별
 function isMountedOrHasMountedDescendant(node) {
@@ -2410,6 +2431,102 @@ function updateFolderTreeContainer(containerId, folderData) {
     }
 }
 
+// DOM에 렌더링된 폴더 및 파일들의 마운트 상태만 직접 업데이트하는 함수
+function updateMountStatesInDOM() {
+    if (!currentSystemState || !currentSystemState.monitored_folders) return;
+
+    const monitoredFolders = currentSystemState.monitored_folders;
+
+    // 1. 트리 내 파일 항목들 업데이트
+    document.querySelectorAll('.file-item').forEach(element => {
+        const filePath = element.dataset.filePath;
+        const fileState = monitoredFolders[filePath];
+        if (fileState) {
+            const isMounted = fileState.is_mounted;
+            
+            // 데이터 속성 업데이트
+            element.dataset.mounted = isMounted ? 'true' : 'false';
+            
+            // 마운트 버튼 업데이트
+            const button = element.querySelector('.toggle-btn');
+            if (button) {
+                const buttonText = isMounted ? '마운트 해제' : '마운트';
+                if (button.innerText !== buttonText) {
+                    button.innerText = buttonText;
+                    
+                    // onclick 속성 동적 바인딩 업데이트
+                    const action = isMounted ? 'unmount' : 'mount';
+                    button.setAttribute('onclick', `event.stopPropagation(); toggleMount('${filePath.replace(/'/g, "\\'")}', '${action}')`);
+                    
+                    // 버튼 클래스 업데이트
+                    if (isMounted) {
+                        button.className = 'toggle-btn text-[10px] px-2 py-0.5 rounded bg-red-50 text-red-700 hover:bg-red-100 transition-colors duration-200';
+                    } else {
+                        button.className = 'toggle-btn text-[10px] px-2 py-0.5 rounded bg-green-50 text-green-700 hover:bg-green-100 transition-colors duration-200';
+                    }
+                }
+            }
+            
+            // ON 뱃지 업데이트
+            const nameContainer = element.querySelector('.flex.items-center.gap-1.5');
+            if (nameContainer) {
+                const hasBadge = nameContainer.querySelector('.bg-green-100');
+                if (isMounted && !hasBadge) {
+                    const badge = document.createElement('span');
+                    badge.className = 'px-1.5 py-0.5 text-[9px] font-semibold bg-green-100 text-green-800 rounded-full';
+                    badge.innerText = 'ON';
+                    nameContainer.appendChild(badge);
+                } else if (!isMounted && hasBadge) {
+                    hasBadge.remove();
+                }
+            }
+        }
+    });
+
+    // 2. 트리 내 폴더 노드들 업데이트
+    document.querySelectorAll('.tree-node-wrapper').forEach(element => {
+        const folderPath = element.dataset.nodePath;
+        const folderState = monitoredFolders[folderPath];
+        if (folderState) {
+            const isMounted = folderState.is_mounted;
+            
+            // 마운트 버튼 업데이트
+            const button = element.querySelector('.tree-node-row .toggle-btn');
+            if (button) {
+                const buttonText = isMounted ? '마운트 해제' : '마운트';
+                if (button.innerText !== buttonText) {
+                    button.innerText = buttonText;
+                    
+                    // onclick 속성 업데이트
+                    const action = isMounted ? 'unmount' : 'mount';
+                    button.setAttribute('onclick', `toggleMount('${folderPath.replace(/'/g, "\\'")}', '${action}')`);
+                    
+                    // 버튼 클래스 업데이트
+                    if (isMounted) {
+                        button.className = 'toggle-btn text-[11px] px-2 py-0.5 rounded bg-red-50 text-red-700 hover:bg-red-100 transition-colors duration-200';
+                    } else {
+                        button.className = 'toggle-btn text-[11px] px-2 py-0.5 rounded bg-green-50 text-green-700 hover:bg-green-100 transition-colors duration-200';
+                    }
+                }
+            }
+            
+            // ON 뱃지 업데이트
+            const nameContainer = element.querySelector('.tree-node-row .flex.items-center.gap-1.5');
+            if (nameContainer) {
+                const hasBadge = nameContainer.querySelector('.bg-green-100');
+                if (isMounted && !hasBadge) {
+                    const badge = document.createElement('span');
+                    badge.className = 'px-1.5 py-0.5 text-[9px] font-semibold bg-green-100 text-green-800 rounded-full flex-shrink-0';
+                    badge.innerText = 'ON';
+                    nameContainer.appendChild(badge);
+                } else if (!isMounted && hasBadge) {
+                    hasBadge.remove();
+                }
+            }
+        }
+    });
+}
+
 // ==================== 파일 멀티 선택 및 벌크 작업 핸들러 ====================
 
 // 파일 항목 클릭 핸들러 (Ctrl / Shift 지원)
@@ -2427,25 +2544,33 @@ function handleFileClick(event, element) {
         } else {
             selectedFiles.add(filePath);
         }
-        lastSelectedFile = element;
-    } else if (event.shiftKey && lastSelectedFile && lastSelectedFile.closest('.tree-files-container') === parentContainer) {
+        lastSelectedFilePath = filePath;
+    } else if (event.shiftKey && lastSelectedFilePath) {
         // Shift 클릭: 동일 폴더 내 범위 선택
-        const startIndex = allItems.indexOf(lastSelectedFile);
-        const endIndex = allItems.indexOf(element);
-        
-        if (startIndex !== -1 && endIndex !== -1) {
-            const [minIdx, maxIdx] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+        const lastSelectedEl = parentContainer.querySelector(`[data-file-path="${CSS.escape(lastSelectedFilePath)}"]`);
+        if (lastSelectedEl) {
+            const startIndex = allItems.indexOf(lastSelectedEl);
+            const endIndex = allItems.indexOf(element);
             
-            // 범위 내 모든 항목 선택에 추가
-            for (let i = minIdx; i <= maxIdx; i++) {
-                selectedFiles.add(allItems[i].dataset.filePath);
+            if (startIndex !== -1 && endIndex !== -1) {
+                const [minIdx, maxIdx] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+                
+                // 범위 내 모든 항목 선택에 추가
+                for (let i = minIdx; i <= maxIdx; i++) {
+                    selectedFiles.add(allItems[i].dataset.filePath);
+                }
             }
+        } else {
+            // 이전 선택 파일이 같은 폴더에 없거나 DOM이 갱신되어 찾을 수 없는 경우 일반 클릭처럼 동작
+            selectedFiles.clear();
+            selectedFiles.add(filePath);
+            lastSelectedFilePath = filePath;
         }
     } else {
         // 일반 클릭: 기존 선택을 모두 해제하고 현재 노드만 선택
         selectedFiles.clear();
         selectedFiles.add(filePath);
-        lastSelectedFile = element;
+        lastSelectedFilePath = filePath;
     }
 
     updateSelectedFilesUI();
@@ -2454,7 +2579,7 @@ function handleFileClick(event, element) {
 // 선택 해제 핸들러
 function clearFileSelection() {
     selectedFiles.clear();
-    lastSelectedFile = null;
+    lastSelectedFilePath = null;
     updateSelectedFilesUI();
 }
 
