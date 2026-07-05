@@ -441,6 +441,16 @@ class FolderMonitor:
         active_folders = set()
         if self.config.SMB_SHARE_MODE == 'file' and hasattr(self.smb_manager, '_active_links'):
             for item in self.smb_manager._active_links:
+                # 만약 item 자체가 감시 대상 폴더 중 하나와 정확히 일치하면, 파일 마운트가 아니라 폴더 마운트이므로
+                # 하위 파일에 대한 마운트 탐색(longest_match)에서 제외합니다.
+                is_direct_folder = False
+                for path in folders_with_mtime:
+                    if path.replace(os.sep, '_') == item:
+                        is_direct_folder = True
+                        break
+                if is_direct_folder:
+                    continue
+
                 longest_match = None
                 longest_len = -1
                 for path in folders_with_mtime:
