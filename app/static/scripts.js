@@ -2062,6 +2062,19 @@ document.addEventListener('DOMContentLoaded', function() {
 // 트리 노드의 접힘/펼침 상태 저장 (key: 노드 경로, value: boolean)
 let treeNodeStates = {};
 
+// 특정 트리 노드 또는 하위 노드 중 마운트(ON)된 것이 있는지 재귀적 판별
+function isMountedOrHasMountedDescendant(node) {
+    if (node.info && node.info.is_mounted) {
+        return true;
+    }
+    for (const key in node.children) {
+        if (isMountedOrHasMountedDescendant(node.children[key])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // 평면 정렬 목록을 계층 트리로 변환
 function buildFolderTree(folders) {
     const root = {};
@@ -2103,8 +2116,8 @@ function renderTree(node, depth = 0, pathPrefix = '') {
         const isFileShareMode = window.SMB_SHARE_MODE === 'file';
 
         if (treeNodeStates[nodePath] === undefined) {
-            // 기본 상태는 열림
-            treeNodeStates[nodePath] = true;
+            // 마운트되어 있거나 마운트된 자식을 갖고 있으면 기본적으로 열어둠, 그렇지 않으면 닫아둠
+            treeNodeStates[nodePath] = isMountedOrHasMountedDescendant(item);
         }
         const isOpen = treeNodeStates[nodePath];
         const folderId = `tree-folder-${encodeURIComponent(nodePath).replace(/%/g, '_')}`;
