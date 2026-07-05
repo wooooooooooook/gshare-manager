@@ -220,6 +220,7 @@ function initSocketIO() {
 
 // 상태 UI 업데이트 함수
 function updateUI(data) {
+    currentSystemState = data;
     // 기능 토글 상태 업데이트
     const toggles = {
         'gshare': data.gshare_enabled,
@@ -2082,6 +2083,13 @@ document.addEventListener('DOMContentLoaded', function() {
 // 트리 노드의 접힘/펼침 상태 저장 (key: 노드 경로, value: boolean)
 let treeNodeStates = {};
 
+// 전역 시스템 상태 저장
+let currentSystemState = null;
+
+// 선택된 파일 목록 및 이전 선택한 파일
+let selectedFiles = new Set();
+let lastSelectedFile = null;
+
 // 특정 트리 노드 또는 하위 노드 중 마운트(ON)된 것이 있는지 재귀적 판별
 function isMountedOrHasMountedDescendant(node) {
     if (node.info && node.info.is_mounted) {
@@ -2316,8 +2324,15 @@ function loadFolderFiles(nodePath, filesContainer) {
                     const action = isMounted ? 'unmount' : 'mount';
                     const badgeHtml = isMounted ? `<span class="px-1.5 py-0.5 text-[9px] font-semibold bg-green-100 text-green-800 rounded-full">ON</span>` : '';
 
+                    const isSelected = selectedFiles.has(filePath);
+                    const selectedClass = isSelected ? 'selected-file bg-blue-50/80 border-l-4 border-blue-500 pl-1' : 'border-l-4 border-transparent';
+
                     filesHtml += `
-                        <div class="file-item flex justify-between items-center py-1 px-2 hover:bg-gray-50 rounded-lg ml-6" style="contain: content;">
+                        <div class="file-item flex justify-between items-center py-1 px-2 hover:bg-gray-50 rounded-lg ml-6 cursor-pointer ${selectedClass} transition-all duration-150" 
+                             data-file-path="${filePath}" 
+                             data-mounted="${isMounted}"
+                             onclick="handleFileClick(event, this)"
+                             style="contain: content;">
                             <div class="flex items-center gap-2 overflow-hidden flex-1">
                                 <!-- 파일 아이콘 (📄) -->
                                 <span class="text-gray-400 flex-shrink-0">
@@ -2339,7 +2354,7 @@ function loadFolderFiles(nodePath, filesContainer) {
                             </div>
                             <!-- 파일 마운트 버튼 -->
                             <div class="flex-shrink-0">
-                                <button onclick="toggleMount('${filePath}', '${action}')" 
+                                <button onclick="event.stopPropagation(); toggleMount('${filePath}', '${action}')" 
                                     class="toggle-btn text-[10px] px-2 py-0.5 rounded ${buttonClass} transition-colors duration-200">
                                     ${buttonText}
                                 </button>
@@ -2394,4 +2409,204 @@ function updateFolderTreeContainer(containerId, folderData) {
             }
         });
     }
+}
+
+// ==================== 파일 멀티 선택 및 벌크 작업 핸들러 ====================
+
+// 파일 항목 클릭 핸들러 (Ctrl / Shift 지원)
+function handleFileClick(event, element) {
+    const filePath = element.dataset.filePath;
+    const parentContainer = element.closest('.tree-files-container');
+    if (!parentContainer) return;
+
+    const allItems = Array.from(parentContainer.querySelectorAll('.file-item'));
+    
+    if (event.ctrlKey || event.metaKey) {
+        // Ctrl 클릭: 개별 토글
+        if (selectedFiles.has(filePath)) {
+            selectedFiles.delete(filePath);
+        } else {
+            selectedFiles.add(filePath);
+        }
+        lastSelectedFile = element;
+    } else if (event.shiftKey && lastSelectedFile && lastSelectedFile.closest('.tree-files-container') === parentContainer) {
+        // Shift 클릭: 동일 폴더 내 범위 선택
+        const startIndex = allItems.indexOf(lastSelectedFile);
+        const endIndex = allItems.indexOf(element);
+        
+        if (startIndex !== -1 && endIndex !== -1) {
+            const [minIdx, maxIdx] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+            
+            // 범위 내 모든 항목 선택에 추가
+            for (let i = minIdx; i <= maxIdx; i++) {
+                selectedFiles.add(allItems[i].dataset.filePath);
+            }
+        }
+    } else {
+        // 일반 클릭: 기존 선택을 모두 해제하고 현재 노드만 선택
+        selectedFiles.clear();
+        selectedFiles.add(filePath);
+        lastSelectedFile = element;
+    }
+
+    updateSelectedFilesUI();
+}
+
+// 선택 해제 핸들러
+function clearFileSelection() {
+    selectedFiles.clear();
+    lastSelectedFile = null;
+    updateSelectedFilesUI();
+}
+
+// 선택 UI 동기화 및 플로팅 액션바 토글
+function updateSelectedFilesUI() {
+    // 1. 모든 파일 노드의 스타일 업데이트
+    document.querySelectorAll('.file-item').forEach(element => {
+        const filePath = element.dataset.filePath;
+        const isSelected = selectedFiles.has(filePath);
+        
+        if (isSelected) {
+            element.classList.add('selected-file', 'bg-blue-50/80', 'border-l-4', 'border-blue-500', 'pl-1');
+            element.classList.remove('border-l-4', 'border-transparent');
+        } else {
+            element.classList.remove('selected-file', 'bg-blue-50/80', 'border-l-4', 'border-blue-500', 'pl-1');
+            element.classList.add('border-l-4', 'border-transparent');
+        }
+    });
+
+    // 2. 플로팅 액션바 제어
+    let actionBar = document.getElementById('floatingFileActionBar');
+    
+    if (selectedFiles.size > 0) {
+        if (!actionBar) {
+            actionBar = document.createElement('div');
+            actionBar.id = 'floatingFileActionBar';
+            actionBar.className = 'fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur-md shadow-2xl border border-gray-200/80 px-6 py-3 rounded-full flex items-center gap-4 z-[9999] transition-all duration-300 ease-out translate-y-10 opacity-0 scale-95';
+            document.body.appendChild(actionBar);
+            
+            // CSS 애니메이션 트리거
+            requestAnimationFrame(() => {
+                actionBar.classList.remove('translate-y-10', 'opacity-0', 'scale-95');
+                actionBar.classList.add('translate-y-0', 'opacity-100', 'scale-100');
+            });
+        }
+        
+        actionBar.innerHTML = `
+            <span class="text-sm font-medium text-gray-800 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                <strong>${selectedFiles.size}</strong>개의 파일 선택됨
+            </span>
+            <div class="h-4 w-px bg-gray-200"></div>
+            <button onclick="bulkToggleMount('mount')" class="text-xs bg-emerald-500 hover:bg-emerald-600 text-white font-medium px-3.5 py-1.5 rounded-full transition-all flex items-center gap-1">
+                선택 마운트
+            </button>
+            <button onclick="bulkToggleMount('unmount')" class="text-xs bg-rose-500 hover:bg-rose-600 text-white font-medium px-3.5 py-1.5 rounded-full transition-all flex items-center gap-1">
+                선택 해제
+            </button>
+            <button onclick="clearFileSelection()" class="text-xs text-gray-500 hover:text-gray-700 font-medium px-2.5 py-1.5 transition-all">
+                선택 취소
+            </button>
+        `;
+    } else if (actionBar) {
+        actionBar.classList.add('translate-y-10', 'opacity-0', 'scale-95');
+        actionBar.classList.remove('translate-y-0', 'opacity-100', 'scale-100');
+        setTimeout(() => {
+            if (actionBar && actionBar.parentNode) {
+                actionBar.parentNode.removeChild(actionBar);
+            }
+        }, 300);
+    }
+}
+
+// 벌크 마운트/마운트해제 API 동기 제어 (설정파일 Lock 병목 방지)
+function bulkToggleMount(action) {
+    if (selectedFiles.size === 0) return;
+
+    // 작업이 필수로 요구되는 대상 선별
+    const targets = [];
+    selectedFiles.forEach(filePath => {
+        let isMounted = false;
+        if (currentSystemState && currentSystemState.monitored_folders && currentSystemState.monitored_folders[filePath]) {
+            isMounted = currentSystemState.monitored_folders[filePath].is_mounted;
+        } else {
+            const el = document.querySelector(`[data-file-path="${filePath.replace(/'/g, "\\'")}"]`);
+            if (el) {
+                isMounted = el.dataset.mounted === 'true';
+            }
+        }
+
+        if (action === 'mount' && !isMounted) {
+            targets.push(filePath);
+        } else if (action === 'unmount' && isMounted) {
+            targets.push(filePath);
+        }
+    });
+
+    if (targets.length === 0) {
+        alert(action === 'mount' ? '이미 선택된 파일이 모두 마운트되어 있습니다.' : '이미 선택된 파일이 모두 해제되어 있습니다.');
+        return;
+    }
+
+    const actionBar = document.getElementById('floatingFileActionBar');
+    const originalContent = actionBar.innerHTML;
+    
+    // 버튼 비활성화 상태 표시
+    actionBar.innerHTML = `
+        <span class="text-sm font-medium text-gray-800 flex items-center gap-2">
+            <svg class="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            처리 중... (0/${targets.length})
+        </span>
+    `;
+
+    let processed = 0;
+    
+    function processNext() {
+        if (processed >= targets.length) {
+            actionBar.innerHTML = `
+                <span class="text-sm font-medium text-emerald-600 flex items-center gap-1.5">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    일괄 마운트 작업이 성공적으로 완료되었습니다.
+                </span>
+            `;
+            setTimeout(() => {
+                clearFileSelection();
+                updateFolderState();
+            }, 1200);
+            return;
+        }
+
+        const filePath = targets[processed];
+        actionBar.querySelector('span').innerHTML = `
+            <svg class="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            처리 중... (${processed + 1}/${targets.length})
+        `;
+
+        fetch(`/toggle_mount/${encodeURIComponent(filePath)}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    processed++;
+                    processNext();
+                } else {
+                    alert(`오류 발생 (${filePath}): ` + data.message);
+                    actionBar.innerHTML = originalContent;
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert('요청 중 네트워크 에러가 발생했습니다.');
+                actionBar.innerHTML = originalContent;
+            });
+    }
+
+    processNext();
 }
