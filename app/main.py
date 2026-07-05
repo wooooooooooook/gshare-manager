@@ -440,13 +440,31 @@ class FolderMonitor:
         monitored_folders = {}
         for path, mtime in sorted(folders_with_mtime.items(), key=sort_key):
             # 실제 심볼릭 링크가 존재하는지 확인 (메모리 캐시 사용)
-            is_mounted = self.smb_manager.is_link_active(path)
+            is_mounted = False
+            link_name = path.replace(os.sep, '_')
+            if self.config.SMB_SHARE_MODE == 'file':
+                is_mounted = any(item.startswith(link_name + '_') for item in self.smb_manager._active_links)
+            else:
+                is_mounted = self.smb_manager.is_link_active(path)
+
             mtime_str = datetime.fromtimestamp(mtime, self.local_tz).strftime('%Y-%m-%d %H:%M:%S') if mtime is not None else '-'
 
             monitored_folders[path] = {
                 'mtime': mtime_str,
                 'is_mounted': is_mounted
             }
+
+        # 파일 모드일 때 현재 실제 활성화되어 있는 개별 파일 심링크 폴더들을 목록에 동적 주입해 줍니다.
+        if self.config.SMB_SHARE_MODE == 'file':
+            for active_link in self.smb_manager._active_links:
+                if active_link == ".tmp":
+                    continue
+                # 감시 목록 상의 원래 폴더 형식이 아니면 개별 파일 가상 폴더로 간주하여 목록에 추가
+                if active_link not in monitored_folders:
+                    monitored_folders[active_link] = {
+                        'mtime': '-',
+                        'is_mounted': True
+                    }
 
         return monitored_folders
 

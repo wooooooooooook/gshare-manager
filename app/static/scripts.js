@@ -261,6 +261,16 @@ function updateUI(data) {
         monitorMode = data.monitor_mode;
     }
 
+    // 모니터 모드에 따른 감시 주기 카드 표시 상태 제어
+    const lastCheckCard = document.getElementById('lastCheckCard');
+    if (lastCheckCard) {
+        if (monitorMode === 'polling') {
+            lastCheckCard.classList.remove('hidden');
+        } else {
+            lastCheckCard.classList.add('hidden');
+        }
+    }
+
     // 총 감시 폴더 개수 표시
     const totalFolderBadge = document.getElementById('totalFolderCountbadge');
     if (totalFolderBadge && data.monitored_folders) {
