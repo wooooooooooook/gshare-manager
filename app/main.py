@@ -364,7 +364,7 @@ class FolderMonitor:
         logging.debug(
             f"폴더 구조 업데이트 완료 - 걸린 시간: {elapsed_time:.3f}초, 총 폴더: {len(self.previous_mtimes)}개, 새 폴더: {len(new_folders)}개, 삭제된 폴더: {len(deleted_folders)}개")
 
-    def check_modifications(self) -> tuple[list[str], bool, list[str]]:
+    def check_modifications(self, current_vm_status: bool = False) -> tuple[list[str], bool, list[str]]:
         """수정 시간이 변경된 서브폴더 목록, VM 시작 필요 여부, 마운트/트랜스코딩 대상 폴더를 반환 (Async)"""
         start_time = time.time()
         changed_folders = []
@@ -393,13 +393,19 @@ class FolderMonitor:
 
                 elif current_mtime != prev_mtime:
                     last_modified = datetime.fromtimestamp(current_mtime, self.local_tz).strftime("%Y-%m-%d %H:%M:%S")
-                    logging.info(f"폴더 수정 시간 변화 감지 ({path}): {last_modified}")
+                    if self.config.SMB_SHARE_MODE == 'file':
+                        logging.debug(f"폴더 수정 시간 변화 감지 ({path}): {last_modified} (파일 공유 모드)")
+                    else:
+                        logging.info(f"폴더 수정 시간 변화 감지 ({path}): {last_modified}")
                     changed_folders.append(path)
                     self.previous_mtimes[path] = current_mtime
 
                     if current_mtime > self.last_shutdown_time:
-                        should_start_vm = True
-                        logging.info(f"VM 시작 조건 충족 - 수정 시간: {last_modified}")
+                        if not current_vm_status:
+                            should_start_vm = True
+                            logging.info(f"VM 시작 조건 충족 - 수정 시간: {last_modified}")
+                        else:
+                            logging.debug(f"수정 시간 변화 감지되었으나 VM이 이미 실행 중입니다 - 수정 시간: {last_modified}")
 
             mount_targets = self._filter_mount_targets(changed_folders)
             if self.config.SMB_SHARE_MODE == 'folder':
@@ -1237,7 +1243,7 @@ class GShareManager:
                 if self.config.POLLING_ENABLED:
                     try:
                         logging.debug("폴더 수정 시간 변화 확인 중")
-                        changed_folders, should_start_vm, mount_targets = self.folder_monitor.check_modifications()
+                        changed_folders, should_start_vm, mount_targets = self.folder_monitor.check_modifications(current_vm_status)
                         if changed_folders:
                             # 변경된 폴더에 대해 트랜스코딩 실행 (SMB 활성화 전)
                             if self.transcoder.enabled:
