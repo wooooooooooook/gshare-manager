@@ -2715,4 +2715,3 @@ function bulkToggleMount(action) {
         actionBar.innerHTML = originalContent;
     });
 }
-}
