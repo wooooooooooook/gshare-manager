@@ -883,6 +883,65 @@ class GShareManager:
         else:
             logging.info("종료 웹훅을 전송하려했지만 vm이 이미 종료상태입니다.")
 
+    def reboot_vm(self) -> None:
+        """VM을 재부팅한다. SMB 공유는 유지한 채 VM만 껐다 켠다.
+        호출 즉시 반환하고 실제 재부팅은 백그라운드 스레드에서 진행한다.
+        이미 재부팅 중이면 아무 일도 하지 않는다."""
+        import threading
+
+        # 재부팅 중복 방지
+        if getattr(self, '_reboot_in_progress', False):
+            logging.info("이미 재부팅 절차가 진행 중입니다. 새 요청을 무시합니다.")
+            return
+
+        self._reboot_in_progress = True
+        try:
+            def _do_reboot():
+                try:
+                    logging.info("=== VM 재부팅 시작 ===")
+
+                    # 1) VM이 실행 중이면 종료
+                    if self.proxmox_api.is_vm_running():
+                        logging.info("VM 종료 요청 전송 중...")
+                        if not self.proxmox_api.stop_vm():
+                            logging.error("VM 종료 명령 전송에 실패했습니다.")
+                            self._reboot_in_progress = False
+                            return
+
+                        # 종료 확인 폴링 (최대 90초)
+                        logging.info("VM 종료 대기 중...")
+                        for _ in range(30):  # 30 × 3초 = 90초
+                            time.sleep(3)
+                            if not self.proxmox_api.is_vm_running():
+                                logging.info("VM이 종료되었습니다.")
+                                break
+                        else:
+                            logging.warning("VM 종료 타임아웃 (90초). 재부팅을 계속 시도합니다.")
+                    else:
+                        logging.info("VM이 이미 종료되어 있습니다. 시작 단계로 넘어갑니다.")
+
+                    # 2) VM 시작
+                    time.sleep(3)  # 짧은 안정화 대기
+                    logging.info("VM 시작 요청 전송 중...")
+                    if self.proxmox_api.start_vm():
+                        logging.info("=== VM 재부팅 완료 ===")
+                    else:
+                        logging.error("VM 시작 명령 전송에 실패했습니다.")
+
+                except Exception as e:
+                    logging.error(f"재부팅 스레드 오류: {e}")
+                finally:
+                    self._reboot_in_progress = False
+                    # 상태 업데이트
+                    if hasattr(self, 'current_state') and self.current_state is not None:
+                        self.current_state = self.update_state()
+
+            thread = threading.Thread(target=_do_reboot, daemon=True)
+            thread.start()
+        except Exception as e:
+            logging.error(f"재부팅 스레드 시작 실패: {e}")
+            self._reboot_in_progress = False
+
     def _run_vm_shutdown_workflow(self) -> None:
         """VM 종료 시 공통 후처리(종료시각 기록, SMB 비활성화)를 실행한다."""
         # VM 종료 시간 저장
@@ -1279,6 +1338,15 @@ class GShareManager:
                     self._process_pending_stop()
 
                     if self.config.VM_MONITOR_ENABLED and self.proxmox_api.is_vm_running():
+                        # 안드로이드가 12시간 이상 가동되었으면 자동 재부팅
+                        try:
+                            uptime = self.proxmox_api.get_vm_uptime()
+                            if uptime is not None and uptime >= 43200:  # 12시간 (12 * 3600)
+                                logging.info(f"안드로이드 VM 가동 시간이 {uptime/3600:.1f}시간입니다. (12시간 임계값 초과) 자동 재부팅을 시작합니다.")
+                                self.reboot_vm()
+                        except Exception as ue:
+                            logging.error(f"VM 업타임 체크 중 오류: {ue}")
+
                         cpu_usage = self.proxmox_api.get_cpu_usage()
                         if cpu_usage is not None:
                             logging.debug(f"현재 CPU 사용량: {cpu_usage}%")

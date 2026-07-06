@@ -229,6 +229,8 @@ class GshareWebServer:
             '/get_log_level', 'get_log_level', self.get_log_level)
         self.app.add_url_rule('/start_vm', 'start_vm', self.start_vm)
         self.app.add_url_rule('/shutdown_vm', 'shutdown_vm', self.shutdown_vm)
+        self.app.add_url_rule('/reboot_vm', 'reboot_vm', self.reboot_vm, methods=['POST', 'GET'])
+        self.app.add_url_rule('/api/reboot_vm', 'api_reboot_vm', self.reboot_vm, methods=['POST', 'GET'])
         self.app.add_url_rule('/toggle_mount/<path:folder>',
                               'toggle_mount', self.toggle_mount)
         self.app.add_url_rule('/api/bulk_mount', 'bulk_mount',
@@ -804,6 +806,20 @@ class GshareWebServer:
             return jsonify({"status": "success", "message": "VM 종료가 요청되었습니다."})
         except Exception as e:
             return jsonify({"status": "error", "message": f"VM 종료 요청 실패: {str(e)}"}), 500
+
+    def reboot_vm(self):
+        """VM 재부팅 (SMB 상태 유지)"""
+        try:
+            if self.manager is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
+
+            if getattr(self.manager, '_reboot_in_progress', False):
+                return jsonify({"status": "error", "message": "이미 재부팅이 진행 중입니다."}), 400
+
+            self.manager.reboot_vm()
+            return jsonify({"status": "success", "message": "VM 재부팅이 요청되었습니다 (SMB 유지)."})
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"VM 재부팅 요청 실패: {str(e)}"}), 500
 
     def api_vm_stop(self):
         """안드로이드 VM IP 요청만 허용하는 VM stop API"""
