@@ -1034,6 +1034,41 @@ function rebootVM() {
     }
 }
 
+function bulkMountRecent() {
+    const input = document.getElementById('bulk_mount_recent_days');
+    const status = document.getElementById('bulk_mount_recent_status');
+    const btn = document.getElementById('bulk_mount_recent_btn');
+    let days = parseInt(input.value, 10);
+    if (!Number.isFinite(days) || days <= 0) {
+        status.textContent = '1 이상 정수 입력';
+        return;
+    }
+    if (days > 3650) days = 3650;
+
+    if (!confirm(`mtime이 ${days}일 이내인 폴더를 모두 공유합니다. 계속할까요?`)) return;
+
+    status.textContent = '실행 중...';
+    btn.disabled = true;
+
+    fetch(`/api/bulk_mount_recent?days=${days}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                status.textContent = data.message;
+                console.log('=== 일괄 공유 성공 ===', data.message);
+                setTimeout(() => updateFolderState(), 1000);
+            } else {
+                throw new Error(data.message);
+            }
+        })
+        .catch(err => {
+            status.textContent = '오류: ' + err.message;
+        })
+        .finally(() => {
+            btn.disabled = false;
+        });
+}
+
 function updateFolderNameScrolling(root = document) {
     // 애니메이션 기능 비활성화 (성능 문제로 인해 수동 스크롤로 대체됨)
 }

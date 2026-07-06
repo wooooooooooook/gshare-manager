@@ -235,6 +235,8 @@ class GshareWebServer:
                               'toggle_mount', self.toggle_mount)
         self.app.add_url_rule('/api/bulk_mount', 'bulk_mount',
                               self.bulk_mount, methods=['POST'])
+        self.app.add_url_rule('/api/bulk_mount_recent', 'bulk_mount_recent',
+                              self.bulk_mount_recent, methods=['GET', 'POST'])
         self.app.add_url_rule('/api/files/<path:folder_path>',
                               'get_folder_files', self.get_folder_files)
         # SMB 토글 엔드포인트를 두 개로 분리
@@ -1039,6 +1041,41 @@ class GshareWebServer:
         except Exception as e:
             logging.error(f"일괄 마운트 API 처리 중 오류 발생: {e}")
             return jsonify({"status": "error", "message": f"일괄 작업 실패: {str(e)}"}), 500
+
+    def bulk_mount_recent(self):
+        """mtime이 N일 미만인 폴더를 일괄 공유하는 엔드포인트 (Android VM은 건드리지 않음)"""
+        try:
+            if self.manager is None:
+                return jsonify({"status": "error", "message": "서버가 아직 초기화되지 않았습니다."}), 404
+
+            # GET 쿼리스트링 또는 POST 본문에서 days 추출
+            days = 3
+            if request.method == 'GET':
+                raw = request.args.get('days')
+            else:
+                raw = (request.get_json(silent=True) or {}).get('days') if request.get_json(silent=True) else None
+                if raw is None:
+                    raw = request.args.get('days')
+
+            if raw is not None:
+                try:
+                    days = int(raw)
+                    if days <= 0 or days > 3650:
+                        return jsonify({"status": "error", "message": "days는 1~3650 사이여야 합니다."}), 400
+                except (TypeError, ValueError):
+                    return jsonify({"status": "error", "message": "days는 정수여야 합니다."}), 400
+
+            ok, detail = self.manager.bulk_mount_recent(days=days)
+
+            self.manager.current_state = self.manager.update_state(update_monitored_folders=True)
+            self.emit_state_update()
+
+            if ok:
+                return jsonify({"status": "success", "message": f"최근 {days}일 이내 폴더 일괄 공유: {detail}", "days": days}), 200
+            return jsonify({"status": "error", "message": detail}), 500
+        except Exception as e:
+            logging.error(f"bulk_mount_recent API 오류: {e}")
+            return jsonify({"status": "error", "message": f"처리 실패: {str(e)}"}), 500
 
     def toggle_mount(self, folder):
         """마운트 토글 (폴더 및 파일 모두 지원)"""

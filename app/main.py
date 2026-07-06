@@ -724,6 +724,7 @@ class GShareManager:
         self.event_relay_timeout_seconds = 90
         self.pending_stop_at: Optional[float] = None
         self.last_file_event_time: Optional[float] = None
+        self.recent_mount_days: int = 3
 
         # VM 마지막 종료 시간 로드
         self.last_shutdown_time = self._load_last_shutdown_time()
@@ -1084,6 +1085,43 @@ class GShareManager:
             logging.error(f'이벤트 처리 실패: {e}')
             return False, str(e)
 
+    def bulk_mount_recent(self, days: int) -> tuple[bool, str]:
+        """최근 N일 내 수정된 폴더를 SMB 공유 대상으로만 반영한다. (Android VM은 건드리지 않음)
+        days가 0 이하이면 self.recent_mount_days 값을 사용한다."""
+        if days is None or days <= 0:
+            days = self.recent_mount_days
+        if days <= 0:
+            days = 3
+        try:
+            threshold_epoch = time.time() - (days * 86400)
+            recent_folders = [
+                path for path, mtime in self.folder_monitor.previous_mtimes.items()
+                if mtime and mtime >= threshold_epoch
+            ]
+            mount_targets = self.folder_monitor._filter_mount_targets(recent_folders)
+
+            mounted_folders: list[str] = []
+            failed_folders: list[str] = []
+            for folder in mount_targets:
+                if self.smb_manager.create_symlink(folder):
+                    mounted_folders.append(folder)
+                else:
+                    failed_folders.append(folder)
+
+            if mounted_folders:
+                self.smb_manager.activate_smb_share()
+
+            self.last_action = (
+                f"일괄 공유({days}일 이내, MQTT/API): {len(mounted_folders)}개 공유, "
+                f"{len(failed_folders)}개 실패"
+            )
+            logging.info(self.last_action)
+            detail = f"성공 {len(mounted_folders)}개" + (f", 실패 {len(failed_folders)}개" if failed_folders else "")
+            return True, detail
+        except Exception as e:
+            logging.error(f"bulk_mount_recent 실행 실패: {e}")
+            return False, str(e)
+
     def manual_sync_recent_folders_and_start_android(self, days: int = 3) -> tuple[bool, str]:
         """최근 N일 내 수정된 폴더를 SMB 공유 대상으로 반영하고 Android VM을 시작한다."""
         try:
@@ -1125,8 +1163,30 @@ class GShareManager:
             if payload and isinstance(payload.get("days"), int) and payload["days"] > 0:
                 days = payload["days"]
             self.manual_sync_recent_folders_and_start_android(days=days)
+        elif command == "bulk_mount_recent":
+            # payload에 days가 있으면 우선 사용, 없거나 무효하면 self.recent_mount_days 사용
+            days = 0
+            if payload and isinstance(payload.get("days"), int) and payload["days"] > 0:
+                days = payload["days"]
+            ok, detail = self.bulk_mount_recent(days=days)
+            logging.info(f"MQTT 수신 bulk_mount_recent(days={days or self.recent_mount_days}): {ok}, {detail}")
         else:
             logging.warning(f"지원하지 않는 MQTT 명령: {command}")
+
+    def handle_number_set(self, entity_id: str, value: float) -> None:
+        """MQTT number 엔티티 set 수신 시 처리"""
+        if entity_id == "recent_mount_days":
+            try:
+                v = int(value)
+                if v <= 0 or v > 3650:
+                    logging.warning(f"recent_mount_days 범위 오류: {v} (1~3650)")
+                    return
+                self.recent_mount_days = v
+                logging.info(f"recent_mount_days 갱신: {v}")
+            except (TypeError, ValueError):
+                logging.warning(f"recent_mount_days 변환 실패: {value}")
+        else:
+            logging.debug(f"처리되지 않은 number 엔티티: {entity_id}")
 
     def touch_event_relay(self) -> None:
         """이벤트 릴레이의 마지막 신호 수신 시각을 업데이트한다."""
@@ -1699,6 +1759,7 @@ if __name__ == "__main__":
                 logging.debug("GShareManager 객체 초기화 완료")
                 if mqtt_manager:
                     mqtt_manager.set_command_handler(gshare_manager.handle_mqtt_command)
+                    mqtt_manager.set_number_set_handler(gshare_manager.handle_number_set)
             except Exception as manager_error:
                 logging.error(f"GShareManager 객체 초기화 중 오류 발생: {manager_error}")
                 logging.error(f"상세 오류: {traceback.format_exc()}")

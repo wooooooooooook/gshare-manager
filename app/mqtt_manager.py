@@ -7,15 +7,20 @@ import paho.mqtt.client as mqtt  # type: ignore
 from config import GshareConfig  # type: ignore
 
 class MQTTManager:
-    def __init__(self, config: GshareConfig, command_handler: Optional[Callable[[str, Optional[Dict[str, Any]]], None]] = None):
+    def __init__(self, config: GshareConfig, command_handler: Optional[Callable[[str, Optional[Dict[str, Any]]], None]] = None,
+                 number_set_handler: Optional[Callable[[str, float], None]] = None):
         self.config = config
         self.client: Optional[mqtt.Client] = None
         self.connected = False
         self.command_handler = command_handler
+        self.number_set_handler = number_set_handler
         self._setup_client()
 
     def set_command_handler(self, handler: Optional[Callable[[str, Optional[Dict[str, Any]]], None]]) -> None:
         self.command_handler = handler
+
+    def set_number_set_handler(self, handler: Optional[Callable[[str, float], None]]) -> None:
+        self.number_set_handler = handler
 
     def _setup_client(self):
         if not getattr(self.config, 'MQTT_ENABLED', True):
@@ -58,6 +63,9 @@ class MQTTManager:
             self.client.publish(availability_topic, "online", retain=True)
             command_topic = f"{self.config.MQTT_TOPIC_PREFIX}/command"
             self.client.subscribe(command_topic, qos=0)
+            # number 엔티티 set 토픽도 구독 (양방향: 값 변경 시 백엔드 메모리에 반영)
+            number_set_topic = f"{self.config.MQTT_TOPIC_PREFIX}/recent_mount_days/set"
+            self.client.subscribe(number_set_topic, qos=0)
         else:
             logging.error(f"MQTT 연결 실패, 결과 코드: {rc}")
             self.connected = False
@@ -69,6 +77,22 @@ class MQTTManager:
     def _on_message(self, client, userdata, msg):
         try:
             payload_raw = msg.payload.decode("utf-8").strip()
+
+            # number 엔티티 set 토픽 처리: 숫자 페이로드를 number_set_handler로 위임
+            if msg.topic == f"{self.config.MQTT_TOPIC_PREFIX}/recent_mount_days/set":
+                try:
+                    value = float(payload_raw)
+                    # state 토픽에 retain 발행 (Home Assistant에 현재 값 반영)
+                    state_topic = f"{self.config.MQTT_TOPIC_PREFIX}/recent_mount_days/state"
+                    self.client.publish(state_topic, payload_raw, retain=True)
+                    if self.number_set_handler:
+                        self.number_set_handler("recent_mount_days", value)
+                    else:
+                        logging.warning("number_set_handler가 등록되지 않아 days 값을 메모리에 반영하지 않습니다.")
+                except ValueError:
+                    logging.warning(f"잘못된 number 페이로드: {payload_raw}")
+                return
+
             data: Optional[Dict[str, Any]] = None
             command = payload_raw
 
@@ -205,6 +229,29 @@ class MQTTManager:
                 "command_topic": f"{self.config.MQTT_TOPIC_PREFIX}/command",
                 "payload_press": "manual_sync_android_on",
                 "icon": "mdi:sync"
+            },
+            {
+                "name": "Recent Mount Days",
+                "id": "recent_mount_days",
+                "type": "number",
+                "command_topic": f"{self.config.MQTT_TOPIC_PREFIX}/recent_mount_days/set",
+                "state_topic": f"{self.config.MQTT_TOPIC_PREFIX}/recent_mount_days/state",
+                "command_template": "{ value }",
+                "min": 1,
+                "max": 3650,
+                "step": 1,
+                "initial": 3,
+                "mode": "box",
+                "unit_of_measurement": "days",
+                "icon": "mdi:calendar-clock"
+            },
+            {
+                "name": "Bulk Mount Recent",
+                "id": "bulk_mount_recent",
+                "type": "button",
+                "command_topic": f"{self.config.MQTT_TOPIC_PREFIX}/command",
+                "payload_press": "bulk_mount_recent",
+                "icon": "mdi:folder-multiple-plus"
             }
         ]
 
@@ -224,6 +271,13 @@ class MQTTManager:
         if sensor["type"] == "button":
             payload["command_topic"] = sensor["command_topic"]
             payload["payload_press"] = sensor["payload_press"]
+        elif sensor["type"] == "number":
+            payload["command_topic"] = sensor["command_topic"]
+            payload["state_topic"] = sensor["state_topic"]
+            payload["command_template"] = sensor["command_template"]
+            for k in ("min", "max", "step", "initial", "mode", "unit_of_measurement"):
+                if k in sensor:
+                    payload[k] = sensor[k]
         elif sensor["type"] == "camera":
             payload["topic"] = sensor["topic"]
             payload["image_encoding"] = sensor.get("image_encoding", "b64")
