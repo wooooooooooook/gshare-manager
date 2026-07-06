@@ -348,19 +348,19 @@
 					</div>
 					<div class="grid grid-cols-3 gap-2">
 						<button onclick="startVM()"
-							class="hidden border border-gray-200 hover:bg-gray-50 text-gray-800 rounded-lg p-2 transition-colors duration-200">
+							class="vm-stopped-element hidden border border-gray-200 hover:bg-gray-50 text-gray-800 rounded-lg p-2 transition-colors duration-200">
 							<div class="flex items-center justify-center gap-1">
 								<span class="text-sm font-medium">VM 시작</span>
 							</div>
 						</button>
 						<button onclick="rebootVM()"
-							class="hidden border border-orange-200 hover:bg-orange-50 text-orange-700 bg-orange-50 rounded-lg p-2 transition-colors duration-200">
+							class="vm-running-element hidden border border-orange-200 hover:bg-orange-50 text-orange-700 bg-orange-50 rounded-lg p-2 transition-colors duration-200">
 							<div class="flex items-center justify-center gap-1">
 								<span class="text-sm font-medium">재부팅</span>
 							</div>
 						</button>
 						<button onclick="shutdownVM()"
-							class="hidden border border-gray-200 hover:bg-gray-50 text-gray-800 rounded-lg p-2 transition-colors duration-200">
+							class="vm-running-element hidden border border-gray-200 hover:bg-gray-50 text-gray-800 rounded-lg p-2 transition-colors duration-200">
 							<div class="flex items-center justify-center gap-1">
 								<span class="text-sm font-medium">VM 종료</span>
 							</div>
