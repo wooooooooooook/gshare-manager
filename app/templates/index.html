@@ -101,9 +101,22 @@
 				</div>
 			</div>
 
+			<!-- 모바일 서브 탭 네비게이션 -->
+			<div class="flex md:hidden bg-gray-100 p-1 rounded-lg border border-gray-200 mb-4">
+				<button onclick="switchSubTab('nas')" id="subtab-nas-btn" class="flex-1 flex items-center justify-center gap-1 py-2 text-xs font-medium rounded-md transition-all duration-200 bg-white text-blue-600 shadow-sm">
+					From NAS
+				</button>
+				<button onclick="switchSubTab('gshare')" id="subtab-gshare-btn" class="flex-1 flex items-center justify-center gap-1 py-2 text-xs font-medium rounded-md transition-all duration-200 text-gray-600 hover:text-gray-900">
+					GShare
+				</button>
+				<button onclick="switchSubTab('vm')" id="subtab-vm-btn" class="flex-1 flex items-center justify-center gap-1 py-2 text-xs font-medium rounded-md transition-all duration-200 text-gray-600 hover:text-gray-900">
+					Android VM
+				</button>
+			</div>
+
 			<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
 				<!-- NFS 마운트 상태 패널 -->
-				<div class="border border-gray-200 rounded-md p-2 bg-white flex flex-col min-h-[60vh] md:min-h-[75vh] max-h-none">
+				<div id="panel-nas" class="border border-gray-200 rounded-md p-2 bg-white flex flex-col min-h-[60vh] md:min-h-[75vh] max-h-none md:flex">
 					<div class="flex items-center gap-2 mb-2">
 						<h3 class="font-medium">From NAS</h3>
 						<span id="totalFolderCountbadge" class="hidden text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium border border-blue-200"></span>
@@ -194,8 +207,8 @@
 				</div>
 
 				<!-- SMB 상태 패널 -->
-				<div
-					class="border border-gray-200 rounded-md p-2 bg-white flex flex-col min-h-[60vh] md:min-h-[75vh] max-h-none {% if state['nfs_status'] != 'ON' %}opacity-50 pointer-events-none{% endif %}">
+				<div id="panel-gshare"
+					class="border border-gray-200 rounded-md p-2 bg-white hidden md:flex flex-col min-h-[60vh] md:min-h-[75vh] max-h-none {% if state['nfs_status'] != 'ON' %}opacity-50 pointer-events-none{% endif %}">
 					<h3 class="font-medium mb-2">GShare</h3>
 					<div onclick="toggleSMB()" style="cursor: pointer" title="클릭하여 SMB 토글"
 						class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 mb-2 smb-status-container">
@@ -236,7 +249,7 @@
 				</div>
 
 				<!-- VM 상태 패널 -->
-				<div class="border border-gray-200 rounded-md p-2 bg-white flex flex-col min-h-[60vh] md:min-h-[75vh] max-h-none">
+				<div id="panel-vm" class="border border-gray-200 rounded-md p-2 bg-white hidden md:flex flex-col min-h-[60vh] md:min-h-[75vh] max-h-none">
 					<h3 class="font-medium mb-2">Android VM</h3>
 					<div
 						class="flex justify-between bg-gray-50 rounded-lg p-2 border border-gray-200 mb-2 vm-status-container">
@@ -637,10 +650,41 @@
 			}
 		}
 
+		function switchSubTab(subTabId) {
+			const subTabs = ['nas', 'gshare', 'vm'];
+			
+			subTabs.forEach(id => {
+				const panel = document.getElementById(`panel-${id}`);
+				const btn = document.getElementById(`subtab-${id}-btn`);
+				
+				if (panel) {
+					if (id === subTabId) {
+						panel.classList.remove('hidden');
+						panel.classList.add('flex');
+					} else {
+						panel.classList.add('hidden');
+						panel.classList.remove('flex');
+					}
+				}
+				
+				if (btn) {
+					if (id === subTabId) {
+						btn.className = "flex-1 flex items-center justify-center gap-1 py-2 text-xs font-medium rounded-md transition-all duration-200 bg-white text-blue-600 shadow-sm";
+					} else {
+						btn.className = "flex-1 flex items-center justify-center gap-1 py-2 text-xs font-medium rounded-md transition-all duration-200 text-gray-600 hover:text-gray-900";
+					}
+				}
+			});
+			localStorage.setItem('gshare_active_subtab', subTabId);
+		}
+
 		// 페이지 로드 완료 시 캐시된 탭 복원
 		document.addEventListener('DOMContentLoaded', () => {
 			const savedTab = localStorage.getItem('gshare_active_tab') || 'dashboard';
 			switchTab(savedTab);
+			
+			const savedSubTab = localStorage.getItem('gshare_active_subtab') || 'nas';
+			switchSubTab(savedSubTab);
 		});
 	</script>
 </body>
