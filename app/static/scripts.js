@@ -1003,6 +1003,37 @@ function shutdownVM() {
     }
 }
 
+function rebootVM() {
+    if (confirm('안드로이드를 재부팅하시겠습니까? (SMB 공유는 유지됩니다)')) {
+        const statusDiv = document.getElementById('vmControlStatus');
+        const statusText = document.getElementById('vmControlStatusText');
+        statusDiv.classList.remove('hidden');
+        statusText.textContent = 'VM 재부팅 중입니다... (SMB 유지)';
+
+        fetch('/reboot_vm')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    statusText.textContent = data.message;
+                    console.log('=== VM 재부팅 요청 성공 ===');
+
+                    setTimeout(() => {
+                        updateFolderState();
+                        statusDiv.classList.add('hidden');
+                    }, 2000);
+                } else {
+                    throw new Error(data.message);
+                }
+            })
+            .catch(error => {
+                statusText.textContent = '오류: ' + error.message;
+                setTimeout(() => {
+                    statusDiv.classList.add('hidden');
+                }, 3000);
+            });
+    }
+}
+
 function updateFolderNameScrolling(root = document) {
     // 애니메이션 기능 비활성화 (성능 문제로 인해 수동 스크롤로 대체됨)
 }

@@ -346,11 +346,17 @@
 								이상이면</span>
 						</div>
 					</div>
-					<div class="grid grid-cols-2 gap-2">
+					<div class="grid grid-cols-3 gap-2">
 						<button onclick="startVM()"
 							class="hidden border border-gray-200 hover:bg-gray-50 text-gray-800 rounded-lg p-2 transition-colors duration-200">
 							<div class="flex items-center justify-center gap-1">
 								<span class="text-sm font-medium">VM 시작</span>
+							</div>
+						</button>
+						<button onclick="rebootVM()"
+							class="hidden border border-orange-200 hover:bg-orange-50 text-orange-700 bg-orange-50 rounded-lg p-2 transition-colors duration-200">
+							<div class="flex items-center justify-center gap-1">
+								<span class="text-sm font-medium">재부팅</span>
 							</div>
 						</button>
 						<button onclick="shutdownVM()"
@@ -359,7 +365,7 @@
 								<span class="text-sm font-medium">VM 종료</span>
 							</div>
 						</button>
-						<div id="vmControlStatus" class="col-span-2 text-sm text-center hidden">
+						<div id="vmControlStatus" class="col-span-3 text-sm text-center hidden">
 							<span class="inline-flex items-center">
 								<svg class="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg"
 									fill="none" viewBox="0 0 24 24">
@@ -612,7 +618,7 @@
 	<script>
 		window.SMB_SHARE_MODE = "{{ config.SMB_SHARE_MODE if config else 'folder' }}";
 	</script>
-	<script src="{{ url_for('static', filename='scripts.js') }}?v=1.2"></script>
+	<script src="{{ url_for('static', filename='scripts.js') }}?v=1.3"></script>
 	<script>
 		function switchTab(tabId) {
 			// 모든 탭 컨텐츠 숨기기
