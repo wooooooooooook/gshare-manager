@@ -451,7 +451,7 @@ class FolderMonitor:
         active_folders = set()
         file_shares = {}  # file_name -> subfolder
         if self.config.SMB_SHARE_MODE == 'file' and hasattr(self.smb_manager, '_active_links'):
-            mount_path = self.manager.config.MOUNT_PATH
+            mount_path = self.config.MOUNT_PATH
             mount_prefix = mount_path.rstrip(os.sep) + os.sep
             links_dir = self.smb_manager.links_dir
             if os.path.isdir(links_dir):
