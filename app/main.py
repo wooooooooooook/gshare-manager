@@ -98,6 +98,7 @@ class State:
     event_enabled: bool = True
     smb_enabled: bool = True
     vm_monitor_enabled: bool = True
+    recent_mount_days: int = 3
 
     def to_dict(self):
         data = asdict(self)
@@ -443,30 +444,40 @@ class FolderMonitor:
             # mtime가 있는 항목 우선, 이후 최신순, 마지막으로 경로명 순 정렬
             return (0 if mtime is not None else 1, -(mtime or 0.0), path)
 
-        # 파일 단위 공유 모드이고 활성 링크가 있는 경우, 각 활성 링크가 실제로 가리키는 가장 구체적인(가장 긴) 감시 폴더를 구합니다.
+        # 파일 단위 공유 모드: links_dir 내 단일 파일 심링크를 직접 스캔하여
+        # 1) 어떤 파일이 공유 중인지, 2) 어느 감시 폴더에 속하는지 복원합니다.
+        # 심링크 target은 "<MOUNT_PATH>/<subfolder>/<file_name>" 형식이므로,
+        # MOUNT_PATH prefix를 제거하여 subfolder와 file_name을 얻습니다.
         active_folders = set()
+        file_shares = {}  # file_name -> subfolder
         if self.config.SMB_SHARE_MODE == 'file' and hasattr(self.smb_manager, '_active_links'):
-            for item in self.smb_manager._active_links:
-                # 만약 item 자체가 감시 대상 폴더 중 하나와 정확히 일치하면, 파일 마운트가 아니라 폴더 마운트이므로
-                # 하위 파일에 대한 마운트 탐색(longest_match)에서 제외합니다.
-                is_direct_folder = False
-                for path in folders_with_mtime:
-                    if path.replace(os.sep, '_') == item:
-                        is_direct_folder = True
-                        break
-                if is_direct_folder:
-                    continue
+            mount_path = self.manager.config.MOUNT_PATH
+            mount_prefix = mount_path.rstrip(os.sep) + os.sep
+            links_dir = self.smb_manager.links_dir
+            if os.path.isdir(links_dir):
+                try:
+                    for entry in os.listdir(links_dir):
+                        if entry == ".tmp":
+                            continue
+                        entry_path = os.path.join(links_dir, entry)
+                        if not (os.path.lexists(entry_path) and os.path.islink(entry_path)):
+                            continue
+                        try:
+                            target = os.readlink(entry_path)
+                        except OSError:
+                            continue
+                        # target이 MOUNT_PATH 하위인지 확인
+                        if target.startswith(mount_prefix):
+                            rel = target[len(mount_prefix):]
+                            if '/' in rel:
+                                subfolder, file_name = rel.rsplit('/', 1)
+                                if subfolder and file_name == entry:
+                                    file_shares[entry] = subfolder
+                except Exception as e:
+                    logging.error(f"links_dir 스캔 중 오류: {e}")
 
-                longest_match = None
-                longest_len = -1
-                for path in folders_with_mtime:
-                    link_name = path.replace(os.sep, '_')
-                    if item.startswith(link_name + '_'):
-                        if len(link_name) > longest_len:
-                            longest_len = len(link_name)
-                            longest_match = path
-                if longest_match:
-                    active_folders.add(longest_match)
+            # 어떤 감시 폴더가 자신의 자식 파일을 공유 중인지
+            active_folders = {subfolder for subfolder in file_shares.values()}
 
         monitored_folders = {}
         for path, mtime in sorted(folders_with_mtime.items(), key=sort_key):
@@ -487,71 +498,16 @@ class FolderMonitor:
                 'is_folder_mount': is_folder_mount
             }
 
-        # 파일 모드일 때 현재 실제 활성화되어 있는 개별 파일 심링크 폴더들을 목록에 동적 주입해 줍니다.
-        if self.config.SMB_SHARE_MODE == 'file':
-            for active_link in self.smb_manager._active_links:
-                if active_link == ".tmp":
-                    continue
-
-                # 1) 만약 active_link가 "_files"로 끝나고 그에 해당하는 원래 폴더 경로가 있으면:
-                # 그 폴더 내부의 파일들(symlinks)을 각각 개별 파일 마운트 항목으로 목록에 주입합니다.
-                matched_folder_path = None
-                if active_link.endswith("_files"):
-                    base_link_name = active_link[:-6] # "_files" 제거
-                    for path in folders_with_mtime:
-                        if path.replace(os.sep, '_') == base_link_name:
-                            matched_folder_path = path
-                            break
-
-                if matched_folder_path:
-                    # 해당 공유 폴더 내부를 직접 조회하여 실제 마운트된 파일 심링크 목록을 주입
-                    parent_dir_path = os.path.join(self.smb_manager.links_dir, active_link)
-                    if os.path.exists(parent_dir_path) and os.path.isdir(parent_dir_path):
-                        try:
-                            for name in os.listdir(parent_dir_path):
-                                if name == ".tmp":
-                                    continue
-                                file_link_path = os.path.join(parent_dir_path, name)
-                                if os.path.lexists(file_link_path) and os.path.islink(file_link_path):
-                                    file_path = f"{matched_folder_path}/{name}"
-                                    if file_path not in monitored_folders:
-                                        monitored_folders[file_path] = {
-                                            'mtime': '-',
-                                            'is_mounted': True,
-                                            'is_file': True
-                                        }
-                        except Exception as e:
-                            logging.error(f"공유 디렉토리 파일 조회 중 오류: {e}")
-                    continue
-
-                # 2) 감시 목록 상의 원래 폴더 형식이 아니면 개별 파일 가상 폴더(구 방식)로 간주하여 목록에 추가
-                # 이때, active_link (예: MobileBackup_영욱의 Z Flip6_DCIM_2026_photo.jpg)를 실제 파일 경로 형식으로 변환하여 추가합니다.
-                longest_match = None
-                longest_len = -1
-                for path in folders_with_mtime:
-                    link_name = path.replace(os.sep, '_')
-                    if active_link.startswith(link_name + '_'):
-                        if len(link_name) > longest_len:
-                            longest_len = len(link_name)
-                            longest_match = path
-                
-                if longest_match:
-                    file_name = active_link[longest_len + 1:]  # link_name + '_' 이후가 파일명
-                    file_path = f"{longest_match}/{file_name}"
-                    if file_path not in monitored_folders:
-                        monitored_folders[file_path] = {
-                            'mtime': '-',
-                            'is_mounted': True,
-                            'is_file': True
-                        }
-                else:
-                    # 매칭되는 폴더가 없는 극히 예외적인 경우 기존 방식 유지
-                    if active_link not in monitored_folders:
-                        monitored_folders[active_link] = {
-                            'mtime': '-',
-                            'is_mounted': True,
-                            'is_file': True
-                        }
+        # 파일 모드: 실제 공유 중인 개별 파일을 목록에 주입
+        if self.config.SMB_SHARE_MODE == 'file' and file_shares:
+            for file_name, subfolder in file_shares.items():
+                file_path = f"{subfolder}/{file_name}"
+                if file_path not in monitored_folders:
+                    monitored_folders[file_path] = {
+                        'mtime': '-',
+                        'is_mounted': True,
+                        'is_file': True
+                    }
 
         return monitored_folders
 
@@ -1122,54 +1078,26 @@ class GShareManager:
             logging.error(f"bulk_mount_recent 실행 실패: {e}")
             return False, str(e)
 
-    def manual_sync_recent_folders_and_start_android(self, days: int = 3) -> tuple[bool, str]:
-        """최근 N일 내 수정된 폴더를 SMB 공유 대상으로 반영하고 Android VM을 시작한다."""
-        try:
-            threshold_epoch = time.time() - (days * 86400)
-            recent_folders = [
-                path for path, mtime in self.folder_monitor.previous_mtimes.items()
-                if mtime and mtime >= threshold_epoch
-            ]
-            mount_targets = self.folder_monitor._filter_mount_targets(recent_folders)
-
-            mounted_folders: list[str] = []
-            for folder in mount_targets:
-                if self.smb_manager.create_symlink(folder):
-                    mounted_folders.append(folder)
-
-            if mounted_folders:
-                self.smb_manager.activate_smb_share()
-
-            vm_started = False
-            if not self.proxmox_api.is_vm_running():
-                vm_started = self.proxmox_api.start_vm()
-            else:
-                vm_started = True
-
-            self.last_action = (
-                f"수동 동기화(MQTT): 최근 {days}일 변경 폴더 {len(mounted_folders)}개 공유, "
-                f"Android VM {'ON' if vm_started else '시작실패'}"
-            )
-            logging.info(self.last_action)
-            return True, self.last_action
-        except Exception as e:
-            logging.error(f"수동 동기화(MQTT) 실행 실패: {e}")
-            return False, str(e)
-
     def handle_mqtt_command(self, command: str, payload: Optional[dict] = None) -> None:
         """MQTT 명령 처리"""
-        if command == "manual_sync_android_on":
-            days = 3
-            if payload and isinstance(payload.get("days"), int) and payload["days"] > 0:
-                days = payload["days"]
-            self.manual_sync_recent_folders_and_start_android(days=days)
-        elif command == "bulk_mount_recent":
+        if command == "bulk_mount_recent":
             # payload에 days가 있으면 우선 사용, 없거나 무효하면 self.recent_mount_days 사용
             days = 0
             if payload and isinstance(payload.get("days"), int) and payload["days"] > 0:
                 days = payload["days"]
             ok, detail = self.bulk_mount_recent(days=days)
             logging.info(f"MQTT 수신 bulk_mount_recent(days={days or self.recent_mount_days}): {ok}, {detail}")
+        elif command == "android_vm_on":
+            if not self.proxmox_api.is_vm_running():
+                success = self.proxmox_api.start_vm()
+                self.last_action = f"Android VM ON (MQTT): {'성공' if success else '실패'}"
+            else:
+                self.last_action = "Android VM ON (MQTT): 이미 실행 중"
+            logging.info(self.last_action)
+            # 상태 강제 업데이트 전송
+            self.current_state = self.update_state(update_monitored_folders=False)
+            if self.mqtt_manager:
+                self.mqtt_manager.publish_state(self.current_state)
         else:
             logging.warning(f"지원하지 않는 MQTT 명령: {command}")
 
@@ -1278,7 +1206,8 @@ class GShareManager:
                 polling_enabled=self.config.POLLING_ENABLED,
                 event_enabled=self.config.EVENT_ENABLED,
                 smb_enabled=self.config.SMB_ENABLED,
-                vm_monitor_enabled=self.config.VM_MONITOR_ENABLED
+                vm_monitor_enabled=self.config.VM_MONITOR_ENABLED,
+                recent_mount_days=self.recent_mount_days
             )
             return current_state
         except Exception as e:
@@ -1308,7 +1237,8 @@ class GShareManager:
                 polling_enabled=True,
                 event_enabled=True,
                 smb_enabled=True,
-                vm_monitor_enabled=True
+                vm_monitor_enabled=True,
+                recent_mount_days=3
             )
 
     def monitor(self) -> None:

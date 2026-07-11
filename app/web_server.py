@@ -925,7 +925,7 @@ class GshareWebServer:
                         fail_count += 1
                         logging.error(f"일괄 마운트 중 폴더 마운트 실패: {folder}")
 
-                # 2-2. 파일 일괄 마운트 (동일 서브폴더에 속한 파일은 한 번에 업데이트)
+                # 2-2. 파일 일괄 마운트 (links_dir/file_name 위치에 단일 심링크 생성)
                 for subfolder, file_names in files_by_subfolder.items():
                     # 부모 폴더가 이미 공유중인지 체크하여 스킵
                     if subfolder and self.manager.smb_manager.is_ancestor_shared(subfolder):
@@ -933,32 +933,12 @@ class GshareWebServer:
                         success_count += len(file_names)
                         continue
 
-                    parent_dir_name = f"{subfolder.replace(os.sep, '_')}_files"
-                    target_dir_path = os.path.join(self.manager.smb_manager.links_dir, parent_dir_name)
-                    
-                    # 기존 마운트된 파일 목록 조회
-                    current_files = set()
-                    if os.path.exists(target_dir_path) and os.path.isdir(target_dir_path):
-                        try:
-                            for name in os.listdir(target_dir_path):
-                                if name == ".tmp":
-                                    continue
-                                file_link_path = os.path.join(target_dir_path, name)
-                                if os.path.lexists(file_link_path) and os.path.islink(file_link_path):
-                                    current_files.add(name)
-                        except Exception as e:
-                            logging.warning(f"일괄 마운트 기존 파일 목록 조회 실패: {e}")
-                            
-                    # 신규 파일 추가
                     for name in file_names:
-                        current_files.add(name)
-                        
-                    # 원자적 디렉토리 한 번에 갱신
-                    if self.manager.smb_manager._atomic_update_files_directory(subfolder, current_files):
-                        success_count += len(file_names)
-                    else:
-                        fail_count += len(file_names)
-                        logging.error(f"일괄 마운트 중 파일 디렉토리 갱신 실패: {subfolder}")
+                        if self.manager.smb_manager.create_file_symlink(subfolder, name):
+                            success_count += 1
+                        else:
+                            fail_count += 1
+                            logging.error(f"일괄 마운트 중 파일 심링크 생성 실패: {subfolder}/{name}")
 
                 # 2-3. 최종 SMB 활성화 및 설정 반영 (단 한 번만 실행!)
                 if success_count > 0:
@@ -973,49 +953,16 @@ class GshareWebServer:
                         fail_count += 1
                         logging.error(f"일괄 해제 중 폴더 마운트 해제 실패: {folder}")
 
-                # 2-2. 파일 일괄 마운트 해제 (동일 서브폴더에 속한 파일은 한 번에 업데이트)
+                # 2-2. 파일 일괄 마운트 해제 (links_dir/file_name 위치의 단일 심링크 제거)
                 for subfolder, file_names in files_by_subfolder.items():
-                    parent_dir_name = f"{subfolder.replace(os.sep, '_')}_files"
-                    parent_dir_path = os.path.join(self.manager.smb_manager.links_dir, parent_dir_name)
-                    
-                    if os.path.exists(parent_dir_path) and os.path.isdir(parent_dir_path):
-                        # 기존 마운트된 파일 목록 조회
-                        current_files = set()
-                        try:
-                            for name in os.listdir(parent_dir_path):
-                                if name == ".tmp":
-                                    continue
-                                file_link_path = os.path.join(parent_dir_path, name)
-                                if os.path.lexists(file_link_path) and os.path.islink(file_link_path):
-                                    current_files.add(name)
-                        except Exception as e:
-                            logging.warning(f"일괄 해제 기존 파일 목록 조회 실패: {e}")
-                            
-                        # 대상 파일들 제거
-                        removed_any = False
-                        for name in file_names:
-                            if name in current_files:
-                                current_files.remove(name)
-                                removed_any = True
-                                
-                        if removed_any:
-                            if not current_files:
-                                # 남은 파일이 없으면 폴더 전체 삭제
-                                trash_dir = tempfile.mktemp(dir=os.path.join(self.manager.smb_manager.links_dir, ".tmp"))
-                                os.rename(parent_dir_path, trash_dir)
-                                shutil.rmtree(trash_dir)
-                                self.manager.smb_manager._active_links.discard(parent_dir_name)
-                                success_count += len(file_names)
-                            else:
-                                # 남은 파일이 있으면 원자적으로 폴더 갱신 (단 한 번만 호출!)
-                                if self.manager.smb_manager._atomic_update_files_directory(subfolder, current_files):
-                                    success_count += len(file_names)
-                                else:
-                                    fail_count += len(file_names)
+                    for name in file_names:
+                        # 'parent_dir/file_name' 형식 입력도 처리
+                        target = f"{subfolder}/{name}" if subfolder else name
+                        if self.manager.smb_manager.remove_symlink(target):
+                            success_count += 1
                         else:
-                            success_count += len(file_names)
-                    else:
-                        success_count += len(file_names)
+                            fail_count += 1
+                            logging.error(f"일괄 해제 중 파일 심링크 제거 실패: {target}")
 
                 # 2-3. 남은 심볼릭 링크 존재 여부 확인 및 최종 SMB 비활성화 여부 판단 (단 한 번만 실행!)
                 remaining_symlinks = len(self.manager.smb_manager._active_links) > 0
@@ -1102,17 +1049,14 @@ class GshareWebServer:
                     if os.path.exists(link_file) and os.path.islink(link_file):
                         is_mounted = True
 
-            # 부모 폴더 내 일괄 파일 마운트 방식도 체크
+            # 파일 단위 공유: links_dir/file_name 위치의 단일 심링크 검사
             if not is_mounted:
                 parts = folder.rsplit('/', 1)
                 if len(parts) > 1:
-                    subfolder, file_name = parts[0], parts[1]
-                    parent_dir_name = f"{subfolder.replace(os.sep, '_')}_files"
-                    parent_dir_path = os.path.join(links_dir, parent_dir_name)
-                    if os.path.exists(parent_dir_path) and os.path.isdir(parent_dir_path):
-                        link_file = os.path.join(parent_dir_path, file_name)
-                        if os.path.lexists(link_file) and os.path.islink(link_file):
-                            is_mounted = True
+                    file_name = parts[1]
+                    file_link_path = os.path.join(links_dir, file_name)
+                    if os.path.lexists(file_link_path) and os.path.islink(file_link_path):
+                        is_mounted = True
 
             # 실제 대상이 파일인지 폴더인지 구분
             source_path = os.path.join(self.manager.config.MOUNT_PATH, folder)
@@ -1172,25 +1116,9 @@ class GshareWebServer:
             for name in os.listdir(abs_path):
                 full_file_path = os.path.join(abs_path, name)
                 if os.path.isfile(full_file_path):
-                    # 마운트 상태 체크
-                    is_mounted = False
-                    
-                    # 1) 개별 파일 전용 폴더 방식 체크
-                    unique_folder_name = f"{folder_path}_{name}".replace(os.sep, '_')
-                    target_dir_path = os.path.join(links_dir, unique_folder_name)
-                    if os.path.exists(target_dir_path) and os.path.isdir(target_dir_path):
-                        link_file = os.path.join(target_dir_path, name)
-                        if os.path.lexists(link_file) and os.path.islink(link_file):
-                            is_mounted = True
-                            
-                    # 2) 부모 폴더 내 일괄 파일 마운트 방식 체크
-                    if not is_mounted:
-                        parent_dir_name = f"{folder_path.replace(os.sep, '_')}_files"
-                        parent_dir_path = os.path.join(links_dir, parent_dir_name)
-                        if os.path.exists(parent_dir_path) and os.path.isdir(parent_dir_path):
-                            link_file = os.path.join(parent_dir_path, name)
-                            if os.path.lexists(link_file) and os.path.islink(link_file):
-                                is_mounted = True
+                    # 마운트 상태 체크: 파일 단위 공유는 links_dir/file_name에 단일 심링크
+                    is_mounted = os.path.lexists(os.path.join(links_dir, name)) and \
+                                 os.path.islink(os.path.join(links_dir, name))
 
                     mtime = os.path.getmtime(full_file_path)
                     mtime_str = datetime.fromtimestamp(mtime, self.manager.local_tz).strftime('%Y-%m-%d %H:%M:%S')

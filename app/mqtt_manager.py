@@ -134,7 +134,13 @@ class MQTTManager:
                 # 상세 정보는 제거하거나 별도 토픽으로 발행 고려 (여기서는 간단히 제거하지 않음)
 
             self.client.publish(topic, json.dumps(payload, default=str))
-            # logging.debug(f"MQTT 상태 발행 완료: {topic}")
+
+            # recent_mount_days number 엔티티 state_topic에 retain 발행
+            if 'recent_mount_days' in payload:
+                rmd = int(payload['recent_mount_days'])
+                self.client.publish(
+                    f"{self.config.MQTT_TOPIC_PREFIX}/recent_mount_days/state",
+                    str(rmd), retain=True)
 
         except Exception as e:
             logging.error(f"MQTT 상태 발행 중 오류: {e}")
@@ -223,20 +229,11 @@ class MQTTManager:
                 "icon": "mdi:camera"
             },
             {
-                "name": "Manual Sync Android On",
-                "id": "manual_sync_android_on",
-                "type": "button",
-                "command_topic": f"{self.config.MQTT_TOPIC_PREFIX}/command",
-                "payload_press": "manual_sync_android_on",
-                "icon": "mdi:sync"
-            },
-            {
                 "name": "Recent Mount Days",
                 "id": "recent_mount_days",
                 "type": "number",
                 "command_topic": f"{self.config.MQTT_TOPIC_PREFIX}/recent_mount_days/set",
                 "state_topic": f"{self.config.MQTT_TOPIC_PREFIX}/recent_mount_days/state",
-                "command_template": "{ value }",
                 "min": 1,
                 "max": 3650,
                 "step": 1,
@@ -252,6 +249,14 @@ class MQTTManager:
                 "command_topic": f"{self.config.MQTT_TOPIC_PREFIX}/command",
                 "payload_press": "bulk_mount_recent",
                 "icon": "mdi:folder-multiple-plus"
+            },
+            {
+                "name": "Android VM On",
+                "id": "android_vm_on",
+                "type": "button",
+                "command_topic": f"{self.config.MQTT_TOPIC_PREFIX}/command",
+                "payload_press": "android_vm_on",
+                "icon": "mdi:play"
             }
         ]
 
@@ -274,7 +279,6 @@ class MQTTManager:
         elif sensor["type"] == "number":
             payload["command_topic"] = sensor["command_topic"]
             payload["state_topic"] = sensor["state_topic"]
-            payload["command_template"] = sensor["command_template"]
             for k in ("min", "max", "step", "initial", "mode", "unit_of_measurement"):
                 if k in sensor:
                     payload[k] = sensor[k]
