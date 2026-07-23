@@ -120,6 +120,44 @@ class Transcoder:
 
         return None
 
+    def _is_output_pattern_file(self, filename: str, output_pattern: str) -> bool:
+        """파일명이 트랜스코딩 출력 패턴에 의해 생성된 파일인지 검사하여 중복 트랜스코딩 방지"""
+        if not output_pattern or '{{filename}}' not in output_pattern:
+            return False
+
+        parts = output_pattern.split('{{filename}}', 1)
+        prefix = parts[0]
+        suffix_template = parts[1]
+
+        # 1. 접두사(prefix) 검사 (예: transcoded_{{filename}}.{{ext}} -> prefix: "transcoded_")
+        if prefix and filename.startswith(prefix):
+            return True
+
+        # 2. 중간/접미사(suffix) 검사 (예: {{filename}}.transcoded.{{ext}} -> suffix_template: ".transcoded.{{ext}}")
+        if suffix_template:
+            marker = suffix_template.replace('{{ext}}', '')
+            if marker and marker != '.':
+                if marker in filename:
+                    return True
+
+        return False
+
+    def _is_any_output_pattern_file(self, filename: str, matched_rule: Optional[Dict[str, Any]] = None) -> bool:
+        """현재 규칙 또는 등록된 모든 규칙의 출력 패턴과 일치하는지 검사"""
+        if matched_rule:
+            rule_pattern = matched_rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
+            if self._is_output_pattern_file(filename, rule_pattern):
+                return True
+
+        for rule in self.rules:
+            if rule is matched_rule:
+                continue
+            pat = rule.get('output_pattern')
+            if pat and self._is_output_pattern_file(filename, pat):
+                return True
+
+        return False
+
     def _is_skippable_file(self, filename: str, done_set: Any) -> bool:
         """스캔/트랜스코딩 공통 건너뛰기 조건"""
         if filename == self.done_filename:
@@ -158,6 +196,9 @@ class Transcoder:
                 if rule is None:
                     continue
 
+                if self._is_any_output_pattern_file(filename, rule):
+                    continue
+
                 yield root, filename, rule
 
     def _iter_known_folder_matches(self, folder_path: str, subfolders: List[str]):
@@ -184,6 +225,9 @@ class Transcoder:
                         if rule is None:
                             continue
 
+                        if self._is_any_output_pattern_file(filename, rule):
+                            continue
+
                         yield full_path, filename, rule
             except OSError as e:
                 logging.debug(f"폴더 재사용 스캔 실패(무시): {full_path} - {e}")
@@ -193,6 +237,7 @@ class Transcoder:
         if not self.enabled or not getattr(self, '_optimized_rules', None):
             return None
 
+        filename = os.path.basename(file_path)
         _, ext = os.path.splitext(file_path)
         ext = ext.lower()
 
@@ -211,6 +256,9 @@ class Transcoder:
             if extensions and ext not in extensions:
                 continue
 
+            if self._is_any_output_pattern_file(filename, optimized['original']):
+                continue
+
             return optimized['original']
 
         return None
@@ -220,6 +268,7 @@ class Transcoder:
         if not getattr(self, '_optimized_rules', None):
             return None
 
+        filename = os.path.basename(file_path)
         _, ext = os.path.splitext(file_path)
         ext = ext.lower()
 
@@ -235,6 +284,10 @@ class Transcoder:
             # 확장자 매칭 (set 조회 O(1))
             if extensions and ext not in extensions:
                 continue
+
+            if self._is_any_output_pattern_file(filename, optimized['original']):
+                continue
+
             return optimized['original']
         return None
 
@@ -297,19 +350,21 @@ class Transcoder:
                 return 0
 
             for root, filename, rule in self._iter_walk_matches(folder_path, recursive=recursive):
-                    file_path = os.path.join(root, filename)
+                file_path = os.path.join(root, filename)
 
-                    # 출력 패턴 기반 건너뛰기 (보조)
+                if self._is_any_output_pattern_file(filename, rule):
+                    continue
+
+                success = self.transcode_file(file_path, rule)
+                if success:
                     output_pattern = rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
-                    if '{{filename}}' in output_pattern:
-                        pattern_parts = output_pattern.replace('{{ext}}', '').replace('{{filename}}', '')
-                        if pattern_parts and pattern_parts in filename:
-                            continue
+                    file_name, file_ext = os.path.splitext(filename)
+                    output_filename = self._apply_output_pattern(file_name, file_ext, output_pattern)
 
-                    success = self.transcode_file(file_path, rule)
-                    if success:
-                        self._mark_done(root, filename)
-                        processed_count += 1
+                    self._mark_done(root, filename)
+                    if output_filename != filename:
+                        self._mark_done(root, output_filename)
+                    processed_count += 1
 
         except Exception as e:
             logging.error(f"폴더 트랜스코딩 중 오류 발생 ({folder_path}): {e}")
@@ -659,7 +714,14 @@ class Transcoder:
 
                 success = self.transcode_file(file_path, rule)
                 if success:
-                    self._mark_done(item.get('folder', os.path.dirname(file_path)), filename)
+                    folder = item.get('folder', os.path.dirname(file_path))
+                    output_pattern = rule.get('output_pattern', '{{filename}}.transcoded.{{ext}}')
+                    file_name, file_ext = os.path.splitext(filename)
+                    output_filename = self._apply_output_pattern(file_name, file_ext, output_pattern)
+
+                    self._mark_done(folder, filename)
+                    if output_filename != filename:
+                        self._mark_done(folder, output_filename)
                     completed += 1
                 else:
                     failed += 1
