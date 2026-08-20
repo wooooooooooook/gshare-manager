@@ -12,6 +12,22 @@ import pytz  # type: ignore
 import yaml  # type: ignore
 import socket
 import tempfile
+try:
+    from app.nfs_utils import (
+        DEFAULT_NFS_OPTIONS,
+        find_nfs_mount_point,
+        is_nfs_mount_present,
+        mount_nfs,
+        unmount_nfs,
+    )
+except ImportError:
+    from nfs_utils import (
+        DEFAULT_NFS_OPTIONS,
+        find_nfs_mount_point,
+        is_nfs_mount_present,
+        mount_nfs,
+        unmount_nfs,
+    )
 import shutil
 from config import (GshareConfig, CONFIG_PATH, INIT_FLAG_PATH,
                     RESTART_FLAG_PATH, LOG_FILE_PATH)  # type: ignore
@@ -93,40 +109,7 @@ class GshareWebServer:
 
     def _is_nfs_mount_present(self, mount_path: str, nfs_path: str = None) -> bool:
         """/proc/mounts 기준으로 nfs/nfs4 마운트 여부를 확인한다."""
-        try:
-            target_mount = os.path.realpath(mount_path)
-            target_nfs = nfs_path.rstrip('/') if nfs_path else None
-
-            with open('/proc/mounts', 'r', encoding='utf-8', errors='replace') as f:
-                for line in f:
-                    parts = line.split()
-                    if len(parts) < 3:
-                        continue
-
-                    source = parts[0].replace('\\040', ' ')
-                    target = parts[1].replace('\\040', ' ')
-                    fs_type = parts[2]
-
-                    if fs_type not in ('nfs', 'nfs4'):
-                        continue
-                    if os.path.realpath(target) != target_mount:
-                        continue
-
-                    # NAS 주소는 IP/호스트명으로 다르게 설정될 수 있어 export 경로 기준으로도 허용한다.
-                    if target_nfs:
-                        mounted_source = source.rstrip('/')
-                        target_source = target_nfs.rstrip('/')
-                        if mounted_source != target_source:
-                            mounted_export = mounted_source.split(':', 1)[-1]
-                            target_export = target_source.split(':', 1)[-1]
-                            if mounted_export != target_export:
-                                continue
-
-                    return True
-        except Exception as e:
-            logging.debug(f"/proc/mounts 기반 NFS 확인 실패: {e}")
-
-        return False
+        return is_nfs_mount_present(mount_path, nfs_path)
 
     def _setup_logging(self):
         """로깅 설정"""
@@ -1185,7 +1168,7 @@ class GshareWebServer:
                 if is_mounted:
                     # NFS 마운트 해제 시도
                     logging.debug(f"기존 NFS 마운트 해제 시도: {mount_path}")
-                    subprocess.run(["umount", "-f", mount_path], stderr=subprocess.PIPE, check=False)
+                    unmount_nfs(mount_path, force=True, lazy=True)
                     logging.debug("NFS 마운트 해제 명령 실행 완료")
                 else:
                     logging.debug(f"NFS가 마운트되어 있지 않음: {mount_path}")
@@ -1684,75 +1667,54 @@ class GshareWebServer:
                     "message": "NFS 경로가 제공되지 않았습니다."
                 }), 400
 
-            # 먼저 이미 마운트되어 있는지 확인
-            mount_check = subprocess.run(
-                ['mount', '-t', 'nfs'], capture_output=True, text=True)
+            nfs_path = nfs_path.strip()
 
-            # 이미 마운트된 경우 해당 마운트 지점 확인
-            if nfs_path in mount_check.stdout:
-                logging.debug(f"이미 마운트된 NFS 경로입니다: {nfs_path}")
+            # 1. 먼저 이미 마운트되어 있는지 확인 (/proc/mounts 기반)
+            existing_mount_point = find_nfs_mount_point(nfs_path)
+            if not existing_mount_point and hasattr(self, 'manager') and getattr(self.manager, 'config', None):
+                if is_nfs_mount_present(self.manager.config.MOUNT_PATH, nfs_path):
+                    existing_mount_point = self.manager.config.MOUNT_PATH
 
-                # 마운트 포인트 찾기
-                mount_lines = mount_check.stdout.strip().split('\n')
-                existing_mount_point = None
+            if existing_mount_point:
+                logging.debug(f"이미 마운트된 NFS 경로({nfs_path})입니다. 마운트 지점: {existing_mount_point}")
+                try:
+                    list(os.scandir(existing_mount_point))
+                    return jsonify({
+                        "status": "success",
+                        "message": f"NFS 경로({nfs_path})가 이미 {existing_mount_point}에 마운트되어 있으며, 정상 작동합니다."
+                    })
+                except Exception as e:
+                    return jsonify({
+                        "status": "warning",
+                        "message": f"NFS 경로({nfs_path})가 이미 {existing_mount_point}에 마운트되어 있으나, 읽기 권한이 없습니다: {str(e)}"
+                    })
 
-                for line in mount_lines:
-                    if nfs_path in line:
-                        parts = line.split(' on ')
-                        if len(parts) > 1:
-                            mount_point = parts[1].split(' ')[0]
-                            existing_mount_point = mount_point
-                            break
-
-                if existing_mount_point:
-                    logging.debug(f"기존 마운트 지점에서 테스트: {existing_mount_point}")
-                    try:
-                        # 기존 마운트 지점에서 읽기 테스트
-                        subprocess.run(
-                            f"ls {existing_mount_point}", shell=True, check=True, capture_output=True, text=True)
-                        return jsonify({
-                            "status": "success",
-                            "message": f"NFS 경로({nfs_path})가 이미 {existing_mount_point}에 마운트되어 있으며, 정상 작동합니다."
-                        })
-                    except Exception as e:
-                        return jsonify({
-                            "status": "warning",
-                            "message": f"NFS 경로({nfs_path})가 이미 {existing_mount_point}에 마운트되어 있으나, 읽기 권한이 없습니다: {str(e)}"
-                        })
-
-            # 기존 마운트가 없거나 찾지 못한 경우 새로 테스트
+            # 2. 기존 마운트가 없는 경우 임시 디렉터리에 새로 테스트 마운트 시도
+            status = "error"
+            message = "NFS 테스트 미완료"
             with tempfile.TemporaryDirectory() as temp_mount:
                 try:
-                    # 마운트 명령 수정 (temp_mount가 두 번 반복되는 오류 수정)
-                    mount_cmd = f"mount -t nfs -o nolock,vers=3,soft,timeo=100 {nfs_path} {temp_mount}"
-                    result = subprocess.run(
-                        mount_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                    success, mount_msg = mount_nfs(nfs_path, temp_mount, options=DEFAULT_NFS_OPTIONS, timeout=30)
 
-                    if result.returncode == 0:
+                    if success:
                         try:
-                            subprocess.run(
-                                f"ls {temp_mount}", shell=True, check=True, capture_output=True, text=True)
+                            list(os.scandir(temp_mount))
                             message = "NFS 연결 테스트 성공: 읽기 권한이 정상입니다."
                             status = "success"
                         except Exception as e:
                             message = f"NFS 마운트는 성공했으나 읽기 권한이 없습니다: {str(e)}"
                             status = "warning"
                     else:
-                        error_msg = result.stderr.strip()
-                        message = f"NFS 마운트 실패: {error_msg}"
+                        message = f"NFS 마운트 실패: {mount_msg}"
                         status = "error"
-                except subprocess.TimeoutExpired:
-                    message = "NFS 마운트 시도 시간 초과"
-                    status = "error"
                 except Exception as e:
                     message = f"NFS 테스트 중 오류 발생: {str(e)}"
                     status = "error"
                 finally:
                     try:
-                        subprocess.run(
-                            f"umount {temp_mount}", shell=True, check=False)
-                    except Exception:
-                        pass
+                        unmount_nfs(temp_mount, force=True, lazy=True, timeout=10)
+                    except Exception as e:
+                        logging.warning(f"임시 마운트 해제 중 오류 (무시): {e}")
 
             return jsonify({
                 "status": status,
