@@ -20,7 +20,6 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
-
           main = Path('app/main.py')
           text = main.read_text()
           pattern = re.compile(r"    def _mount_nfs\(self\):\n.*?(?=    def _format_uptime\(self, seconds: float\) -> str:\n)", re.S)
@@ -34,32 +33,17 @@ jobs:
             if not self.config.NFS_PATH:
                 logging.warning("NFS 경로가 설정되지 않았습니다.")
                 return
-
             mount_path = self.config.MOUNT_PATH
             nfs_path = self.config.NFS_PATH
-
             if not os.path.exists(mount_path):
                 os.makedirs(mount_path, exist_ok=True)
                 logging.debug(f"마운트 디렉토리 생성: {mount_path}")
-
             if _is_nfs_mount_present(mount_path, nfs_path):
-                logging.debug(
-                    f"NFS가 이미 마운트되어 있습니다: {nfs_path} -> {mount_path}")
+                logging.debug(f"NFS가 이미 마운트되어 있습니다: {nfs_path} -> {mount_path}")
                 return
-
             logging.debug(f"NFS 마운트 시도: {nfs_path} -> {mount_path}")
-            mount_cmd = [
-                'mount', '-t', 'nfs', '-o',
-                'hard,timeo=600,retrans=5,actimeo=30',
-                nfs_path, mount_path
-            ]
-            result = subprocess.run(
-                mount_cmd,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-
+            mount_cmd = ['mount', '-t', 'nfs', '-o', 'hard,timeo=600,retrans=5,actimeo=30', nfs_path, mount_path]
+            result = subprocess.run(mount_cmd, capture_output=True, text=True, timeout=60)
             if result.returncode == 0:
                 logging.info(f"NFS 마운트 성공: {nfs_path} -> {mount_path}")
             else:
@@ -75,30 +59,17 @@ jobs:
           if count != 1:
               raise SystemExit('Failed to replace GShareManager._mount_nfs')
           main.write_text(text)
-
           web = Path('app/web_server.py')
           text = web.read_text()
           pattern = re.compile(r"    def test_nfs\(self\):\n.*?(?=    def test_mqtt\(self\):\n)", re.S)
           replacement = '''    def test_nfs(self):
-        """NFS 연결 테스트.
-
-        NFS 버전을 강제하지 않고 서버와 클라이언트가 자동 협상하도록 테스트한다.
-        실제 애플리케이션 마운트와 동일한 옵션만 사용하며 shell=True를 사용하지 않는다.
-        """
+        """NFS 연결 테스트. 서버/클라이언트가 NFS 버전을 자동 협상하도록 한다."""
         try:
             nfs_path = request.form.get('nfs_path')
             if not nfs_path:
-                return jsonify({
-                    "status": "error",
-                    "message": "NFS 경로가 제공되지 않았습니다."
-                }), 400
-
-            mount_check = subprocess.run(
-                ['mount', '-t', 'nfs'], capture_output=True, text=True, check=False
-            )
-
+                return jsonify({"status": "error", "message": "NFS 경로가 제공되지 않았습니다."}), 400
+            mount_check = subprocess.run(['mount', '-t', 'nfs'], capture_output=True, text=True, check=False)
             if nfs_path in mount_check.stdout:
-                logging.debug(f"이미 마운트된 NFS 경로입니다: {nfs_path}")
                 for line in mount_check.stdout.splitlines():
                     if nfs_path not in line:
                         continue
@@ -106,88 +77,42 @@ jobs:
                     if len(parts) != 2:
                         continue
                     existing_mount_point = parts[1].split(' ', 1)[0]
-                    logging.debug(f"기존 마운트 지점에서 테스트: {existing_mount_point}")
                     try:
-                        subprocess.run(
-                            ['ls', existing_mount_point],
-                            check=True, capture_output=True, text=True
-                        )
-                        return jsonify({
-                            "status": "success",
-                            "message": f"NFS 경로({nfs_path})가 이미 {existing_mount_point}에 마운트되어 있으며, 정상 작동합니다."
-                        })
+                        subprocess.run(['ls', existing_mount_point], check=True, capture_output=True, text=True)
+                        return jsonify({"status": "success", "message": f"NFS 경로({nfs_path})가 이미 {existing_mount_point}에 마운트되어 있으며, 정상 작동합니다."})
                     except Exception as e:
-                        return jsonify({
-                            "status": "warning",
-                            "message": f"NFS 경로({nfs_path})가 이미 {existing_mount_point}에 마운트되어 있으나, 읽기 권한이 없습니다: {str(e)}"
-                        })
-
+                        return jsonify({"status": "warning", "message": f"NFS 경로({nfs_path})가 이미 {existing_mount_point}에 마운트되어 있으나, 읽기 권한이 없습니다: {str(e)}"})
             with tempfile.TemporaryDirectory() as temp_mount:
-                mount_cmd = [
-                    'mount', '-t', 'nfs', '-o',
-                    'hard,timeo=600,retrans=5,actimeo=30',
-                    nfs_path, temp_mount
-                ]
+                mount_cmd = ['mount', '-t', 'nfs', '-o', 'hard,timeo=600,retrans=5,actimeo=30', nfs_path, temp_mount]
                 try:
-                    result = subprocess.run(
-                        mount_cmd,
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        timeout=60
-                    )
-
+                    result = subprocess.run(mount_cmd, capture_output=True, text=True, check=False, timeout=60)
                     if result.returncode == 0:
                         try:
-                            subprocess.run(
-                                ['ls', temp_mount],
-                                check=True, capture_output=True, text=True
-                            )
-                            message = "NFS 연결 테스트 성공: 읽기 권한이 정상입니다."
-                            status = "success"
+                            subprocess.run(['ls', temp_mount], check=True, capture_output=True, text=True)
+                            message, status = "NFS 연결 테스트 성공: 읽기 권한이 정상입니다.", "success"
                         except Exception as e:
-                            message = f"NFS 마운트는 성공했으나 읽기 권한이 없습니다: {str(e)}"
-                            status = "warning"
+                            message, status = f"NFS 마운트는 성공했으나 읽기 권한이 없습니다: {str(e)}", "warning"
                     else:
                         error_msg = result.stderr.strip() or result.stdout.strip() or '알 수 없는 오류'
-                        message = f"NFS 마운트 실패: {error_msg}"
-                        status = "error"
+                        message, status = f"NFS 마운트 실패: {error_msg}", "error"
                 except subprocess.TimeoutExpired:
-                    message = "NFS 마운트 시도 시간 초과"
-                    status = "error"
+                    message, status = "NFS 마운트 시도 시간 초과", "error"
                 except Exception as e:
-                    message = f"NFS 테스트 중 오류 발생: {str(e)}"
-                    status = "error"
+                    message, status = f"NFS 테스트 중 오류 발생: {str(e)}", "error"
                 finally:
-                    subprocess.run(
-                        ['umount', '-f', temp_mount],
-                        capture_output=True,
-                        text=True,
-                        check=False
-                    )
-
-            return jsonify({
-                "status": status,
-                "message": message
-            })
+                    subprocess.run(['umount', '-f', temp_mount], capture_output=True, text=True, check=False)
+            return jsonify({"status": status, "message": message})
         except Exception as e:
             logging.error(f"NFS 테스트 처리 중 오류: {e}")
-            return jsonify({
-                "status": "error",
-                "message": f"NFS 테스트 실패: {str(e)}"
-            }), 500
+            return jsonify({"status": "error", "message": f"NFS 테스트 실패: {str(e)}"}), 500
 
 '''
           text, count = pattern.subn(replacement, text, count=1)
           if count != 1:
               raise SystemExit('Failed to replace WebServer.test_nfs')
           web.write_text(text)
-
-          # Remove this one-shot workflow after the code change is committed.
-          workflow = Path('.github/workflows/apply-nfs-fix.yml')
-          workflow.unlink()
+          Path('.github/workflows/apply-nfs-fix.yml').unlink()
           PY
-
       - name: Commit NFS fix
         run: |
           git config user.name 'github-actions[bot]'
@@ -196,3 +121,5 @@ jobs:
           git diff --cached --check
           git commit -m 'fix: make NFS mounts negotiate server version'
           git push
+
+# retrigger
