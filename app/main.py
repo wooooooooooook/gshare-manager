@@ -48,6 +48,7 @@ gshare_manager = None
 gshare_web_server = None
 
 
+@dataclass
 class State:
     last_check_time: str
     vm_running: bool

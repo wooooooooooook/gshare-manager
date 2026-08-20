@@ -10,12 +10,41 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 from nfs_utils import (
     DEFAULT_NFS_OPTIONS,
     DEFAULT_NFS_TIMEOUT,
+    FALLBACK_NFS_OPTIONS,
     build_nfs_mount_command,
     is_nfs_mount_present,
     find_nfs_mount_point,
     mount_nfs,
     unmount_nfs,
 )
+
+
+class TestStateDataClass(unittest.TestCase):
+
+    def test_state_dataclass_instantiation(self):
+        """State dataclass가 정상적으로 인스턴스화되는지 검증"""
+        from main import State
+
+        state = State(
+            last_check_time="2025-01-01T00:00:00Z",
+            vm_running=True,
+            cpu_usage=15.0,
+            last_action="none",
+            cpu_threshold=20.0,
+            low_cpu_count=0,
+            threshold_count=5,
+            uptime="10시간",
+            last_shutdown_time="-",
+            monitored_folders={},
+            smb_running=True,
+            check_interval=10,
+        )
+
+        self.assertEqual(state.last_check_time, "2025-01-01T00:00:00Z")
+        self.assertTrue(state.vm_running)
+        self.assertEqual(state.cpu_usage, 15.0)
+        self.assertFalse(state.nfs_mounted)
+        self.assertEqual(state.monitor_mode, "event")
 
 
 class TestNfsUtils(unittest.TestCase):
@@ -56,8 +85,31 @@ class TestNfsUtils(unittest.TestCase):
 
     @patch('subprocess.run')
     @patch('os.path.exists', return_value=True)
+    def test_mount_nfs_fallback_options_success(self, mock_exists, mock_run):
+        """기본 옵션 실패 시 fallback 옵션(vers=3,nolock)으로 재시도하여 성공하는지 확인"""
+        # 첫 번째 시도(기본 옵션) 실패, 두 번째 시도(fallback) 성공
+        res_fail = MagicMock(returncode=32, stdout='', stderr='mount.nfs: an incorrect mount option was specified')
+        res_ok = MagicMock(returncode=0, stdout='mounted with fallback', stderr='')
+        mock_run.side_effect = [res_fail, res_ok]
+
+        success, msg = mount_nfs('10.0.0.1:/share', '/mnt/gshare')
+
+        self.assertTrue(success)
+        self.assertEqual(msg, 'mounted with fallback')
+        self.assertEqual(mock_run.call_count, 2)
+
+        # 첫 번째 call: DEFAULT_NFS_OPTIONS
+        first_call_opt = mock_run.call_args_list[0][0][0][4]
+        self.assertEqual(first_call_opt, DEFAULT_NFS_OPTIONS)
+
+        # 두 번째 call: FALLBACK_NFS_OPTIONS[0] ('vers=3,nolock')
+        second_call_opt = mock_run.call_args_list[1][0][0][4]
+        self.assertEqual(second_call_opt, FALLBACK_NFS_OPTIONS[0])
+
+    @patch('subprocess.run')
+    @patch('os.path.exists', return_value=True)
     def test_mount_nfs_failure_returns_stderr(self, mock_exists, mock_run):
-        """mount_nfs 실패 시 stderr 내용이 반환 메시지에 포함되는지 확인"""
+        """mount_nfs 전체 옵션 실패 시 마지막 stderr 내용이 반환 메시지에 포함되는지 확인"""
         stderr_output = 'mount.nfs: access denied by server while mounting 10.0.0.1:/share'
         mock_run.return_value = MagicMock(returncode=32, stdout='', stderr=stderr_output)
 

@@ -5,6 +5,10 @@ from typing import Optional, Tuple
 
 DEFAULT_NFS_OPTIONS = "nolock,vers=3,hard,timeo=600,retrans=5,actimeo=30"
 DEFAULT_NFS_TIMEOUT = 30
+FALLBACK_NFS_OPTIONS = [
+    "vers=3,nolock",
+    "vers=3"
+]
 
 
 def build_nfs_mount_command(
@@ -101,6 +105,7 @@ def mount_nfs(
 ) -> Tuple[bool, str]:
     """
     NFS 마운트를 실행하고 성공 여부와 오류 메시지/출력을 반환한다.
+    기본 옵션 시도 실패 시 NFSv3 호환 대체 옵션들을 순차적으로 시도한다.
     Returns:
         (success: bool, message: str)
     """
@@ -113,27 +118,36 @@ def mount_nfs(
         except Exception as e:
             return False, f"마운트 타겟 디렉토리 생성 실패: {e}"
 
-    cmd = build_nfs_mount_command(nfs_path, target_path, options)
-    logging.debug(f"NFS 마운트 실행 명령어: {' '.join(cmd)}")
+    # 시도할 옵션 목록 구성 (전달받은 options를 1순위로, 실패 시 FALLBACK 옵션 시도)
+    options_to_try = [options]
+    if options == DEFAULT_NFS_OPTIONS:
+        for fb_opt in FALLBACK_NFS_OPTIONS:
+            if fb_opt not in options_to_try:
+                options_to_try.append(fb_opt)
 
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if result.returncode == 0:
-            logging.info(f"NFS 마운트 성공: {nfs_path} -> {target_path} (옵션: {options})")
-            return True, result.stdout.strip()
-        else:
-            stderr_msg = result.stderr.strip() if result.stderr else result.stdout.strip()
-            error_msg = stderr_msg if stderr_msg else f"mount command failed with return code {result.returncode}"
-            logging.error(f"NFS 마운트 실패 (경로: {nfs_path}, 옵션: {options}): {error_msg}")
-            return False, error_msg
-    except subprocess.TimeoutExpired:
-        error_msg = f"NFS 마운트 시도 시간 초과 ({timeout}초)"
-        logging.error(f"NFS 마운트 실패 (경로: {nfs_path}): {error_msg}")
-        return False, error_msg
-    except Exception as e:
-        error_msg = f"NFS 마운트 실행 중 예외 발생: {e}"
-        logging.error(f"NFS 마운트 실패 (경로: {nfs_path}): {error_msg}")
-        return False, error_msg
+    last_error_msg = ""
+    for opt in options_to_try:
+        cmd = build_nfs_mount_command(nfs_path, target_path, opt)
+        logging.debug(f"NFS 마운트 실행 명령어 (옵션: {opt}): {' '.join(cmd)}")
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if result.returncode == 0:
+                logging.info(f"NFS 마운트 성공: {nfs_path} -> {target_path} (사용된 옵션: {opt})")
+                return True, result.stdout.strip()
+            else:
+                stderr_msg = result.stderr.strip() if result.stderr else result.stdout.strip()
+                last_error_msg = stderr_msg if stderr_msg else f"mount command failed with return code {result.returncode}"
+                logging.warning(f"NFS 마운트 시도 실패 (옵션: {opt}): {last_error_msg}")
+        except subprocess.TimeoutExpired:
+            last_error_msg = f"NFS 마운트 시도 시간 초과 ({timeout}초)"
+            logging.warning(f"NFS 마운트 시도 실패 (옵션: {opt}): {last_error_msg}")
+        except Exception as e:
+            last_error_msg = f"NFS 마운트 실행 중 예외 발생: {e}"
+            logging.warning(f"NFS 마운트 시도 실패 (옵션: {opt}): {last_error_msg}")
+
+    logging.error(f"NFS 마운트 최종 실패 (경로: {nfs_path}): {last_error_msg}")
+    return False, last_error_msg
 
 
 def unmount_nfs(
