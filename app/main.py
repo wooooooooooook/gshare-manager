@@ -25,20 +25,6 @@ import yaml  # type: ignore
 import traceback
 import urllib3  # type: ignore
 import json
-try:
-    from app.nfs_utils import (
-        DEFAULT_NFS_OPTIONS,
-        is_nfs_mount_present as _is_nfs_mount_present,
-        mount_nfs,
-        unmount_nfs,
-    )
-except ImportError:
-    from nfs_utils import (
-        DEFAULT_NFS_OPTIONS,
-        is_nfs_mount_present as _is_nfs_mount_present,
-        mount_nfs,
-        unmount_nfs,
-    )
 
 # SSL 경고 메시지 비활성화
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -48,6 +34,45 @@ gshare_manager = None
 gshare_web_server = None
 
 
+def _is_nfs_mount_present(mount_path: str, nfs_path: Optional[str] = None) -> bool:
+    """/proc/mounts 기준으로 nfs/nfs4 마운트 여부를 확인한다."""
+    try:
+        target_mount = os.path.realpath(mount_path)
+        target_nfs = nfs_path.rstrip('/') if nfs_path else None
+
+        with open('/proc/mounts', 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+
+                source = parts[0].replace('\\040', ' ')
+                target = parts[1].replace('\\040', ' ')
+                fs_type = parts[2]
+
+                if fs_type not in ('nfs', 'nfs4'):
+                    continue
+                if os.path.realpath(target) != target_mount:
+                    continue
+
+                # NAS 주소는 IP/호스트명으로 다르게 설정될 수 있어 export 경로 기준으로도 허용한다.
+                if target_nfs:
+                    mounted_source = source.rstrip('/')
+                    target_source = target_nfs.rstrip('/')
+                    if mounted_source != target_source:
+                        mounted_export = mounted_source.split(':', 1)[-1]
+                        target_export = target_source.split(':', 1)[-1]
+                        if mounted_export != target_export:
+                            continue
+
+                return True
+    except Exception as e:
+        logging.debug(f"/proc/mounts 기반 NFS 확인 실패: {e}")
+
+    return False
+
+
+@dataclass
 class State:
     last_check_time: str
     vm_running: bool
@@ -757,6 +782,11 @@ class GShareManager:
             mount_path = self.config.MOUNT_PATH
             nfs_path = self.config.NFS_PATH
 
+            # 마운트 디렉토리가 없으면 생성
+            if not os.path.exists(mount_path):
+                os.makedirs(mount_path, exist_ok=True)
+                logging.debug(f"마운트 디렉토리 생성: {mount_path}")
+
             # 이미 마운트되어 있는지 확인
             if _is_nfs_mount_present(mount_path, nfs_path):
                 logging.debug(
@@ -764,13 +794,15 @@ class GShareManager:
                 return
 
             # NFS 마운트 시도
-            logging.debug(f"NFS 마운트 시도: {nfs_path} -> {mount_path} (옵션: {DEFAULT_NFS_OPTIONS})")
-            success, msg = mount_nfs(nfs_path, mount_path, options=DEFAULT_NFS_OPTIONS, timeout=30)
+            logging.debug(f"NFS 마운트 시도: {nfs_path} -> {mount_path}")
+            mount_cmd = ['mount', '-t', 'nfs', '-o',
+                         'nolock,vers=3,hard,timeo=600,retrans=5,actimeo=30', nfs_path, mount_path]
+            result = subprocess.run(mount_cmd, capture_output=True, text=True)
 
-            if success:
+            if result.returncode == 0:
                 logging.info(f"NFS 마운트 성공: {nfs_path} -> {mount_path}")
             else:
-                logging.error(f"NFS 마운트 실패 (옵션: {DEFAULT_NFS_OPTIONS}): {msg}")
+                logging.error(f"NFS 마운트 실패: {result.stderr}")
         except Exception as e:
             logging.error(f"NFS 마운트 중 오류 발생: {e}")
 
@@ -1381,8 +1413,8 @@ class GShareManager:
         else:
             logging.info("NFS 마운트 비활성화: 마운트 해제 시도 중...")
             try:
-                if self.config.MOUNT_PATH and _is_nfs_mount_present(self.config.MOUNT_PATH, self.config.NFS_PATH):
-                    unmount_nfs(self.config.MOUNT_PATH, force=True, lazy=True)
+                if self.config.MOUNT_PATH:
+                    subprocess.run(['umount', '-f', self.config.MOUNT_PATH], check=False)
                     logging.info(f"NFS 마운트 해제 완료: {self.config.MOUNT_PATH}")
             except Exception as e:
                 logging.error(f"NFS 마운트 해제 중 오류: {e}")
