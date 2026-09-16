@@ -2,11 +2,16 @@ import logging
 import os
 import subprocess
 import time
-import pwd
-import grp
 import shutil
+try:
+    import pwd
+    import grp
+except ImportError:
+    pwd = None  # type: ignore
+    grp = None  # type: ignore
 from config import GshareConfig  # type: ignore
 from typing import Optional, Tuple
+
 class SMBManager:
     """SMB 서비스 관리 클래스"""
 
@@ -638,25 +643,53 @@ class SMBManager:
             logging.error(f"공유 리소스 제거 실패 ({subfolder}): {e}")
             return False
 
-    def create_file_symlink(self, subfolder: str, file_name: str) -> bool:
+    def _apply_symlink_ownership(self, link_path: str) -> None:
+        """심볼릭 링크에 SMB 소유권 적용"""
+        if pwd is None or grp is None:
+            return
+        try:
+            target_uid = pwd.getpwnam(self.config.SMB_USERNAME).pw_uid
+            existing_group_name = self._get_group_name(self.nfs_gid)
+            if existing_group_name:
+                try:
+                    target_gid = grp.getgrnam(existing_group_name).gr_gid
+                except KeyError:
+                    target_gid = self.nfs_gid
+            else:
+                try:
+                    target_gid = grp.getgrnam(self.config.SMB_USERNAME).gr_gid
+                except KeyError:
+                    target_gid = self.nfs_gid
+            os.lchown(link_path, target_uid, target_gid)
+        except Exception as pe:
+            logging.warning(f"심링크 소유권 설정 오류 (무시): {pe}")
+
+    def create_file_symlink_from_path(self, source_path: str) -> bool:
         """
-        파일 단위 공유: links_dir에 file_name 그대로 단일 심링크를 생성합니다.
-        별도의 서브폴더나 .tmp 스테이징 없이, SMB 공유 루트에 직접 노출됩니다.
+        파일 전체 경로(source_path)를 받아 links_dir에 file_name 단일 심링크를 생성합니다.
+        실제 파일이 존재하지 않는 경우 스킵합니다.
 
         Args:
-            subfolder: 파일이 속한 서브폴더 경로 (참조용, link_name에는 미사용)
-            file_name: SMB 공유에 노출할 파일명 (실제 파일의 basename)
+            source_path: 공유할 실제 파일의 절대 경로
         """
         try:
-            source_path = os.path.join(self.config.MOUNT_PATH, subfolder, file_name)
+            if not os.path.exists(source_path):
+                logging.warning(f"공유 대상 파일이 실제로 존재하지 않아 심링크 생성을 스킵합니다: {source_path}")
+                return False
+
+            file_name = os.path.basename(source_path)
             link_path = os.path.join(self.links_dir, file_name)
 
             if os.path.lexists(link_path):
                 # 동일 target이면 idempotent 성공
-                if os.path.islink(link_path) and os.readlink(link_path) == source_path:
-                    self._active_links.add(file_name)
-                    logging.debug(f"이미 활성화된 파일 심링크를 재사용합니다: {link_path}")
-                    return True
+                if os.path.islink(link_path):
+                    try:
+                        if os.readlink(link_path) == source_path:
+                            self._active_links.add(file_name)
+                            logging.debug(f"이미 활성화된 파일 심링크를 재사용합니다: {link_path}")
+                            return True
+                    except OSError:
+                        pass
                 # 다른 파일/폴더가 같은 이름으로 있으면 제거 후 재생성
                 if os.path.islink(link_path) or os.path.isfile(link_path):
                     os.remove(link_path)
@@ -664,31 +697,95 @@ class SMBManager:
                     shutil.rmtree(link_path)
 
             os.symlink(source_path, link_path)
-
-            # 소유권/권한: symlink 자체에 적용 (가능하면 lchown)
-            try:
-                target_uid = pwd.getpwnam(self.config.SMB_USERNAME).pw_uid
-                existing_group_name = self._get_group_name(self.nfs_gid)
-                if existing_group_name:
-                    try:
-                        target_gid = grp.getgrnam(existing_group_name).gr_gid
-                    except KeyError:
-                        target_gid = self.nfs_gid
-                else:
-                    try:
-                        target_gid = grp.getgrnam(self.config.SMB_USERNAME).gr_gid
-                    except KeyError:
-                        target_gid = self.nfs_gid
-                os.lchown(link_path, target_uid, target_gid)
-            except Exception as pe:
-                logging.warning(f"파일 심링크 소유권 설정 오류 (무시): {pe}")
+            self._apply_symlink_ownership(link_path)
 
             self._active_links.add(file_name)
             logging.info(f"파일 단위 공유 심링크 생성: {link_path} -> {source_path}")
             return True
         except Exception as e:
-            logging.error(f"파일 단위 공유 심링크 생성 실패 ({subfolder}/{file_name}): {e}")
+            logging.error(f"파일 단위 공유 심링크 생성 실패 ({source_path}): {e}")
             return False
+
+    def create_file_symlink(self, subfolder: str, file_name: str) -> bool:
+        """
+        파일 단위 공유: links_dir에 file_name 그대로 단일 심링크를 생성합니다.
+        별도의 서브폴더나 .tmp 스테이징 없이, SMB 공유 루트에 직접 노출됩니다.
+
+        Args:
+            subfolder: 파일이 속한 서브폴더 경로
+            file_name: SMB 공유에 노출할 파일명 (실제 파일의 basename)
+        """
+        source_path = os.path.join(self.config.MOUNT_PATH, subfolder, file_name)
+        return self.create_file_symlink_from_path(source_path)
+
+    def sync_file_symlinks(self, file_paths: set[str] | list[str]) -> tuple[int, int]:
+        """
+        최근 파일 목록(전체 경로 집합)과 links_dir의 심볼릭 링크를 동기화합니다.
+        최근 3일 윈도우에 포함된 파일만 links_dir에 유지하고, 만료된 파일은 제거합니다.
+        실제 존재하지 않는 파일은 건너뜁니다.
+
+        Args:
+            file_paths: 공유 대상 파일 전체 경로들의 집합
+
+        Returns:
+            tuple[int, int]: (성공 개수, 스킵/실패 개수)
+        """
+        success_count = 0
+        fail_count = 0
+        desired_link_names = set()
+
+        # 1. 3일 집합 내 파일들의 심볼릭 링크 생성/유지
+        for source_path in file_paths:
+            if not os.path.exists(source_path):
+                logging.warning(f"공유 대상 파일이 실제로 존재하지 않아 스킵합니다: {source_path}")
+                fail_count += 1
+                continue
+
+            file_name = os.path.basename(source_path)
+            if self.create_file_symlink_from_path(source_path):
+                desired_link_names.add(file_name)
+                success_count += 1
+            else:
+                fail_count += 1
+
+        # 2. links_dir에서 3일 집합에 포함되지 않는 만료된 파일 심링크 제거
+        if os.path.exists(self.links_dir):
+            try:
+                for entry in os.listdir(self.links_dir):
+                    if entry == ".tmp":
+                        continue
+                    if entry not in desired_link_names:
+                        entry_path = os.path.join(self.links_dir, entry)
+                        try:
+                            if os.path.islink(entry_path) or os.path.isfile(entry_path):
+                                os.remove(entry_path)
+                            elif os.path.isdir(entry_path):
+                                shutil.rmtree(entry_path)
+                            logging.info(f"3일 윈도우 만료로 공유 리소스 제거됨: {entry_path}")
+                        except Exception as e:
+                            logging.error(f"만료된 공유 리소스 제거 실패 ({entry_path}): {e}")
+                        self._active_links.discard(entry)
+            except Exception as e:
+                logging.error(f"links_dir 정리 중 오류: {e}")
+
+        # 3. 활성 심볼릭 링크 수에 따라 SMB 서비스 상태 조정
+        remaining_symlinks = len(self._active_links) > 0
+        if not remaining_symlinks and os.path.exists(self.links_dir):
+            remaining_symlinks = any(
+                (os.path.islink(os.path.join(self.links_dir, filename)) or
+                 (os.path.isdir(os.path.join(self.links_dir, filename)) and filename != ".tmp"))
+                for filename in os.listdir(self.links_dir)
+            )
+
+        if desired_link_names:
+            if not self.check_smb_status():
+                self.activate_smb_share()
+        elif not remaining_symlinks:
+            if self.check_smb_status():
+                logging.info("공유할 파일이 없어 SMB 공유를 비활성화합니다.")
+                self.deactivate_smb_share()
+
+        return success_count, fail_count
 
     def create_symlink(self, subfolder: str) -> bool:
         """

@@ -6,7 +6,7 @@ from dataclasses import dataclass, asdict
 from typing import Optional
 import requests  # type: ignore
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta, date
 import pytz  # type: ignore
 import os
 import threading
@@ -109,6 +109,87 @@ class State:
         return data
 
 
+class RecentFileTracker:
+    """최근 N일간(기본 3일) 이벤트가 발생한 파일 집합을 메모리에 유지하는 롤링 윈도우 매니저"""
+
+    def __init__(self, tz: Optional[pytz.BaseTzInfo] = None, max_days: int = 3):
+        self.tz = tz or pytz.timezone('Asia/Seoul')
+        self.max_days = max_days
+        self._daily_files: dict[str, set[str]] = {}
+        self._lock = threading.RLock()
+
+    def _get_current_date_str(self, now: Optional[datetime] = None) -> str:
+        if now is None:
+            now = datetime.now(self.tz)
+        return now.strftime('%Y-%m-%d')
+
+    def prune_old_dates(self, current_date_str: Optional[str] = None) -> None:
+        """현재 날짜 기준으로 max_days일보다 오래된 날짜의 집합을 자동 제거"""
+        with self._lock:
+            if current_date_str is None:
+                current_date_str = self._get_current_date_str()
+
+            try:
+                cur_date = datetime.strptime(current_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return
+
+            cutoff_date = cur_date - timedelta(days=self.max_days - 1)
+            cutoff_str = cutoff_date.strftime('%Y-%m-%d')
+
+            keys_to_remove = [d for d in self._daily_files if d < cutoff_str]
+            for d in keys_to_remove:
+                del self._daily_files[d]
+
+    def add_file_event(self, file_path: str, event_date_str: Optional[str] = None) -> None:
+        """
+        신규 파일 이벤트를 해당 날짜의 set에 추가하고 오래된 날짜를 정리합니다.
+        
+        Args:
+            file_path: 정규화된 파일 경로
+            event_date_str: 이벤트 발생 날짜 (YYYY-MM-DD, 기본값: 현재 KST 날짜)
+        """
+        if not file_path:
+            return
+
+        normalized_path = os.path.normpath(file_path).replace('\\', '/')
+
+        with self._lock:
+            ref_date_str = event_date_str or self._get_current_date_str()
+            self.prune_old_dates(ref_date_str)
+
+            if ref_date_str not in self._daily_files:
+                self._daily_files[ref_date_str] = set()
+
+            self._daily_files[ref_date_str].add(normalized_path)
+
+    def get_recent_files(self, current_date_str: Optional[str] = None) -> set[str]:
+        """
+        최근 N일간 이벤트가 발생한 모든 파일의 중복 없는 집합(set)을 반환합니다.
+        호출 시점의 날짜 기준으로 오래된 날짜를 정리합니다.
+        """
+        with self._lock:
+            if current_date_str is None:
+                current_date_str = self._get_current_date_str()
+
+            self.prune_old_dates(current_date_str)
+
+            all_files: set[str] = set()
+            for files in self._daily_files.values():
+                all_files.update(files)
+            return all_files
+
+    def get_daily_files(self) -> dict[str, set[str]]:
+        """현재 메모리에 유지 중인 날짜별 파일 목록 반환 (복사본)"""
+        with self._lock:
+            return {k: set(v) for k, v in self._daily_files.items()}
+
+    def clear(self) -> None:
+        """메모리 초기화"""
+        with self._lock:
+            self._daily_files.clear()
+
+
 class FolderMonitor:
     def __init__(self, config: GshareConfig, proxmox_api: ProxmoxAPI, last_shutdown_time: float):
         self.config = config
@@ -121,6 +202,9 @@ class FolderMonitor:
         self.nfs_uid, self.nfs_gid = self._get_nfs_ownership()
         logging.debug(
             f"NFS 마운트 경로의 UID/GID 확인 완료: {self.nfs_uid}/{self.nfs_gid}")
+
+        # 최근 3일간의 파일 이벤트 목록을 관리하는 롤링 트래커 초기화 (메모리 상태)
+        self.recent_file_tracker = RecentFileTracker(tz=self.local_tz, max_days=3)
 
         # SMB 관리자 초기화
         logging.debug("SMB 관리자 초기화 중...")
@@ -142,6 +226,18 @@ class FolderMonitor:
         self.loaded_from_cache = self._load_scan_cache()
         logging.debug(
             f"FolderMonitor 객체 생성됨 (초기 스캔은 지연됨, 캐시 로드: {self.loaded_from_cache}, 폴더 수: {len(self.previous_mtimes)}개)")
+
+    def add_file_event(self, file_path: str, event_date_str: Optional[str] = None) -> None:
+        """최근 3일 메모리 파일 집합에 파일 추가"""
+        self.recent_file_tracker.add_file_event(file_path, event_date_str)
+
+    def get_recent_files(self, current_date_str: Optional[str] = None) -> set[str]:
+        """최근 3일간 이벤트가 발생한 파일 집합 반환"""
+        return self.recent_file_tracker.get_recent_files(current_date_str)
+
+    def prune_old_dates(self, current_date_str: Optional[str] = None) -> None:
+        """3일 이전 날짜의 파일 집합 정리"""
+        self.recent_file_tracker.prune_old_dates(current_date_str)
 
     def initialize(self) -> None:
         """초기 파일시스템 스캔 및 링크 생성 수행"""
@@ -703,6 +799,9 @@ class GShareManager:
         self.smb_manager = self.folder_monitor.smb_manager
         logging.debug("SMBManager 참조 완료")
 
+        # 최근 3일 파일 롤링 트래커 참조
+        self.recent_file_tracker = self.folder_monitor.recent_file_tracker
+
         # Transcoder 초기화
         self.transcoder = Transcoder(config)
         if self.transcoder.enabled:
@@ -978,14 +1077,29 @@ class GShareManager:
             self.current_state = self.update_state(update_monitored_folders=False)
 
 
+    def add_file_event(self, file_path: str, event_date_str: Optional[str] = None) -> None:
+        """최근 3일 메모리 파일 집합에 파일 추가"""
+        self.folder_monitor.add_file_event(file_path, event_date_str)
+
+    def get_recent_files(self, current_date_str: Optional[str] = None) -> set[str]:
+        """최근 3일간 이벤트가 발생한 파일 집합 반환"""
+        return self.folder_monitor.get_recent_files(current_date_str)
+
+    def prune_old_dates(self, current_date_str: Optional[str] = None) -> None:
+        """3일 이전 날짜의 파일 집합 정리"""
+        self.folder_monitor.prune_old_dates(current_date_str)
+
     def handle_folder_event(self, folder_path: str, file_name: Optional[str] = None) -> tuple[bool, str]:
-        """NAS 이벤트 기반으로 전달된 폴더를 즉시 처리"""
+        """NAS 이벤트 기반으로 전달된 폴더/파일을 즉시 처리"""
         if not self.config.EVENT_ENABLED:
             return False, '이벤트 수신 기능이 비활성화되어 있습니다.'
 
         try:
             normalized = (folder_path or '').strip().strip('/')
-            if not normalized:
+            if normalized == '.':
+                normalized = ''
+
+            if not normalized and not file_name:
                 return False, '폴더 경로가 비어 있습니다.'
 
             # 방어적 코드: 설정 제약 검증 및 강제 보정
@@ -995,36 +1109,48 @@ class GShareManager:
                 share_mode = 'folder'
 
             event_mtime = time.time()
-            self.folder_monitor.previous_mtimes[normalized] = event_mtime
-            self.folder_monitor._save_scan_cache()
-            mount_targets = self.folder_monitor._filter_mount_targets([normalized])
-            if not mount_targets:
+            if normalized:
+                self.folder_monitor.previous_mtimes[normalized] = event_mtime
+                self.folder_monitor._save_scan_cache()
+            mount_targets = self.folder_monitor._filter_mount_targets([normalized]) if normalized else []
+            if not mount_targets and normalized:
                 mount_targets = [normalized]
 
             # 파일 이벤트 시간 갱신
             if file_name:
                 self.last_file_event_time = time.time()
 
-            for folder in mount_targets:
+            recent_files = set()
+            if file_name:
+                # 1. 파일의 normalized full path 계산
+                full_path = os.path.normpath(os.path.join(self.config.MOUNT_PATH, normalized, file_name)).replace('\\', '/')
+                # 2. 최근 3일 메모리 set에 추가
+                self.folder_monitor.add_file_event(full_path)
+                # 3. 최근 3일간의 전체 파일 집합 가져오기
+                recent_files = self.folder_monitor.get_recent_files()
+                logging.info(f"최근 3일 이벤트 파일 집합 (총 {len(recent_files)}개): {recent_files}")
+
                 if share_mode == 'file':
-                    if file_name:
-                        # 부모 폴더가 이미 공유중인지 체크하여 스킵
-                        if self.smb_manager.is_ancestor_shared(folder):
-                            logging.info(f"부모 폴더 '{folder}'가 이미 공유 중이므로 파일 '{file_name}'의 개별 마운트를 스킵합니다.")
-                            continue
-                        self.smb_manager.create_file_symlink(folder, file_name)
-                    else:
-                        logging.debug("파일 단위 공유 모드이나 파일명이 전달되지 않아 심링크 생성을 생략합니다.")
+                    # 4. SMB 공유 대상을 최근 3일간의 전체 파일 집합으로 갱신
+                    success_count, fail_count = self.smb_manager.sync_file_symlinks(recent_files)
+                    logging.info(f"SMB 파일 심링크 갱신 완료 (성공: {success_count}개, 스킵/실패: {fail_count}개)")
                 else:
+                    for folder in mount_targets:
+                        self.smb_manager.create_symlink(folder)
+            else:
+                for folder in mount_targets:
                     self.smb_manager.create_symlink(folder)
 
-            if mount_targets:
+            if share_mode == 'file' and file_name:
+                if self.smb_manager.check_smb_status():
+                    self.last_action = f"SMB 파일 공유 갱신(최근 3일 {len(recent_files)}개): {file_name}"
+                else:
+                    self.last_action = f"SMB 공유 대상 없음 또는 비활성화: {file_name}"
+            elif mount_targets:
                 if self.smb_manager.check_smb_status():
                     logging.debug('SMB 공유가 이미 활성화되어 있어 재시작을 생략합니다.')
                 elif self.smb_manager.activate_smb_share():
                     self.last_action = f"SMB 공유 활성화(이벤트): {', '.join(mount_targets)}"
-                    if share_mode == 'file' and file_name:
-                        self.last_action += f" -> {file_name}"
 
             if not self.proxmox_api.is_vm_running():
                 self.last_action = 'VM 시작(이벤트)'
@@ -1033,9 +1159,9 @@ class GShareManager:
                 else:
                     logging.error('VM 시작 실패 (이벤트 기반)')
 
-            ret_detail = ', '.join(mount_targets)
-            if share_mode == 'file' and file_name:
-                ret_detail += f" ({file_name})"
+            ret_detail = ', '.join(mount_targets) if mount_targets else normalized
+            if file_name:
+                ret_detail = f"{ret_detail} ({file_name})" if ret_detail else file_name
             return True, ret_detail
         except Exception as e:
             logging.error(f'이벤트 처리 실패: {e}')

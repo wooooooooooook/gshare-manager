@@ -583,8 +583,8 @@ class GshareWebServer:
                 self.emit_state_update()
                 return jsonify({"status": "success", "message": "헬스 신호 수신 완료"})
 
-            if not folder:
-                return jsonify({"status": "error", "message": "folder 필드가 필요합니다."}), 400
+            if not folder and not file_name:
+                return jsonify({"status": "error", "message": "folder 또는 file 필드가 필요합니다."}), 400
 
             success, detail = self.manager.handle_folder_event(folder, file_name=file_name)
             if not success:
