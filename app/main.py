@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import logging
 from bisect import bisect_right
 from logging.handlers import RotatingFileHandler
 import time
 from dataclasses import dataclass, asdict
-from typing import Optional
+from typing import Optional, Set, Dict, List, Tuple, Union
 import requests  # type: ignore
 import subprocess
 from datetime import datetime, timedelta, date

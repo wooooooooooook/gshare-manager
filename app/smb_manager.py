@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import subprocess
@@ -10,7 +12,7 @@ except ImportError:
     pwd = None  # type: ignore
     grp = None  # type: ignore
 from config import GshareConfig  # type: ignore
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union, Set, List
 
 class SMBManager:
     """SMB 서비스 관리 클래스"""
@@ -718,7 +720,7 @@ class SMBManager:
         source_path = os.path.join(self.config.MOUNT_PATH, subfolder, file_name)
         return self.create_file_symlink_from_path(source_path)
 
-    def sync_file_symlinks(self, file_paths: set[str] | list[str]) -> tuple[int, int]:
+    def sync_file_symlinks(self, file_paths: Union[Set[str], List[str]]) -> Tuple[int, int]:
         """
         최근 파일 목록(전체 경로 집합)과 links_dir의 심볼릭 링크를 동기화합니다.
         최근 3일 윈도우에 포함된 파일만 links_dir에 유지하고, 만료된 파일은 제거합니다.
