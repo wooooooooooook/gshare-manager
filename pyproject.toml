@@ -6,7 +6,7 @@ package-mode = false
 authors = ["wooooooooooook <wooooooooooook@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.12"
 flask = "^3.1.0"
 requests = "^2.32.0"
 pytz = "^2024.1"
