@@ -417,6 +417,10 @@ class FolderMonitor:
                         continue
 
             return results
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Folder scan error: {e}")
+            self._nfs_status_cache = False
+            return results
         except Exception as e:
             logging.error(f"Folder scan error: {e}")
             return results
@@ -713,7 +717,7 @@ class FolderMonitor:
         return list(final_mounts)
 
     def check_nfs_status(self) -> bool:
-        """NFS 마운트가 되어 있는지 확인"""
+        """NFS 마운트가 정상적으로 되어 있고 접근 가능한지 확인"""
         try:
             if not self.config.NFS_PATH or not self.config.MOUNT_PATH:
                 return False
@@ -723,12 +727,21 @@ class FolderMonitor:
                 return self._nfs_status_cache
 
             is_mounted = _is_nfs_mount_present(self.config.MOUNT_PATH, self.config.NFS_PATH)
+            if is_mounted:
+                # 실제로 마운트 디렉토리에 접근 가능한지 확인 (Stale file handle / IO stall 감지)
+                try:
+                    os.stat(self.config.MOUNT_PATH)
+                    os.listdir(self.config.MOUNT_PATH)
+                except OSError as e:
+                    logging.warning(f"NFS 마운트 접근 불가 (Stale 또는 IO 오류): {e}")
+                    is_mounted = False
+
             self._nfs_status_cache = is_mounted
             self._nfs_status_checked_at = now
             return is_mounted
         except Exception as e:
             logging.error(f"NFS 마운트 상태 확인 중 오류: {e}")
-            return self._nfs_status_cache if self._nfs_status_cache is not None else False
+            return False
 
     def keepalive_nfs(self) -> None:
         """NFS attribute 캐시를 따뜻하게 유지하여 IO stall 시 폴더 깜박임 방지
@@ -890,9 +903,17 @@ class GShareManager:
 
             # 이미 마운트되어 있는지 확인
             if _is_nfs_mount_present(mount_path, nfs_path):
-                logging.debug(
-                    f"NFS가 이미 마운트되어 있습니다: {nfs_path} -> {mount_path}")
-                return
+                try:
+                    os.stat(mount_path)
+                    os.listdir(mount_path)
+                    logging.debug(
+                        f"NFS가 이미 정상 마운트되어 있습니다: {nfs_path} -> {mount_path}")
+                    return
+                except OSError as e:
+                    logging.warning(
+                        f"기존 NFS 마운트가 비정상 상태(Stale/IO 오류)입니다: {e}. 언마운트 후 재시도합니다.")
+                    subprocess.run(['umount', '-f', '-l', mount_path], capture_output=True)
+                    time.sleep(1)
 
             # NFS 마운트 시도
             logging.debug(f"NFS 마운트 시도: {nfs_path} -> {mount_path}")
@@ -1396,6 +1417,15 @@ class GShareManager:
                         self.folder_monitor.keepalive_nfs()
                     except Exception as e:
                         logging.debug(f"NFS keepalive 오류 (무시): {e}")
+
+                # NFS 마운트 상태 확인 및 비정상(Stale/미마운트) 시 자동 복구
+                if self.config.NFS_MOUNT_ENABLED and hasattr(self, 'folder_monitor'):
+                    try:
+                        if not self.folder_monitor.check_nfs_status():
+                            logging.warning("NFS 마운트가 비정상(Stale 또는 미마운트) 상태입니다. 자동 재마운트를 시도합니다.")
+                            self._mount_nfs()
+                    except Exception as e:
+                        logging.error(f"NFS 자동 재마운트 검사 중 오류: {e}")
                 # VM 상태 확인
                 current_vm_status = False
                 if self.config.VM_MONITOR_ENABLED:

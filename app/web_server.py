@@ -1185,7 +1185,7 @@ class GshareWebServer:
                 if is_mounted:
                     # NFS 마운트 해제 시도
                     logging.debug(f"기존 NFS 마운트 해제 시도: {mount_path}")
-                    subprocess.run(["umount", "-f", mount_path], stderr=subprocess.PIPE, check=False)
+                    subprocess.run(["umount", "-f", "-l", mount_path], stderr=subprocess.PIPE, check=False)
                     logging.debug("NFS 마운트 해제 명령 실행 완료")
                 else:
                     logging.debug(f"NFS가 마운트되어 있지 않음: {mount_path}")
