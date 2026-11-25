@@ -1471,6 +1471,8 @@ class GShareManager:
                                     self.last_action = f"SMB 공유 활성화: {', '.join(changed_folders)}"
 
                             # VM이 정지 상태이고 최근 수정된 파일이 있는 경우에만 시작
+                            # current_vm_status는 위에서 읽은 뒤 트랜스코딩 등으로 오래되었을 수 있지만,
+                            # start_vm()이 시작 직전 실제 상태를 다시 조회해 중복 start를 걸러낸다.
                             if self.config.VM_MONITOR_ENABLED and not current_vm_status and should_start_vm:
                                 self.last_action = "VM 시작"
                                 if self.proxmox_api.start_vm():
